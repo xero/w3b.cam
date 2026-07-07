@@ -868,7 +868,7 @@ export function renderShell({ title, headerText, mainInner }: ShellOpts): string
 		`\t\t\t</div>`,
 		`\t\t\t<p class="count">${counts}</p>`,
 		"\t\t</header>",
-		'\t\t<main hx-target:inherited="main" hx-swap:inherited="innerHTML">',
+		'\t\t<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">',
 		indentBlock(mainInner, 3),
 		"\t\t</main>",
 		'\t\t<script src="/htmx.min.js"></script>',
