@@ -1,0 +1,7 @@
+node_modules/
+camhunting.sqlite
+camhunting.sqlite-wal
+camhunting.sqlite-shm
+out/
+in/
+.env

@@ -1,0 +1,52 @@
+name: build
+
+# Bakes the SQLite DB into the static site in out/ and deploys it to GitHub Pages.
+# Reusable: run it on demand, or have another workflow call it after mutating the DB.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+# Least privilege for the built-in GITHUB_TOKEN:
+#   contents: read     -> gh release download (restore the DB)
+#   pages / id-token   -> deploy-pages (OIDC upload to Pages)
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two Pages deploys at once; let an in-flight deploy finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      # Needed before bake: build.ts guards on node_modules/htmx.org/dist/htmx.min.js.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The DB lives as an asset on the db-store release, not in git (it's ~375MB).
+      # If the store doesn't exist yet, bake an empty DB (build.ts still emits index.html).
+      - name: Restore DB from release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; baking empty"
+
+      - name: Bake static site
+        run: bun run bake
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: out
+
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

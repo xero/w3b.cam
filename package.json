@@ -1,0 +1,27 @@
+{
+  "name": "w3b.cam",
+  "version": "1.0.0",
+  "description": "internet voyeurism, cam hunters anonymous, shodan camera scraper",
+  "type": "module",
+  "private": true,
+  "module": "src/scraper.ts",
+  "scripts": {
+    "initdb": "bun run src/initdb.ts",
+    "scrape": "bun run src/scraper.ts",
+    "import": "bun run src/import.ts",
+    "blacklist": "bun run src/blacklist.ts",
+    "unblacklist": "bun run src/unblacklist.ts",
+    "reorder": "bun run src/reorder.ts",
+    "bake": "bun run src/build.ts",
+    "serve": "bun run src/serve.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "shodan-ts": "1.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "htmx.org": "4.0.0-beta5",
+    "typescript": "^5.9.3"
+  }
+}
