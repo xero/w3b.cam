@@ -79,6 +79,52 @@ const HOST_BLACKLIST_SEED: readonly string[] = [
   "northstate.net",
 ];
 
+/**
+ * Free-form tags attached to an IP (host), independent of any camera or port: a
+ * single IP may carry several. Keyed on (ip_str, tag) so a tag can't be applied to
+ * the same IP twice. On a host page these are concatenated with commas, mirroring
+ * how ports are shown. `tag` is stored normalized (see normalizeTag).
+ */
+const IP_TAGS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS ip_tags (
+  ip_str    TEXT NOT NULL,
+  tag       TEXT NOT NULL,
+  added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (ip_str, tag)
+) STRICT;
+`;
+
+/**
+ * Tag -> IPs used to seed ip_tags on a fresh database. Applied only when the table
+ * is empty (see seedIpTags), so a tag removed by hand never comes back. Tags are
+ * normalized on insert, so casing/whitespace here is cosmetic.
+ */
+const IP_TAGS_SEED: Readonly<Record<string, readonly string[]>> = {
+  graffiti: [
+    "149.232.133.220",
+    "149.232.137.67",
+    "46.250.173.71",
+    "46.250.171.73",
+    "46.250.173.83",
+    "181.2.201.255",
+    "46.250.171.180",
+    "149.232.135.7",
+    "46.250.169.102",
+  ],
+  games: [
+    "24.136.120.51",
+    "24.136.120.52",
+    "202.39.216.179",
+    "87.138.95.183",
+  ],
+  backrooms: [
+    "5.26.172.20",
+    "220.134.169.248",
+    "82.166.212.224",
+    "84.120.199.77",
+  ],
+};
+
 export function openDb(path = DB_PATH): Database {
   const db = new Database(path, { create: true, strict: true });
   db.run("PRAGMA journal_mode = WAL;");
@@ -87,7 +133,9 @@ export function openDb(path = DB_PATH): Database {
   migrate(db);
   db.run(BLACKLIST_SCHEMA);
   db.run(HOST_BLACKLIST_SCHEMA);
+  db.run(IP_TAGS_SCHEMA);
   seedHostBlacklist(db);
+  seedIpTags(db);
   return db;
 }
 
@@ -215,6 +263,46 @@ export function seedHostBlacklist(db: Database): void {
 /** Canonical host key: trimmed, lowercased, trailing FQDN dot removed. */
 export function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, "");
+}
+
+/** Canonical tag key: trimmed and lowercased, so casing/whitespace never dupes a tag. */
+export function normalizeTag(tag: string): string {
+  return tag.trim().toLowerCase();
+}
+
+/**
+ * Populate ip_tags from IP_TAGS_SEED, but only on a fresh (empty) table. Idempotent:
+ * once the table holds any row this is a no-op, so it never re-adds a tag removed by
+ * hand. Mirrors seedHostBlacklist.
+ */
+export function seedIpTags(db: Database): void {
+  const { c } = db.query("SELECT COUNT(*) AS c FROM ip_tags").get() as { c: number };
+  if (c > 0) return;
+  const stmt = db.query("INSERT OR IGNORE INTO ip_tags (ip_str, tag) VALUES (?, ?)");
+  db.transaction((seed: Readonly<Record<string, readonly string[]>>) => {
+    for (const [tag, ips] of Object.entries(seed)) {
+      const t = normalizeTag(tag);
+      for (const ip of ips) stmt.run(ip.trim(), t);
+    }
+  })(IP_TAGS_SEED);
+}
+
+/**
+ * Every IP's tags as a map of ip_str -> tag list, loaded once for a build. IPs with
+ * no tags are absent (callers default a miss to []). Tags come back sorted so the
+ * comma-joined display on a host page is stable.
+ */
+export function loadIpTags(db: Database): Map<string, string[]> {
+  const rows = db
+    .query("SELECT ip_str, tag FROM ip_tags ORDER BY ip_str, tag")
+    .all() as { ip_str: string; tag: string }[];
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = map.get(r.ip_str);
+    if (list) list.push(r.tag);
+    else map.set(r.ip_str, [r.tag]);
+  }
+  return map;
 }
 
 /** True when `name` equals, or is a subdomain of, any listed host. Case/dot-insensitive. */

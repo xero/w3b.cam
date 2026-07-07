@@ -124,6 +124,8 @@ export interface Host {
 	domains: string[];
 	labels: string[];
 	httpTitle: string | null;
+	// Free-form tags applied per-IP (see ip_tags), shared across all of a host's ports.
+	tags: string[];
 }
 
 function jsonPath(raw: string, get: (o: Record<string, unknown>) => unknown): unknown {
@@ -176,9 +178,14 @@ function isBetterRep(candidate: StoredRow, current: StoredRow): boolean {
  * (country_name, ip_str, port), so a host's ports stay adjacent, shots keep
  * their port order, and hosts sharing a timestamp fall back to that stable
  * country-grouped order. `imgHref` maps a row to the URL of its already-extracted
- * screenshot file.
+ * screenshot file. `tagsByIp` supplies per-IP tags (see loadIpTags); an IP absent
+ * from the map has no tags.
  */
-export function groupByIp(rows: StoredRow[], imgHref: (row: StoredRow) => string): Host[] {
+export function groupByIp(
+	rows: StoredRow[],
+	imgHref: (row: StoredRow) => string,
+	tagsByIp: Map<string, string[]> = new Map(),
+): Host[] {
 	const groups = new Map<string, StoredRow[]>();
 	for (const r of rows) {
 		const g = groups.get(r.ip_str);
@@ -239,6 +246,7 @@ export function groupByIp(rows: StoredRow[], imgHref: (row: StoredRow) => string
 			domains: safeParseArray(rep.domains),
 			labels: extractLabels(rep.raw_json),
 			httpTitle: extractHttpTitle(rep.raw_json),
+			tags: tagsByIp.get(ip) ?? [],
 		};
 		built.push({ host, ts: rep.timestamp ?? "" });
 	}
@@ -444,6 +452,7 @@ export function renderHostMain(host: Host): string {
 	push("ISP", host.isp);
 	push("ASN", host.asn);
 	rows.push(metaRow("Ports", escapeHtml(host.shots.map((s) => s.port).join(", "))));
+	if (host.tags.length) rows.push(metaRow("Tags", escapeHtml(host.tags.join(", "))));
 
 	const nameHtml = renderHostName(host);
 	const heading = nameHtml ? `${renderHostPort(host)} ${nameHtml}` : renderHostPort(host);

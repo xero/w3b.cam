@@ -16,7 +16,7 @@ import {
 	PAGE_SIZE,
 	SNIPS_DIR,
 } from "./config.ts";
-import { allRows, closeDb, openDb } from "./db.ts";
+import { allRows, closeDb, loadIpTags, openDb } from "./db.ts";
 import { isBlockedProduct } from "./util.ts";
 import {
 	extFromMime,
@@ -59,10 +59,12 @@ async function writePage(fullName: string, snipName: string, mainInner: string, 
 
 const db = openDb();
 let rows: StoredRow[];
+let tagsByIp: Map<string, string[]>;
 try {
 	// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
 	// that guard can still be in the DB. Never render them, whatever the DB holds.
 	rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
+	tagsByIp = loadIpTags(db);
 } finally {
 	closeDb(db);
 }
@@ -81,7 +83,7 @@ await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
 
 const imgByKey = await extractImages(rows);
 const imgHref = (row: StoredRow): string => imgByKey.get(`${row.ip_str}:${row.port}`) ?? "";
-const hosts: Host[] = groupByIp(rows, imgHref);
+const hosts: Host[] = groupByIp(rows, imgHref, tagsByIp);
 
 const headerText = `${hosts.length.toLocaleString()} ${hosts.length === 1 ? "host" : "hosts"} · ${rows.length.toLocaleString()} ${rows.length === 1 ? "camera" : "cameras"}`;
 
