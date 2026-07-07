@@ -17,6 +17,7 @@ import {
 	SNIPS_DIR,
 } from "./config.ts";
 import { allRows, closeDb, openDb } from "./db.ts";
+import { isBlockedProduct } from "./util.ts";
 import {
 	extFromMime,
 	groupByIp,
@@ -59,7 +60,9 @@ async function writePage(fullName: string, snipName: string, mainInner: string, 
 const db = openDb();
 let rows: StoredRow[];
 try {
-	rows = allRows(db);
+	// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
+	// that guard can still be in the DB. Never render them, whatever the DB holds.
+	rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
 } finally {
 	closeDb(db);
 }

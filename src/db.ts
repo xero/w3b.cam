@@ -1,6 +1,7 @@
 import { Database, constants } from "bun:sqlite";
 import { DB_PATH } from "./config.ts";
 import type { CamRow, StoredRow, WebcamMatch } from "./types.ts";
+import { BLOCKED_PRODUCTS } from "./util.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS webcams (
@@ -174,6 +175,25 @@ export function allRows(db: Database): StoredRow[] {
   return db
     .query("SELECT * FROM webcams ORDER BY country_name, ip_str, port")
     .all() as StoredRow[];
+}
+
+/** True when any stored camera has this exact IP (any port). */
+export function hasHost(db: Database, ip: string): boolean {
+  return db.query("SELECT 1 FROM webcams WHERE ip_str = ? LIMIT 1").get(ip) != null;
+}
+
+/**
+ * Purge stored cameras whose product we filter at ingestion (RDP/VNC). The
+ * ingestion guard (isBlockedProduct) only blocks *new* rows, so this retroactively
+ * removes any that predate it. Returns the number of rows removed.
+ */
+export function deleteBlockedProducts(db: Database): number {
+  const list = [...BLOCKED_PRODUCTS];
+  if (list.length === 0) return 0;
+  const placeholders = list.map(() => "?").join(", ");
+  return db
+    .query(`DELETE FROM webcams WHERE lower(trim(product)) IN (${placeholders})`)
+    .run(...list).changes;
 }
 
 // ── Blacklist ───────────────────────────────────────────────────────────────

@@ -23,10 +23,12 @@ try {
     const removed = unblacklist(db, arg);
     console.log(`IP:         ${arg}`);
     console.log(`Blacklist:  ${removed ? "removed" : "not listed"}`);
+    if (!removed) console.warn(`⚠ ${arg} was not in the blacklist — check for a typo if you expected it to be listed.`);
   } else {
     const removed = unblacklistHost(db, arg);
     console.log(`Hostname:   ${arg}`);
     console.log(`Blacklist:  ${removed ? "removed" : "not listed"}`);
+    if (!removed) console.warn(`⚠ ${arg} was not in the blacklist — check for a typo if you expected it to be listed.`);
   }
 } finally {
   closeDb(db);

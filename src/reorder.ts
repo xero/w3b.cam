@@ -7,7 +7,7 @@
 //         bun run reorder <ip> --clear    revert ip to the newest screenshot
 
 import { isIP } from "node:net";
-import { clearPreferred, closeDb, openDb, setPreferred } from "./db.ts";
+import { clearPreferred, closeDb, hasHost, openDb, setPreferred } from "./db.ts";
 
 const ip = Bun.argv[2];
 const portArg = Bun.argv[3];
@@ -36,6 +36,9 @@ try {
     console.log(`\n── Reorder summary ──`);
     console.log(`IP:         ${ip}`);
     console.log(`Pin:        ${cleared ? "cleared, reverts to newest screenshot" : "none was set"}`);
+    if (!cleared && !hasHost(db, ip)) {
+      console.warn(`⚠ ${ip} isn't in the DB — check for a typo.`);
+    }
     console.log(`Next:       run \`bun run bake\` to regenerate the site.`);
   } else if (setPreferred(db, ip, port)) {
     console.log(`\n── Reorder summary ──`);
@@ -43,7 +46,8 @@ try {
     console.log(`Preferred:  port ${port}, now this host's card image`);
     console.log(`Next:       run \`bun run bake\` to regenerate the site.`);
   } else {
-    console.error(`No stored screenshot for ${ip}:${port}. Nothing changed.`);
+    const why = hasHost(db, ip) ? `port ${port} not found for ${ip}` : `${ip} isn't in the DB (typo?)`;
+    console.error(`No stored screenshot for ${ip}:${port} — ${why}. Nothing changed.`);
     failed = true;
   }
 } finally {
