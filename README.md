@@ -8,6 +8,7 @@
 > ### Table of Contents
 > - [Requirements](#requirements)
 > - [Setup](#setup)
+> - [Getting the database](#getting-the-database)
 > - [Usage](#usage)
 > - [Editing locally](#editing-locally)
 > - [How it works](#how-it-works)
@@ -44,6 +45,30 @@ bun install
 That installs `shodan-ts` (the API client) and Bun's type definitions. SQLite is built into Bun, so there is nothing else to add.
 
 Run `bun typecheck` at any point to type-check the sources with `tsc --noEmit`.
+
+---
+
+## Getting the database
+
+The database is not in the repo. `camhunting.sqlite` runs to a few hundred MB and only grows, so it lives as an asset on a public prerelease named `db-store` rather than in git. You have two ways to get one: pull the published copy the live site builds from, or start fresh with an empty one.
+
+**Pull the published database.** This is the exact database the site serves, ready to browse and edit.
+
+```sh
+bun sync --pull
+```
+
+It downloads `camhunting.sqlite` from the `db-store` release, overwrites your local copy, and removes the stale `-wal` and `-shm` sidecars so SQLite reads the fresh file cleanly. The repo is public, so any GitHub account works and you do not need to be a collaborator. Sync drives the `gh` CLI, so install and authenticate it first with `gh auth login`. See [Editing locally](#editing-locally) for the full edit loop.
+
+**Download it without `gh`.** The release is public, so you can fetch the asset straight over HTTPS with no CLI and no login. Delete the sidecars yourself afterward, since a plain download skips that step.
+
+```sh
+curl -L -o camhunting.sqlite \
+  https://github.com/xero/w3b.cam/releases/download/db-store/camhunting.sqlite
+rm -f camhunting.sqlite-wal camhunting.sqlite-shm
+```
+
+**Start fresh instead.** To build your own database from an empty, seeded one rather than the published data, run `bun initdb` and populate it with `bun scrape` or `bun import`.
 
 ---
 
@@ -113,6 +138,14 @@ Both directions overwrite a whole database, so each one prints a size and timest
 > [!WARNING]
 > `--pull` clobbers your local database and `--push` clobbers the published one and redeploys the site. Mind the direction, and back up the local file first if it holds edits you have not pushed.
 
+**`bun merge <source> <target>`.** Folds the new cameras from one database into another instead of overwriting either, for when your local copy holds edits you have not pushed. The scheduled scraper adds cameras to the published database every six hours, so a plain `--pull` would clobber your unpushed work just to pick them up. Pull the published copy alongside your working one under another name, then merge only its new rows in:
+
+```sh
+bun merge camhunting.sqlite.prod camhunting.sqlite
+```
+
+It diffs the two `webcams` tables by their `(ip_str, port)` primary key and inserts only the cameras the target is missing, copied verbatim, including each camera's original `first_seen` and any pin. Rows the target already has are left untouched, so your own pins, tags, and curation survive. Only the target is written; the source is opened read-only. Pass `--dry-run` to preview the delta and write nothing, or `--yes` to skip the confirmation prompt.
+
 ---
 
 ## How it works
@@ -130,6 +163,8 @@ A few details worth knowing:
 - **YouTube streams live in their own table.** `bun youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in a `youtube` table keyed on the video id, apart from the Shodan `webcams` table because the metadata differs. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams.html`, one card per stream, and each stream's page links the other streams sharing its channel.
 - **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row and a streams row, each two pinned cards followed by the two newest of that kind. `bun feature <cam|stream> <slot> <ref>` sets one of two slots per kind — an IP for a cam, a video id for a stream — stored in a `featured` table keyed on `(kind, slot)`. A pin whose row is gone is skipped and backfilled from the newest, so the page always fills four and four. The full paginated galleries are unchanged: cams move to `/page001.html`, streams stay at `/streams.html`, both reachable from the header nav. Re-run `bun bake` to rebuild the site.
 - **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
+- **Every geolocated camera plots on a world map.** `/map.html`, in the header nav, is one baked SVG that plots every located camera across all three sources as a dot linking to its detail page. Shodan and traffic cams carry coordinates already; YouTube publishes none, so `bun geo <video_id> <lat> <lng>` assigns one by hand into a `yt_geo` table (seeded with best-guess coordinates for the streams whose titles name a place). With JavaScript on you drag to pan and scroll to zoom; without it the map is a fixed world view whose dots are still plain links, each with a location tooltip. Re-run `bun bake` to rebuild the site.
+
 - **The site works without JavaScript.** Every index page and per-host page is a real file with plain links, so it stays browsable on its own. When JavaScript is on, htmx intercepts those links and swaps only the page body, which skips reloading the shell and shared assets. Each page is generated in two forms, the full document and a body-only snippet, from a single source string so the two cannot drift.
 
 ---
@@ -160,13 +195,16 @@ src/
   reorder.ts      pin a host's card image to one port
   tag.ts          attach a free-form label to a host
   feature.ts      pin a cam or stream to a homepage slot
+  geo.ts          assign a YouTube stream's map coordinates (yt_geo)
   purge.ts        remove stored RDP/VNC rows that predate the ingest filter
   render.ts       pure HTML rendering (grouping, pager, pages, shell)
+  worldmap.ts     pre-projected world-country outlines for the map page
   build.ts        database to static site (orchestrator)
   serve.ts        static file server for out/
   dev.ts          local dev server with right-click blacklist/reorder/tag
   dev-client/     browser editing UI (js and css), served from source
   sync.ts         pull/push the database to and from the db-store release
+  merge.ts        merge new webcam rows from one database into another
 in/                curated inputs (gitignored)
   youtube.md       YouTube live-stream list, source for `bun youtube`
   *.json           raw Shodan JSON for `bun import`
@@ -179,6 +217,7 @@ out/               generated site (gitignored)
   streams002.html  full streams pages 2..N
   <ip>.html     one page per host (dots become hyphens)
   yt-<id>.html  one page per YouTube stream
+  map.html      world map of every geolocated camera
   img/          extracted screenshots and thumbnails
   snips/        body-only snippets for htmx swaps
   htmx.min.js   vendored htmx library
@@ -188,7 +227,7 @@ out/               generated site (gitignored)
 
 ## GitHub Actions
 
-Eight workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, and feature edits happen from the Actions tab without a local checkout.
+Nine workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, feature, and geo edits happen from the Actions tab without a local checkout.
 
 **`build`.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
 
@@ -205,6 +244,8 @@ Eight workflows in `.github/workflows/` run the same commands in CI. The site bu
 **`tag`.** Takes an IP and a tag, attaches the label to the host, saves the database, then calls `build` so the tag appears on the site.
 
 **`feature`.** Takes a kind (cam or stream), a slot (1 or 2), and a ref (an IP for a cam, a video id for a stream), pins it to that homepage slot, saves the database, then calls `build` so the homepage updates.
+
+**`geo`.** Takes a video id, a latitude, and a longitude, assigns that stream's map coordinates in the `yt_geo` table, saves the database, then calls `build` so the stream appears on the map.
 
 ### The database store
 

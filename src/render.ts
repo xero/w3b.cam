@@ -3,10 +3,20 @@
 // is HTML-escaped before interpolation, exactly as the original single-page build did.
 
 import { displayParts, escapeHtml, pickDisplayName } from "./util.ts";
-import type { StoredRow, StoredYtRow } from "./types.ts";
+import type { FeedKind, StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
+import { WORLD_PATHS } from "./worldmap.ts";
 
 export const TITLE = "w3b.cam";
 export const THEME_COLOR = "#0f1117";
+
+/** Map viewBox size. The world outlines in worldmap.ts are pre-projected into this space. */
+export const MAP_W = 1000;
+export const MAP_H = 500;
+
+/** Equirectangular projection of a coordinate into the map viewBox (must match worldmap.ts). */
+export function project(lat: number, lng: number): { x: number; y: number } {
+	return { x: ((lng + 180) / 360) * MAP_W, y: ((90 - lat) / 180) * MAP_H };
+}
 
 /** Tab of depth n (web-style: tabs, never spaces). */
 export const T = (n: number): string => "\t".repeat(n);
@@ -98,12 +108,39 @@ export const ytSlug = (id: string): string => `yt-${id.replace(/[^A-Za-z0-9_-]+/
 export const ytUrl = (slug: string): string => `/${slug}.html`;
 export const ytSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
 
+// Traffic (Osiris) cams have their own paginated gallery (traffic.html, then
+// traffic002.html …) with one detail page per cam (t-<id>.html). Same conventions
+// as the streams gallery: page 1 is the pretty traffic.html, snippets are uniformly
+// numbered.
+
+/** Disk filename of full traffic page p (page 1 is traffic.html). */
+export const trafficPageFileName = (p: number): string => (p === 1 ? "traffic.html" : `traffic${pad(p)}.html`);
+/** Pretty URL pushed into history for traffic page p. */
+export const trafficPageUrl = (p: number): string => `/${p === 1 ? "traffic.html" : `traffic${pad(p)}.html`}`;
+/** Disk filename of the snippet for traffic page p (uniform, includes page 1). */
+export const trafficSnippetFileName = (p: number): string => `traffic${pad(p)}.html`;
+/** hx-get URL of the snippet for traffic page p. */
+export const trafficSnippetUrl = (p: number): string => `/snips/traffic${pad(p)}.html`;
+
+/** Filename-safe slug for a cam's detail page. Ids are namespaced but ad-hoc; whitelist to [A-Za-z0-9_-]. */
+export const trafficSlug = (id: string): string =>
+  `t-${id.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-|-$/g, "")}`;
+export const trafficUrl = (slug: string): string => `/${slug}.html`;
+export const trafficDetailSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
+
 // The tag cloud is a single, unpaginated page. Unlinked from the nav for now
 // (visit /tags.html directly); it just surfaces how the per-IP tagging is going.
 export const tagsPageFileName = "tags.html";
 export const tagsSnippetFileName = "tags.html";
 export const tagsUrl = "/tags.html";
 export const tagsSnippetUrl = "/snips/tags.html";
+
+// The map is a single, unpaginated page (map.html) reachable from the nav: every
+// geolocated camera across all three sources is a dot linking to its detail page.
+export const mapPageFileName = "map.html";
+export const mapSnippetFileName = "map.html";
+export const mapUrl = "/map.html";
+export const mapSnippetUrl = "/snips/map.html";
 
 /**
  * Live-view URL for a host:port (external link, opened in a new tab). IPv6 literals
@@ -147,6 +184,8 @@ export interface Host {
 	country_name: string | null;
 	city: string | null;
 	region_code: string | null;
+	latitude: number | null;
+	longitude: number | null;
 	org: string | null;
 	isp: string | null;
 	asn: string | null;
@@ -269,6 +308,8 @@ export function groupByIp(
 			country_name: rep.country_name,
 			city: rep.city,
 			region_code: rep.region_code,
+			latitude: rep.latitude,
+			longitude: rep.longitude,
 			org: rep.org,
 			isp: rep.isp,
 			asn: rep.asn,
@@ -373,6 +414,11 @@ export function renderStreamsPager(cur: number, total: number): string {
 	return renderPagerWith(cur, total, streamsPageUrl, streamsSnippetUrl);
 }
 
+/** Numbered pager for the traffic gallery. */
+export function renderTrafficPager(cur: number, total: number): string {
+	return renderPagerWith(cur, total, trafficPageUrl, trafficSnippetUrl);
+}
+
 // ── Index cards ──────────────────────────────────────────────────────────────
 
 /**
@@ -474,7 +520,7 @@ export function renderIndexMain(hosts: Host[], page: number, totalPages: number,
  * cards verbatim; a "more" link jumps to the full paginated gallery. An empty
  * section is dropped, and if both are empty the galleries' "nothing yet" note shows.
  */
-export function renderHomeMain(cams: Host[], streams: YtStream[], opts: RenderOpts = {}): string {
+export function renderHomeMain(cams: Host[], streams: YtStream[], traffic: TrafficCam[], opts: RenderOpts = {}): string {
 	const section = (title: string, cards: string, moreHref: string, moreSnip: string, moreLabel: string): string =>
 		[
 			`<section class="home">`,
@@ -495,8 +541,12 @@ export function renderHomeMain(cams: Host[], streams: YtStream[], opts: RenderOp
 		const cards = streams.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
 		parts.push(section("streams", cards, streamsPageUrl(1), streamsSnippetUrl(1), "all streams"));
 	}
+	if (traffic.length) {
+		const cards = traffic.map((c) => indentBlock(renderTrafficCard(c), 1)).join("\n");
+		parts.push(section("traffic", cards, trafficPageUrl(1), trafficSnippetUrl(1), "all traffic"));
+	}
 	if (parts.length === 0) {
-		return `<p class="empty">Nothing to feature yet. Run <code>bun run scrape</code> or <code>bun run youtube</code> first.</p>`;
+		return `<p class="empty">Nothing to feature yet. Run <code>bun run scrape</code>, <code>bun run youtube</code>, or <code>bun run traffic</code> first.</p>`;
 	}
 	return parts.join("\n");
 }
@@ -699,12 +749,9 @@ function renderSiblings(stream: YtStream, siblings: YtStream[]): string {
  * filtered out inside renderSiblings).
  */
 export function renderYtDetail(stream: YtStream, siblings: YtStream[]): string {
-	const media = stream.thumbHref
-		? `${T(2)}<img src="${escapeHtml(stream.thumbHref)}" alt="${escapeHtml(stream.thumbAlt)}" loading="lazy" />`
-		: `${T(2)}<div class="noshot" role="img" aria-label="${escapeHtml(stream.thumbAlt)}">no thumbnail</div>`;
 	const figure = [
 		`${T(1)}<figure class="shot">`,
-		media,
+		ytFacade(stream),
 		`${T(2)}<a class="btn" href="${escapeHtml(stream.url)}" target="_blank" rel="noopener noreferrer">`,
 		indentBlock(btnLayers("Watch on YouTube"), 2),
 		`${T(2)}</a>`,
@@ -737,6 +784,191 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[]): string {
 		`${T(1)}</table>`,
 		...(siblingSection ? [indentBlock(siblingSection, 1)] : []),
 		`${T(1)}<a class="back" href="/streams.html" hx-get="${streamsSnippetUrl(1)}" hx-push-url="/streams.html">&larr; Back to streams</a>`,
+		`</article>`,
+	].join("\n");
+}
+
+/**
+ * Click-to-load YouTube facade for a stream detail page: the thumbnail with a play
+ * overlay, rendered as an <a> to the watch URL so it works with no JS. assets/traffic.js
+ * intercepts the click and swaps in a youtube-nocookie iframe — no third-party DOM loads
+ * until the user opts in. The "Watch on YouTube" button beneath it stays as the fallback.
+ */
+function ytFacade(stream: YtStream): string {
+	const bg = stream.thumbHref ? ` style="background-image:url('${escapeHtml(stream.thumbHref)}')"` : "";
+	return [
+		`${T(2)}<a class="yt-facade" href="${escapeHtml(stream.url)}" data-yt="${escapeHtml(stream.videoId)}" aria-label="Play ${escapeHtml(stream.label)}"${bg}>`,
+		`${T(3)}<span class="yt-play" aria-hidden="true"></span>`,
+		`${T(2)}</a>`,
+	].join("\n");
+}
+
+// ── Traffic (Osiris) cams ────────────────────────────────────────────────────────
+// A third source with its own flat gallery (one card per cam, like the streams
+// gallery). Hybrid rendering: the gallery card shows a baked, same-origin thumbnail
+// exactly like the other sources, but the detail page embeds the LIVE feed — an
+// auto-refreshing <img> (jpg), a <video> (mp4/hls, hls via the vendored hls.js), or,
+// for iframe/external-only cams, just a "view live" link (we never load third-party
+// DOM). Every live element degrades to that link on error.
+
+export interface TrafficCam {
+	id: string;
+	slug: string;
+	/** Display title: the cam's name, else its id. */
+	name: string;
+	source: string | null;
+	city: string | null;
+	country: string | null;
+	lat: number | null;
+	lng: number | null;
+	feedKind: FeedKind;
+	/** URL the detail page embeds (jpg/mp4/hls) or links (link kind). */
+	liveUrl: string;
+	/** Optional human-facing viewer page (preferred "view live" target). */
+	externalUrl: string | null;
+	/** URL of the already-extracted thumbnail file, or "" when none was captured. */
+	thumbHref: string;
+	thumbAlt: string;
+}
+
+/** Map a stored traffic row (plus its extracted image URL) into a view model. */
+export function toTrafficCam(row: StoredTrafficRow, thumbHref: string): TrafficCam {
+	const name = (row.name && row.name.trim()) || row.id;
+	return {
+		id: row.id,
+		slug: trafficSlug(row.id),
+		name,
+		source: row.source,
+		city: row.city,
+		country: row.country,
+		lat: row.lat,
+		lng: row.lng,
+		feedKind: row.feed_kind,
+		liveUrl: row.live_url,
+		externalUrl: row.external_url,
+		thumbHref,
+		thumbAlt: `Snapshot from ${name}`,
+	};
+}
+
+/** Plain-text "city, country", de-duped when a source uses the country as a placeholder city. Callers escape. */
+function trafficLoc(cam: TrafficCam): string {
+	const city = cam.city?.trim() ?? "";
+	const country = cam.country?.trim() ?? "";
+	const parts = city && country && city.toLowerCase() === country.toLowerCase() ? [country] : [city, country];
+	return parts.filter((v) => v !== "").join(", ");
+}
+
+/** Corner badge for a traffic card: "live" for video cams, nothing for auto-refresh JPEGs. */
+function trafficBadge(kind: FeedKind): string {
+	if (kind === "mp4" || kind === "hls") return `\n${T(2)}<span class="badge live">live</span>`;
+	return "";
+}
+
+/** Human label for a cam's feed kind, shown in the detail metadata table. */
+function feedKindLabel(kind: FeedKind): string {
+	switch (kind) {
+		case "jpg":
+			return "Auto-refreshing snapshot";
+		case "mp4":
+			return "Live video (MP4)";
+		case "hls":
+			return "Live video (HLS)";
+	}
+}
+
+/**
+ * One traffic card for the gallery. Same shape as a host/stream card (a CSS-background
+ * thumbnail figure with a corner badge, a one-line title, a location subtitle) so all
+ * three galleries render identically; here the title is the cam name and the subtitle
+ * is its location. A cam with no captured thumbnail (link cams, dead feeds) shows the
+ * plain black figure.
+ */
+export function renderTrafficCard(cam: TrafficCam): string {
+	const badge = trafficBadge(cam.feedKind);
+	const loc = escapeHtml(trafficLoc(cam));
+	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
+	return [
+		`<a class="card" href="${trafficUrl(cam.slug)}" hx-get="${trafficDetailSnippetUrl(cam.slug)}" hx-push-url="${trafficUrl(cam.slug)}">`,
+		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">${badge}`,
+		`${T(1)}</figure>`,
+		`${T(1)}<h2>`,
+		`${T(2)}<span class="dn-line dn-name">${escapeHtml(cam.name)}</span>`,
+		`${T(1)}</h2>${locLine}`,
+		`</a>`,
+	].join("\n");
+}
+
+/** Inner-<main> content for a traffic gallery page: the card grid plus the pager. */
+export function renderTrafficMain(cams: TrafficCam[], page: number, totalPages: number): string {
+	if (cams.length === 0) {
+		return `<p class="empty">No traffic cams stored yet. Run <code>bun run traffic</code> first.</p>`;
+	}
+	const cards = cams.map((c) => indentBlock(renderTrafficCard(c), 1)).join("\n");
+	const pager = renderTrafficPager(page, totalPages);
+	return [`<section class="gallery">`, cards, `</section>`, ...(pager ? [pager] : [])].join("\n");
+}
+
+/**
+ * The live media element for a detail page, chosen by feed kind. The `poster` /
+ * initial `src` is the baked same-origin thumbnail so there's an instant frame and
+ * no broken-image flash; the client (traffic.js) then drives the live feed
+ * (cache-busting the <img>, attaching hls.js to the <video>). `link` cams show a
+ * placeholder — we never embed third-party DOM.
+ */
+function trafficMedia(cam: TrafficCam): string {
+	const alt = escapeHtml(cam.thumbAlt);
+	const poster = cam.thumbHref ? ` poster="${escapeHtml(cam.thumbHref)}"` : "";
+	switch (cam.feedKind) {
+		case "jpg": {
+			const src = cam.thumbHref ? ` src="${escapeHtml(cam.thumbHref)}"` : "";
+			return `${T(2)}<img class="live-img" data-refresh="${escapeHtml(cam.liveUrl)}"${src} alt="${alt}" referrerpolicy="no-referrer" />`;
+		}
+		case "mp4":
+			return `${T(2)}<video class="live-video" src="${escapeHtml(cam.liveUrl)}" autoplay muted loop playsinline controls${poster}></video>`;
+		case "hls":
+			return `${T(2)}<video class="live-video" data-hls="${escapeHtml(cam.liveUrl)}" autoplay muted playsinline controls${poster}></video>`;
+	}
+}
+
+/**
+ * Inner-<main> content for a traffic cam's detail page: the live media (or a
+ * placeholder) with a "View live" button, then a lean metadata table. The button
+ * targets the human-facing page when there is one, else the raw feed URL.
+ */
+export function renderTrafficDetail(cam: TrafficCam): string {
+	const media = trafficMedia(cam);
+	const liveHref = cam.externalUrl ?? cam.liveUrl;
+	const figure = [
+		`${T(1)}<figure class="shot">`,
+		media,
+		`${T(2)}<a class="btn" href="${escapeHtml(liveHref)}" target="_blank" rel="noopener noreferrer">`,
+		indentBlock(btnLayers("View live"), 2),
+		`${T(2)}</a>`,
+		`${T(1)}</figure>`,
+	].join("\n");
+
+	const rows: string[] = [];
+	const push = (label: string, value: string | null | undefined): void => {
+		if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
+	};
+	push("Source", cam.source);
+	push("Location", trafficLoc(cam));
+	if (cam.lat != null && cam.lng != null) push("Coordinates", `${cam.lat}, ${cam.lng}`);
+	push("Type", feedKindLabel(cam.feedKind));
+
+	return [
+		`<article class="host">`,
+		`${T(1)}<h2>${escapeHtml(cam.name)}</h2>`,
+		`${T(1)}<div class="shots">`,
+		indentBlock(figure, 1),
+		`${T(1)}</div>`,
+		`${T(1)}<table class="meta">`,
+		`${T(2)}<tbody>`,
+		indentBlock(rows.join("\n"), 3),
+		`${T(2)}</tbody>`,
+		`${T(1)}</table>`,
+		`${T(1)}<a class="back" href="/traffic.html" hx-get="${trafficSnippetUrl(1)}" hx-push-url="/traffic.html">&larr; Back to traffic</a>`,
 		`</article>`,
 	].join("\n");
 }
@@ -792,6 +1024,64 @@ export function renderTagsMain(tags: TagCount[]): string {
 	].join("\n");
 }
 
+// ── World map ────────────────────────────────────────────────────────────────
+// A single page plotting every geolocated camera (all three sources) as a dot on a
+// baked SVG world map. The country outlines (worldmap.ts) and the dots share one
+// viewBox, so the whole thing is one inert SVG: hover a dot for its location (native
+// <title>), click it to open that cam (a real <a>, htmx-swapped when JS is on).
+// assets/map.js adds drag-to-pan / wheel-to-zoom by nudging the viewBox; with no JS
+// it stays a fixed world view, still fully clickable.
+
+export interface MapPoint {
+	/** Projected viewBox coordinates (see project()). */
+	x: number;
+	y: number;
+	/** Detail-page pretty URL: the no-JS href and the pushed history entry. */
+	href: string;
+	/** Detail-page snippet URL: the htmx swap target. */
+	snip: string;
+	/** Hover label: the cam's location, else its name. */
+	title: string;
+}
+
+/** Trim a trailing ".0" so projected coords stay compact across ~10k dots. */
+const mapRound = (n: number): string => {
+	const s = n.toFixed(1);
+	return s.endsWith(".0") ? s.slice(0, -2) : s;
+};
+
+/**
+ * Inner-<main> for the map page: one SVG holding the world outlines and a dot per
+ * geolocated camera. Each dot is an <a> to the cam's detail page (a plain link
+ * without JS, an htmx body-swap with it) carrying a <title> for a native hover
+ * tooltip. `total` is only for the SVG's accessible label.
+ */
+export function renderMapMain(points: MapPoint[], total: number): string {
+	if (points.length === 0) {
+		return `<p class="empty">No geolocated cameras yet. Scrape cams, add traffic, or assign stream coordinates with <code>bun run geo</code>, then re-bake.</p>`;
+	}
+	const land = WORLD_PATHS.map((d) => `${T(3)}<path d="${d}" />`).join("\n");
+	const dots = points
+		.map(
+			(p) =>
+				`${T(3)}<a href="${p.href}" hx-get="${p.snip}" hx-push-url="${p.href}"><circle cx="${mapRound(p.x)}" cy="${mapRound(p.y)}" r="1.4"><title>${escapeHtml(p.title)}</title></circle></a>`,
+		)
+		.join("\n");
+	return [
+		`<section class="mapwrap">`,
+		`${T(1)}<p class="maphint">${total.toLocaleString()} geolocated cameras &middot; drag to pan, scroll to zoom, click a dot to open it</p>`,
+		`${T(1)}<svg class="worldmap" viewBox="0 0 ${MAP_W} ${MAP_H}" preserveAspectRatio="xMidYMid meet" aria-label="World map of ${total.toLocaleString()} geolocated cameras">`,
+		`${T(2)}<g class="land" aria-hidden="true">`,
+		land,
+		`${T(2)}</g>`,
+		`${T(2)}<g class="dots">`,
+		dots,
+		`${T(2)}</g>`,
+		`${T(1)}</svg>`,
+		`</section>`,
+	].join("\n");
+}
+
 // ── Page shell + CSS ─────────────────────────────────────────────────────────
 
 const CSS = `:root {
@@ -812,6 +1102,10 @@ const CSS = `:root {
 	--muted:   var(--fog);
 	--accent:  var(--ocean);
 	--border:  var(--poseidon);
+	--land:    #1b2333;
+	--coast:   #2b3a52;
+	--dot:     #6cc6e6;
+	--dot-hi:  #f2c14e;
 	--font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 
 	/* metrics */
@@ -863,6 +1157,7 @@ h1 > em {
 .brand {
 	display: flex;
 	flex-flow: column nowrap;
+	align-self: center;
 }
 
 .count {
@@ -871,6 +1166,10 @@ h1 > em {
 	color: var(--muted);
 	font-variant-numeric: tabular-nums;
 	line-height: 1.23em;
+	align-self: flex-start;
+	align-items: self-end;
+	flex-grow: 1;
+	font-size: 11px;
 }
 
 main {
@@ -1154,16 +1453,16 @@ body > footer {
 	display: flex;
 	flex-flow: row wrap;
 	gap: 1rem;
-	align-items: baseline;
+	align-items: center;
 
-	& a {
-		color: var(--muted);
-		text-decoration: none;
-	}
-
-	& a:hover,
-	& a:focus-visible {
-		color: var(--accent);
+	a {
+		color: var(--ice);
+		&:hover {
+			color: var(--sand);
+		}
+		& .front {
+			padding: 12px;
+		}
 	}
 }
 
@@ -1173,6 +1472,69 @@ body > footer {
 
 .badge.upcoming {
 	background: var(--poseidon);
+}
+
+.shot video {
+	display: block;
+	width: auto;
+	height: auto;
+	max-width: 100%;
+	background: #000;
+}
+
+.live-img {
+	max-width: 100%;
+}
+
+.yt-facade {
+	position: relative;
+	display: block;
+	width: 40rem;
+	max-width: 100%;
+	aspect-ratio: 16 / 9;
+	background-color: #000;
+	background-position: center;
+	background-size: cover;
+	background-repeat: no-repeat;
+	cursor: pointer;
+}
+
+.yt-facade .yt-play {
+	position: absolute;
+	inset: 0;
+	margin: auto;
+	width: 4rem;
+	height: 4rem;
+	border: 2px solid #fff;
+	border-radius: 50%;
+	background: rgb(0 0 0 / 0.55);
+}
+
+.yt-facade .yt-play::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	margin: auto;
+	width: 0;
+	height: 0;
+	border-style: solid;
+	border-width: 0.7rem 0 0.7rem 1.15rem;
+	border-color: transparent transparent transparent #fff;
+	transform: translateX(0.15rem);
+}
+
+.yt-facade:hover .yt-play,
+.yt-facade:focus-visible .yt-play {
+	background: var(--accent);
+}
+
+.yt-embed {
+	display: block;
+	width: 40rem;
+	max-width: 100%;
+	aspect-ratio: 16 / 9;
+	border: 0;
+	background: #000;
 }
 
 .siblings {
@@ -1244,6 +1606,51 @@ body > footer {
 	}
 }
 
+.mapwrap {
+	border-top: 1px solid var(--accent);
+	padding-top: 10px;
+	display: flex;
+	flex-flow: column nowrap;
+	gap: 0.75rem;
+}
+
+.maphint {
+	color: var(--muted);
+}
+
+.worldmap {
+	display: block;
+	width: 100%;
+	height: auto;
+	max-height: 82vh;
+	background: var(--bg);
+	touch-action: none;
+	cursor: grab;
+
+	&:active {
+		cursor: grabbing;
+	}
+
+	& .land path {
+		fill: var(--land);
+		stroke: var(--coast);
+		stroke-width: 0.5;
+		vector-effect: non-scaling-stroke;
+	}
+
+	& .dots circle {
+		fill: var(--dot);
+		fill-opacity: 0.6;
+		transition: fill 0.1s ease;
+	}
+
+	& .dots a:hover circle,
+	& .dots a:focus-visible circle {
+		fill: var(--dot-hi);
+		fill-opacity: 1;
+	}
+}
+
 @media (prefers-color-scheme: light) {
 	:root {
 		--bg:      #f4f6f8;
@@ -1252,6 +1659,10 @@ body > footer {
 		--muted:   #5b6472;
 		--accent:  #0d3b4a;
 		--border:  #d3dbe3;
+		--land:    #dfe6ee;
+		--coast:   #b9c4d0;
+		--dot:     #12667f;
+		--dot-hi:  #c0392b;
 	}
 }`;
 
@@ -1278,43 +1689,61 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 	// document (its own <main> included) and appends it. Set both explicitly so
 	// these links swap the snippet into <main>, exactly like the in-main links.
 	const navAttrs = 'hx-target="main" hx-swap="innerHTML show:top"';
+	// Nav links are real .btn links — larger siblings of the pager buttons: the same
+	// three stacked layers (shadow / edge / labelled front), plus the header-only
+	// hx-target/hx-swap so they swap <main> like the in-main links.
+	const navLink = (href: string, snip: string, label: string): string =>
+		[
+			`<a class="btn" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
+			btnLayers(label),
+			`</a>`,
+		].join("\n");
 	return [
 		"<!DOCTYPE html>",
 		'<html lang="en">',
-		"\t<head>",
-		'\t\t<meta charset="UTF-8" />',
-		'\t\t<meta name="viewport" content="width=device-width, initial-scale=1" />',
-		`\t\t<meta name="theme-color" content="${THEME_COLOR}" />`,
-		`\t\t<title>${escapeHtml(title)}</title>`,
-		'\t\t<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />',
-		'\t\t<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
-		'\t\t<link rel="shortcut icon" href="/favicon.ico" />',
-		'\t\t<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />',
-		`\t\t<meta name="apple-mobile-web-app-title" content="${escapeHtml(TITLE)}" />`,
-		'\t\t<link rel="manifest" href="/site.webmanifest" />',
-		"\t\t<style>",
+		`${T(1)}<head>`,
+		`${T(2)}<meta charset="UTF-8" />`,
+		`${T(2)}<meta name="viewport" content="width=device-width, initial-scale=1" />`,
+		`${T(2)}<meta name="theme-color" content="${THEME_COLOR}" />`,
+		`${T(2)}<title>${escapeHtml(title)}</title>`,
+		`${T(2)}<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />`,
+		`${T(2)}<link rel="icon" type="image/svg+xml" href="/favicon.svg" />`,
+		`${T(2)}<link rel="shortcut icon" href="/favicon.ico" />`,
+		`${T(2)}<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />`,
+		`${T(2)}<meta name="apple-mobile-web-app-title" content="${escapeHtml(TITLE)}" />`,
+		`${T(2)}<link rel="manifest" href="/site.webmanifest" />`,
+		`${T(2)}<style>`,
 		indentBlock(CSS, 2),
-		"\t\t</style>",
-		...(dev ? ['\t\t<link rel="stylesheet" href="/__dev/dev.css" />'] : []),
-		"\t</head>",
-		"\t<body>",
-		"\t\t<header>",
-		`\t\t\t<div class="brand">`,
-		`\t\t\t\t<h1><a href="${homeUrl}" hx-get="${homeSnippetUrl}" ${navAttrs} hx-push-url="${homeUrl}">${escapeHtml(TITLE)}</a></h1>`,
-		`\t\t\t\t<em>internet voyeurism</em>`,
-		`\t\t\t</div>`,
-		`\t\t\t<nav class="nav">`,
-		`\t\t\t\t<a href="${pageUrl(1)}" hx-get="${snippetUrl(1)}" ${navAttrs} hx-push-url="${pageUrl(1)}">cams</a>`,
-		`\t\t\t\t<a href="/streams.html" hx-get="${streamsSnippetUrl(1)}" ${navAttrs} hx-push-url="/streams.html">streams</a>`,
-		`\t\t\t</nav>`,
-		`\t\t\t<p class="count">${counts}</p>`,
-		"\t\t</header>",
-		'\t\t<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">',
+		`${T(2)}</style>`,
+		...(dev ? [`${T(2)}<link rel="stylesheet" href="/__dev/dev.css" />`] : []),
+		`${T(1)}</head>`,
+		`${T(1)}<body>`,
+		`${T(2)}<header>`,
+		`${T(3)}<div class="brand">`,
+		`${T(4)}<h1><a href="${homeUrl}" hx-get="${homeSnippetUrl}" ${navAttrs} hx-push-url="${homeUrl}">${escapeHtml(TITLE)}</a></h1>`,
+		`${T(4)}<em>internet voyeurism</em>`,
+		`${T(3)}</div>`,
+		`${T(3)}<nav class="nav">`,
+		indentBlock(navLink(pageUrl(1), snippetUrl(1), "cams"), 4),
+		indentBlock(navLink("/streams.html", streamsSnippetUrl(1), "streams"), 4),
+		indentBlock(navLink("/traffic.html", trafficSnippetUrl(1), "traffic"), 4),
+		indentBlock(navLink(mapUrl, mapSnippetUrl, "map"), 4),
+		`${T(3)}</nav>`,
+		`${T(3)}<p class="count">${counts}</p>`,
+		`${T(2)}</header>`,
+		`${T(2)}<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">`,
 		indentBlock(mainInner, 3),
-		"\t\t</main>",
-		'\t\t<script src="/htmx.min.js"></script>',
-		...(dev ? ['\t\t<script src="/__dev/dev.js"></script>'] : []),
-		"\t</body>",
+		`${T(2)}</main>`,
+		`${T(2)}<script src="/htmx.min.js"></script>`,
+		// Live-feed client on every page (tiny): drives traffic detail feeds and must be
+		// present however you arrive, including htmx swaps whose snippets carry no script.
+		// It loads hls.min.js on demand only when an HLS cam is actually viewed.
+		`${T(2)}<script src="/traffic.js" defer></script>`,
+		// Map client (tiny): drag-to-pan / wheel-to-zoom for the SVG world map. Like
+		// traffic.js it loads on every page and no-ops when no map is present.
+		`${T(2)}<script src="/map.js" defer></script>`,
+		...(dev ? [`${T(2)}<script src="/__dev/dev.js"></script>`] : []),
+		`${T(1)}</body>`,
 		"</html>",
 		"",
 	].join("\n");

@@ -1,0 +1,89 @@
+name: traffic
+
+# Re-ingest the Osiris "traffic" cams (refreshing each cam's baked card thumbnail),
+# persist the updated DB to the db-store release, then rebuild & deploy the site.
+#
+# The Osiris dump is large and lives under in/ (gitignored by default), so CI can
+# only ingest when the dump is present in the checkout — commit it to a tracked
+# path and pass that path, or (simpler) run `bun run traffic` locally and push the
+# DB with `bun run sync --push`. Either way the site's live detail feeds are always
+# current; only the gallery thumbnails go stale between refreshes.
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: Path to the Osiris JSON dump (must exist in the checkout)
+        required: false
+        default: in/new/osiris-cameras.json
+        type: string
+      limit:
+        description: Optional cap on cams ingested (blank = all)
+        required: false
+        default: ''
+        type: string
+      source:
+        description: Optional source filter (substring, e.g. "TfL")
+        required: false
+        default: ''
+        type: string
+
+# Serialize with every other DB-mutating workflow so runs can't clobber the DB.
+concurrency:
+  group: db-write
+  cancel-in-progress: false
+
+jobs:
+  traffic:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release upload/create (persist the DB)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      # ffmpeg captures a still frame from MP4/HLS cams for their gallery thumbnail.
+      # It ships on the ubuntu runner image, but install it if a future image drops it.
+      - name: Ensure ffmpeg
+        run: ffmpeg -version >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y ffmpeg; }
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore DB from release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
+
+      # Inputs passed via env (not inline ${{ }}) to avoid shell injection.
+      - name: Ingest traffic cams
+        env:
+          FILE: ${{ inputs.file }}
+          LIMIT: ${{ inputs.limit }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Osiris dump not found at '$FILE'. Commit it to the checkout or ingest locally and 'bun run sync --push'."
+            exit 1
+          fi
+          args=("$FILE")
+          if [ -n "$LIMIT" ]; then args+=(--limit "$LIMIT"); fi
+          if [ -n "$SOURCE" ]; then args+=(--source "$SOURCE"); fi
+          bun run traffic "${args[@]}"
+
+      - name: Save DB to release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view db-store >/dev/null 2>&1 \
+            || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
+          gh release upload db-store camhunting.sqlite --clobber
+
+  # New/refreshed traffic cams change the gallery, so rebuild & deploy.
+  call-build:
+    needs: traffic
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/build.yml

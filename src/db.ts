@@ -1,6 +1,6 @@
 import { Database, constants } from "bun:sqlite";
 import { DB_PATH } from "./config.ts";
-import type { CamRow, StoredRow, StoredYtRow, WebcamMatch, YtRow } from "./types.ts";
+import type { CamRow, StoredRow, StoredTrafficRow, StoredYtRow, TrafficRow, WebcamMatch, YtRow } from "./types.ts";
 import { BLOCKED_PRODUCTS } from "./util.ts";
 
 const SCHEMA = `
@@ -90,6 +90,201 @@ const YT_COLUMNS = [
   "video_id", "url", "label", "title", "description", "channel_id",
   "channel_title", "published_at", "live_content", "scheduled_start",
   "actual_start", "thumbnail_url", "ss_mime", "ss_hash", "ss_base64", "raw_json",
+] as const;
+
+/**
+ * Manual coordinates for YouTube streams, kept apart from the `youtube` table
+ * because unlike the other two sources YouTube publishes no location: these are
+ * our own best-guess lat/lng, hand-assigned from the place named in a stream's
+ * title (city centroid, or the landmark itself). One row per video, keyed on
+ * `video_id`; a stream absent from this table simply gets no map dot. Seeded once
+ * on a fresh table (see seedYtGeo) and editable with `bun run geo`, mirroring how
+ * ip_tags / featured are seeded-then-curated.
+ */
+const YT_GEO_SCHEMA = `
+CREATE TABLE IF NOT EXISTS yt_geo (
+  video_id  TEXT NOT NULL PRIMARY KEY,
+  lat       REAL NOT NULL,
+  lng       REAL NOT NULL,
+  added_at  TEXT NOT NULL DEFAULT (datetime('now'))
+) STRICT;
+`;
+
+/**
+ * video_id -> [lat, lng] seed for yt_geo on a fresh database, best-guess from each
+ * stream's title. Applied only when the table is empty (see seedYtGeo), so a coord
+ * removed or corrected by hand never reverts. Streams whose title names no single
+ * place (the FalconCam feeds, the roaming "Multi-Cam" feeds, the "Railcam UK
+ * Sampler") are intentionally absent and stay off the map.
+ */
+const YT_GEO_SEED: Readonly<Record<string, readonly [number, number]>> = {
+  // Koh Samui, Thailand (Lamai / Chaweng / Bophut beaches)
+  e9T0L_POAOk: [9.533, 100.062], // "The Best Pancake Man" (Chaweng)
+  Tpj0cmMVOd0: [9.47, 100.052], // Baobab, Lamai Beach
+  w47yvCftkWQ: [9.47, 100.05], // Bondi Aussie Bar (Lamai)
+  "VR-x3HdhKLQ": [9.47, 100.05], // Bondi Aussie Bar
+  NTTtqzL5OWI: [9.462, 100.055], // Crystal Bay Beach Resort (Lamai)
+  Fw9hgttWzIg: [9.462, 100.055], // Crystal Bay Beach Resort
+  "3N3ZwIB_X4Y": [9.46, 100.056], // Crystal Bay Yacht Club (Lamai)
+  LGNYKz4yziE: [9.46, 100.056], // Crystal Bay Yacht Club - Panoramic
+  kkVrj2cr9Ko: [9.46, 100.056], // Crystal Bay Yacht Club Lamai
+  CSp55hSd_6A: [9.573, 100.061], // Fisherman's Village (Bophut)
+  FyFAqPHBKiQ: [9.573, 100.061], // Fisherman's Village (Bophut)
+  x73IEW0fOo0: [9.573, 100.065], // Floating Lotus Big Buddha
+  "6MMXJrzT5c0": [9.533, 100.062], // Henry Africa's Bar (Chaweng)
+  DwKCna1mumk: [9.545, 100.061], // Hush Bar (Soi Green Mango)
+  UNbOvsRAx9U: [9.545, 100.061], // Punch Machine (Soi Green Mango)
+  yFgVmioYkys: [9.545, 100.061], // Soi Green Mango (Chaweng)
+  bbBGNNPu0rg: [9.573, 100.061], // The Shack, Fisherman's Village
+  OBJ5Q0lWbqk: [9.533, 100.062], // Tropical Murphy's Irish Pub
+  RiSXbSQmTyw: [9.468, 100.053], // Villa Tao, Lamai
+  // Bangkok, Thailand
+  a_bUVExv_Cg: [13.751, 100.54], // Petchaburi Road
+  UemFRPrl1hk: [13.738, 100.56], // Sukhumvit Road
+  Q71sLS8h9a4: [13.738, 100.56], // Sukhumvit Road
+  // Duluth / North Shore, Minnesota, USA
+  _L0u39B732I: [46.722, -92.104], // AMI Connors Point
+  EbVlhVeD3jA: [46.78, -92.098], // Bayfront
+  m2wWzo9GmwY: [46.78, -92.09], // Beach
+  "36MiI7NltHk": [46.779, -92.093], // Aerial Lift Bridge
+  E0YlMI4P8Fw: [46.75, -92.11], // Cargo Connect
+  "05WivhRmKq4": [46.77, -92.1], // Harbor
+  bBubIPZYVt0: [46.77, -92.1], // Harbor Plaza / GLA
+  DzJb26edNjs: [46.79, -92.1], // Hillside
+  c1kfkIoF0k0: [46.766, -92.108], // Pier B
+  zTVWJ3Mc0Ag: [47.288, -91.257], // Silver Bay Marina
+  ZXlXNf_w5Lw: [46.779, -92.089], // South Pier Lighthouse
+  "9EnmgL3fXW8": [47.2, -91.367], // Split Rock Lighthouse
+  rCec9HDbFwA: [47.023, -91.671], // Two Harbors Depot
+  mpMdJJjw59E: [46.75, -92.12], // Western Harbor
+  sThx7mQM3Uc: [46.708, -91.995], // Wisconsin Point
+  HPS48TMmNag: [46.779, -92.091], // canal
+  nCf7X2cPDAY: [46.779, -92.089], // lighthouse
+  Yw8CZCEOdXE: [45.885, -95.377], // Big Ole Cam, Alexandria MN
+  zKDNVIGoOSQ: [40.758, -73.985], // Manhattan rooftop, NYC
+  // Calgary, Alberta, Canada
+  xsRDTfuksyI: [51.038, -114.07], // Central Memorial Park
+  MwcqP3ta6RI: [51.048, -114.066], // Downtown
+  // Japan (Kyoto / Saga-Arashiyama / Tokyo / Nagasaki)
+  ldO0Eqoomms: [35.028, 135.678], // Daikakuji Temple
+  hy7sPwngWNQ: [33.852, 132.786], // Dogo Onsen, Matsuyama
+  Onyb8uHQV5Y: [34.967, 135.773], // Fushimi-Inari Taisha
+  J3xHBUgWRqc: [35.003, 135.775], // Hanamikoji Street, Gion
+  KHglGodzQ9g: [35.031, 135.735], // Kitano-Tenmangu Shrine
+  v9rQqa_VTEY: [34.986, 135.758], // Kyoto Station Bus Terminal
+  CO_ZjH6N7RE: [34.985, 135.759], // Kyoto Station Hachijo Taxi
+  zNahac5x0Tw: [32.916, 129.914], // Nagasaki Airport
+  "niQh-vFZBs4": [35.0, 135.78], // Nene no michi, Higashiyama
+  VqTF7RQfRTc: [35.66, 139.72], // Nishiazabu, Tokyo
+  qZ2ghbe3zc0: [35.005, 135.765], // Nishiki Market
+  S6IkZhhwG4A: [35.027, 135.794], // Philosopher's Path
+  "Qm4X_oY-9YM": [35.021, 135.667], // Saga-Toriimoto
+  "Op-lf2NRMzs": [35.017, 135.671], // Arashiyama Bamboo Forest
+  jqtsC5BYlIk: [35.013, 135.678], // Togetsukyo bridge
+  "4Za-6AXfu4w": [35.024, 135.673], // Seiryoji Temple
+  "1Xm5bjdI5hU": [35.671, 139.764], // Sukiyabashi crossing, Ginza
+  // European cities
+  "4DjwrvoTKwk": [41.378, 2.192], // Barcelona - Beach
+  IRqboacDNFg: [52.521, 13.413], // Berlin - Alexanderplatz
+  xFdvZ4eGzPg: [48.14, 17.117], // Bratislava - Danube
+  LSPN10FbR3U: [40.42, -3.705], // Madrid - Gran Via
+  "4CaHlfpGlAI": [40.417, -3.703], // Madrid - Puerta del Sol
+  dsoM6TYIkOI: [45.464, 9.19], // Milan - Duomo
+  KxWuwC7R5kY: [48.137, 11.575], // Munich - Marienplatz
+  LO2Fvujwc8M: [40.852, 14.268], // Naples
+  asO_10T0k2k: [43.7, 7.265], // Nice - City View
+  YAdNYoRY0Cw: [43.694, 7.259], // Nice - Promenade des Anglais
+  UMuEooW0iAQ: [48.858, 2.294], // Paris - Eiffel Tower
+  OzYp4NRZlwQ: [48.861, 2.336], // Paris - Louvre
+  tmlE1ct0cYk: [50.086, 14.411], // Prague - Charles Bridge
+  sspBOJIrNzU: [50.088, 14.42], // Prague - City View
+  "89d3tEaqImM": [41.89, 12.492], // Rome - Colosseum
+  "mt7uE-n0YPI": [45.44, 12.328], // Venice - Grand Canal
+  // Middle East
+  qJf4NqPKLjI: [33.893, 35.501], // Beirut Skyline
+  "77akujLn4k8": [31.777, 35.234], // Jerusalem Western Wall
+  u_4FJ4M7gGE: [31.5, 34.9], // Barn Owl (Israel), country-level
+  // United Kingdom
+  "1FsH5EeOppg": [52.06, -1.334], // Banbury Station
+  BnIq_jumCl8: [54.148, -2.297], // Horton-in-Ribblesdale
+  pwKtRjDAXik: [54.148, -2.297], // Horton-in-Ribblesdale Quarry
+  oiLG19R9PmE: [54.968, -1.617], // Newcastle Central Station
+  t65TCpcJOPQ: [53.089, -2.433], // Crewe
+  R1P9v9bEtuk: [50.735, -1.163], // Ryde Pier, Isle of Wight
+  ug3AO8rn0IE: [50.545, -3.5], // Teign Estuary, Teignmouth
+  vByZX49lCic: [53.958, -1.093], // York
+  ZC7HiaMkmlU: [53.09, -2.4357], // Railcam UK Sampler (anchored at Crewe, Railcam's hub)
+  // Austria (Semmering / Wechsel ski area)
+  "T-NTOEpqx9I": [47.605, 16.004], // Kirchberg am Wechsel
+  ypcVXc9EEb8: [47.598, 15.96], // Kirchberg - Steyersberger Schwaig
+  _klXKK3kyMY: [47.636, 15.828], // Semmering - Panoramahotel Wagner
+  Npz21TdGN7w: [47.633, 15.833], // Semmering - Passhoehe
+  "5stfSF-G6kI": [47.635, 15.826], // Semmering - Sporthotel
+  "1Wyfd_ytFQk": [47.552, 15.947], // Wexlarena Corona Coaster
+  "eJs-IowPqxM": [47.552, 15.947], // Wexlarena St. Corona
+  vS9fLLaMNLI: [47.552, 15.947], // Wexlarena St. Corona
+  // Australia
+  sCPKGMfHGQA: [-27.443, 153.038], // Bowen Hills, Brisbane
+  xW1YcHVp7Ko: [-34.726, 135.87], // Port Lincoln OspreyCam
+  // FalconCam Project, Charles Sturt University Orange Campus, NSW, Australia
+  yv2RtoIMNzA: [-33.3068, 149.1012], // Box Camera FalconCam
+  VuZaWzhXSAI: [-33.3068, 149.1012], // Ledge Camera FalconCam
+  rQxrTGgNu4M: [-33.3068, 149.1012], // Tower cam FalconCam
+  // Monterey Bay Aquarium, California, USA (tank cams, one venue)
+  cUoet3dmRU4: [36.618, -121.902], // Aviary
+  m1XcdxjVGos: [36.618, -121.902], // Jelly
+  w3LjpFhySTg: [36.618, -121.902], // Kelp Forest
+  "fVa6-zCBR7A": [36.618, -121.902], // Monterey Bay
+  "7N9-FODmuBA": [36.618, -121.902], // Moon Jelly
+  n_GpVsz4nHU: [36.618, -121.902], // Open Sea
+  "abbR-Ttd-cA": [36.618, -121.902], // Sea Otter
+  dzmJXWmA2EM: [36.618, -121.902], // Spider Crab
+  tEtg5Kg3voQ: [36.618, -121.902], // Shark
+  // Brazil
+  "0qhqrRm2biY": [-23.007, -47.134], // VCP - Viracopos Airport, Campinas
+};
+
+/**
+ * Traffic (Osiris) cams, a third source kept apart from the other two tables
+ * because these are LIVE pointers, not stored feeds. `feed_kind` records how the
+ * detail page renders the cam (jpg/mp4/hls/link) and `live_url` is the URL it
+ * embeds or links. The `ss_*` columns still hold a baked card thumbnail so the
+ * gallery and image pipeline work exactly like the other sources; they are
+ * nullable because a snapshot (JPEG fetch or ffmpeg frame) can fail and `link`
+ * cams have none. `ss_hash` is a sha256 hex string, like the youtube table, so a
+ * re-run that captures a fresher frame registers as a changed screenshot. One row
+ * per cam, keyed on the namespaced `id` (unique in the dump).
+ */
+const TRAFFIC_SCHEMA = `
+CREATE TABLE IF NOT EXISTS traffic (
+  id            TEXT    NOT NULL PRIMARY KEY,
+  source        TEXT,
+  name          TEXT,
+  city          TEXT,
+  country       TEXT,
+  lat           REAL,
+  lng           REAL,
+  feed_kind     TEXT    NOT NULL,   -- 'jpg' | 'mp4' | 'hls' | 'link'
+  live_url      TEXT    NOT NULL,   -- URL the detail page embeds (jpg/mp4/hls) or links (link)
+  external_url  TEXT,               -- optional human-facing viewer page
+  ss_mime       TEXT,               -- nullable: a snapshot can fail
+  ss_hash       TEXT,               -- sha256 hex of the baked thumbnail bytes
+  ss_base64     TEXT,               -- nullable
+  raw_json      TEXT    NOT NULL,   -- the original camera object
+  first_seen    TEXT    NOT NULL DEFAULT (datetime('now')),
+  last_seen     TEXT    NOT NULL DEFAULT (datetime('now'))
+) STRICT;
+`;
+
+/**
+ * Traffic insert columns, in order. Excludes the generated `first_seen` (kept on
+ * conflict) and `last_seen` (set explicitly to datetime('now')), mirroring how
+ * COLUMNS and YT_COLUMNS treat their tables.
+ */
+const TRAFFIC_COLUMNS = [
+  "id", "source", "name", "city", "country", "lat", "lng",
+  "feed_kind", "live_url", "external_url",
+  "ss_mime", "ss_hash", "ss_base64", "raw_json",
 ] as const;
 
 /** IPs we've removed and never want to ingest again. Keyed on IP only (every port). */
@@ -208,6 +403,8 @@ export function openDb(path = DB_PATH): Database {
   db.run(SCHEMA);
   migrate(db);
   db.run(YOUTUBE_SCHEMA);
+  db.run(YT_GEO_SCHEMA);
+  db.run(TRAFFIC_SCHEMA);
   db.run(BLACKLIST_SCHEMA);
   db.run(HOST_BLACKLIST_SCHEMA);
   db.run(IP_TAGS_SCHEMA);
@@ -215,6 +412,7 @@ export function openDb(path = DB_PATH): Database {
   seedHostBlacklist(db);
   seedIpTags(db);
   seedFeatured(db);
+  seedYtGeo(db);
   return db;
 }
 
@@ -367,6 +565,101 @@ export function allYtRows(db: Database): StoredYtRow[] {
          video_id`,
     )
     .all() as StoredYtRow[];
+}
+
+// ── YouTube geo (manual coordinates) ────────────────────────────────────────
+
+/**
+ * Populate yt_geo from YT_GEO_SEED, but only on a fresh (empty) table. Idempotent:
+ * once the table holds any row this is a no-op, so it never re-adds a coord removed
+ * by hand. Mirrors seedIpTags / seedFeatured.
+ */
+export function seedYtGeo(db: Database): void {
+  const { c } = db.query("SELECT COUNT(*) AS c FROM yt_geo").get() as { c: number };
+  if (c > 0) return;
+  const stmt = db.query("INSERT OR IGNORE INTO yt_geo (video_id, lat, lng) VALUES (?, ?, ?)");
+  db.transaction((seed: Readonly<Record<string, readonly [number, number]>>) => {
+    for (const [id, [lat, lng]] of Object.entries(seed)) stmt.run(id, lat, lng);
+  })(YT_GEO_SEED);
+}
+
+/**
+ * Every stream's manual coordinates as a map of video_id -> {lat, lng}, loaded once
+ * for a build. Videos with no assigned coord are absent (the build gives them no map
+ * dot). Companion to loadIpTags.
+ */
+export function loadYtGeo(db: Database): Map<string, { lat: number; lng: number }> {
+  const rows = db.query("SELECT video_id, lat, lng FROM yt_geo").all() as { video_id: string; lat: number; lng: number }[];
+  const map = new Map<string, { lat: number; lng: number }>();
+  for (const r of rows) map.set(r.video_id, { lat: r.lat, lng: r.lng });
+  return map;
+}
+
+/** Set (or replace) a stream's coordinates. Upsert, so re-running `bun run geo` on the same id never dupes a row. */
+export function setYtGeo(db: Database, videoId: string, lat: number, lng: number): void {
+  db.query(
+    `INSERT INTO yt_geo (video_id, lat, lng) VALUES (?, ?, ?)
+     ON CONFLICT(video_id) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, added_at = datetime('now')`,
+  ).run(videoId, lat, lng);
+}
+
+// ── Traffic (Osiris) ────────────────────────────────────────────────────────
+
+/**
+ * Build a transactional bulk upserter for the `traffic` table. Inserts new `id`
+ * rows and refreshes existing ones (metadata + thumbnail + last_seen), preserving
+ * the original first_seen. Returns a tally of added / updated / changed rows.
+ * Mirrors makeYtInserter; `changed` counts refreshes whose thumbnail hash differed
+ * (a genuinely fresher frame).
+ */
+export function makeTrafficInserter(db: Database): (rows: TrafficRow[]) => InsertResult {
+  const placeholders = TRAFFIC_COLUMNS.map((c) => `$${c}`).join(", ");
+  const updates = TRAFFIC_COLUMNS
+    .filter((c) => c !== "id")
+    .map((c) => `${c} = excluded.${c}`)
+    .join(", ");
+  const stmt = db.query(
+    `INSERT INTO traffic (${TRAFFIC_COLUMNS.join(", ")}, last_seen)
+     VALUES (${placeholders}, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET ${updates}, last_seen = excluded.last_seen`,
+  );
+  // ON CONFLICT DO UPDATE reports changes>0 for both inserts and updates, so peek
+  // at the prior screenshot hash to tell a new row from a refreshed one.
+  const prior = db.query("SELECT ss_hash AS h FROM traffic WHERE id = ?");
+  return db.transaction((rows: TrafficRow[]): InsertResult => {
+    let added = 0;
+    let updated = 0;
+    let changed = 0;
+    for (const row of rows) {
+      const before = prior.get(row.id) as { h: string | null } | null;
+      stmt.run(row);
+      if (before == null) {
+        added++;
+      } else {
+        updated++;
+        if (before.h !== row.ss_hash) changed++;
+      }
+    }
+    return { added, updated, changed };
+  });
+}
+
+export function countTrafficRows(db: Database): number {
+  const row = db.query("SELECT COUNT(*) AS c FROM traffic").get() as { c: number };
+  return row.c;
+}
+
+/**
+ * Every traffic row. Cams with a baked thumbnail sort first so the gallery leads
+ * with working previews (a dead/blocked feed that captured no still sinks to the
+ * back rather than dominating page 1); within each group, ordered by country then
+ * source then name for a stable, browsable order. The gallery never groups rows
+ * (one card per cam), so this order is exactly the card order.
+ */
+export function allTrafficRows(db: Database): StoredTrafficRow[] {
+  return db
+    .query("SELECT * FROM traffic ORDER BY (ss_base64 IS NULL), country, source, name, id")
+    .all() as StoredTrafficRow[];
 }
 
 /** True when any stored camera has this exact IP (any port). */

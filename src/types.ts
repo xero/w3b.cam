@@ -151,3 +151,76 @@ export type YtRow = {
 
 /** A youtube row as read back from the DB (adds the generated columns). */
 export type StoredYtRow = YtRow & { first_seen: string; last_seen: string };
+
+// ── Traffic (Osiris) ───────────────────────────────────────────────────────────
+// A third source: public/OSINT cameras consolidated from the Osiris project, kept
+// in their own `traffic` table. Unlike the other two sources these are LIVE
+// pointers (auto-updating JPEG snapshots, MP4/HLS streams, third-party embeds)
+// rather than stored image bytes. Hybrid rendering: a still is snapshotted at
+// ingest for the gallery card (ss_* columns, exactly like the other sources), and
+// the live feed itself is embedded only on the detail page via `live_url`/`feed_kind`.
+
+/**
+ * How a traffic cam is rendered, derived once at ingest (see classify in
+ * traffic-source.ts). `jpg` auto-refreshes an <img>; `mp4`/`hls` embed a <video>
+ * on the detail page. The traffic table holds only these embeddable feeds — cams
+ * that need auth headers, point at a viewer page, or are third-party embeds are
+ * classified out (YouTube ones are routed to the `youtube` table instead; see
+ * traffic.ts), so there is no "offsite link" kind here.
+ */
+export type FeedKind = "jpg" | "mp4" | "hls";
+
+/** One camera object from the Osiris JSON dump (`cameras[]`). Everything but `id` is optional/nullable at the edge. */
+export interface OsirisCamera {
+  id: string;
+  source?: string | null;
+  country?: string | null;
+  city?: string | null;
+  name?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  /** Direct snapshot URL (usually a JPEG); may instead be a viewer page or auth-gated endpoint. */
+  feed_url?: string | null;
+  /** Live video/stream URL, paired with `stream_type`. */
+  stream_url?: string | null;
+  /** "hls" | "mp4" | "iframe" | "jpg". */
+  stream_type?: string | null;
+  /** Human-facing viewer page (link-out target). */
+  external_url?: string | null;
+}
+
+/**
+ * A row to INSERT into the `traffic` table. Keys map 1:1 to the insert columns
+ * (an index signature is included so it binds to Bun's named-parameter API).
+ * `ss_hash` is a sha256 hex string (TEXT), like YouTube. `ss_*` hold the baked
+ * card thumbnail (may be null: a snapshot fetch/ffmpeg grab can fail, and `link`
+ * cams have none). `live_url` is the URL the detail page embeds or links.
+ */
+export type TrafficRow = {
+  id: string;
+  source: string | null;
+  name: string | null;
+  city: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+  feed_kind: FeedKind;
+  live_url: string; // embed URL (jpg/mp4/hls) or primary link (link kind)
+  external_url: string | null; // optional human-facing page (view-live link)
+  ss_mime: string | null;
+  ss_hash: string | null; // sha256 hex of the fetched bytes, for change detection
+  ss_base64: string | null;
+  raw_json: string;
+} & Record<string, string | number | null>;
+
+/** A traffic row as read back from the DB (adds the generated columns). */
+export type StoredTrafficRow = TrafficRow & { first_seen: string; last_seen: string };
+
+/** The output of classifying a raw Osiris cam (see traffic-source.ts): how to render it, and the URLs involved. */
+export interface Classified {
+  feed_kind: FeedKind;
+  /** URL the detail page embeds (jpg/mp4/hls) or links (link kind). */
+  live_url: string;
+  /** Optional human-facing viewer page (the "view live" link target). */
+  external_url: string | null;
+}

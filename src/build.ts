@@ -11,25 +11,36 @@ import { existsSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import {
 	ASSETS_DIR,
+	HLS_OUT,
+	HLS_VENDOR_SRC,
 	HTMX_OUT,
 	HTMX_VENDOR_SRC,
 	IMG_DIR,
 	OUT_DIR,
 	PAGE_SIZE,
 	SNIPS_DIR,
+	TRAFFIC_PAGE_SIZE,
 	YT_PAGE_SIZE,
 } from "./config.ts";
-import { allRows, allYtRows, closeDb, loadFeatured, loadIpTags, loadTagCounts, openDb } from "./db.ts";
+import { allRows, allTrafficRows, allYtRows, closeDb, loadFeatured, loadIpTags, loadTagCounts, loadYtGeo, openDb } from "./db.ts";
 import { isBlockedProduct } from "./util.ts";
 import {
 	extFromMime,
 	groupByIp,
+	hostSnippetUrl,
+	hostUrl,
+	mapPageFileName,
+	mapSnippetFileName,
 	pageFileName,
+	project,
 	renderHomeMain,
 	renderHostMain,
 	renderIndexMain,
+	renderMapMain,
 	renderShell,
 	renderTagsMain,
+	renderTrafficDetail,
+	renderTrafficMain,
 	renderYtDetail,
 	renderYtMain,
 	snippetFileName,
@@ -38,11 +49,20 @@ import {
 	tagsPageFileName,
 	tagsSnippetFileName,
 	TITLE,
+	toTrafficCam,
 	toYtStream,
+	trafficDetailSnippetUrl,
+	trafficPageFileName,
+	trafficSnippetFileName,
+	trafficUrl,
+	ytSnippetUrl,
+	ytUrl,
 	type Host,
+	type MapPoint,
+	type TrafficCam,
 	type YtStream,
 } from "./render.ts";
-import type { StoredRow, StoredYtRow } from "./types.ts";
+import type { StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
 
 /**
  * Decode each row's screenshot to a file under out/img/ (deduped by content
@@ -123,6 +143,8 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	let tagsByIp: Map<string, string[]>;
 	let tagCounts: { tag: string; count: number }[];
 	let ytRows: StoredYtRow[];
+	let ytGeo: Map<string, { lat: number; lng: number }>;
+	let trafficRows: StoredTrafficRow[];
 	let featured: { cams: string[]; streams: string[] };
 	try {
 		// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
@@ -131,6 +153,8 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		tagsByIp = loadIpTags(db);
 		tagCounts = loadTagCounts(db);
 		ytRows = allYtRows(db);
+		ytGeo = loadYtGeo(db);
+		trafficRows = allTrafficRows(db);
 		featured = loadFeatured(db);
 	} finally {
 		closeDb(db);
@@ -145,6 +169,14 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		process.exit(1);
 	}
 	await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
+
+	// Vendor hls.js too (fetched on demand by assets/traffic.js when an HLS cam is
+	// viewed). A missing copy only breaks HLS playback, so warn rather than abort.
+	if (await Bun.file(HLS_VENDOR_SRC).exists()) {
+		await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
+	} else {
+		console.warn(`Missing ${HLS_VENDOR_SRC}; HLS traffic cams will fall back to their "View live" link. Run \`bun install\`.`);
+	}
 
 	// Copy static assets (favicons, web manifest) verbatim into out/ root, the
 	// same flat copy the htmx write above does. Guard on the dir so a missing
@@ -211,6 +243,19 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	const ytHeaderText = `${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}`;
 
+	// ── Traffic (Osiris) cams: baked thumbnails + view models ────────────────────────
+	// Same hybrid pipeline as the other sources for the card image (a baked, deduped
+	// thumbnail); the live feed itself is embedded client-side on the detail page.
+	const trafficImgById = await extractImages(
+		trafficRows,
+		(r) => r.id,
+		(r) => r.ss_base64,
+		(r) => r.ss_mime,
+		written,
+	);
+	const trafficCams: TrafficCam[] = trafficRows.map((r) => toTrafficCam(r, trafficImgById.get(r.id) ?? ""));
+	const trafficHeaderText = `${trafficCams.length.toLocaleString()} ${trafficCams.length === 1 ? "cam" : "cams"}`;
+
 	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
 
 	// `hosts` is already newest-first (groupByIp). Streams sort newest-first by
@@ -228,10 +273,27 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		.map((r) => streamByVideo.get(r.video_id))
 		.filter((s): s is YtStream => s !== undefined);
 
+	// Traffic has no featured pins yet (deferred), so the homepage shows its newest.
+	const trafficById = new Map(trafficCams.map((c) => [c.id, c]));
+	const newestTraffic = [...trafficRows]
+		.sort((a, b) => {
+			// Cams with a baked thumbnail first, so the homepage never leads with black tiles.
+			const at = a.ss_base64 ? 0 : 1;
+			const bt = b.ss_base64 ? 0 : 1;
+			if (at !== bt) return at - bt;
+			if (a.first_seen !== b.first_seen) return a.first_seen < b.first_seen ? 1 : -1;
+			return a.id < b.id ? -1 : 1;
+		})
+		.map((r) => trafficById.get(r.id))
+		.filter((c): c is TrafficCam => c !== undefined);
+
 	const homeCams = pickHome(featured.cams, camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
 	const homeStreams = pickHome(featured.streams, streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
-	const homeHeaderText = `${headerText} · ${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}`;
-	await writePage("index.html", "index.html", renderHomeMain(homeCams, homeStreams, { dev }), TITLE, homeHeaderText, { dev });
+	const homeTraffic = newestTraffic.slice(0, HOME_PER_KIND);
+	const homeHeaderText =
+		`${headerText} · ${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}` +
+		` · ${trafficCams.length.toLocaleString()} traffic`;
+	await writePage("index.html", "index.html", renderHomeMain(homeCams, homeStreams, homeTraffic, { dev }), TITLE, homeHeaderText, { dev });
 
 	const ytTotalPages = Math.max(1, Math.ceil(streams.length / YT_PAGE_SIZE));
 	for (let p = 1; p <= ytTotalPages; p++) {
@@ -246,16 +308,56 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		await writePage(`${s.slug}.html`, `${s.slug}.html`, mainInner, `${s.label} | ${TITLE}`, ytHeaderText, { dev });
 	}
 
+	// ── Traffic cams: paginated gallery + per-cam detail pages ────────────────────────
+
+	const trafficTotalPages = Math.max(1, Math.ceil(trafficCams.length / TRAFFIC_PAGE_SIZE));
+	for (let p = 1; p <= trafficTotalPages; p++) {
+		const pageCams = trafficCams.slice((p - 1) * TRAFFIC_PAGE_SIZE, p * TRAFFIC_PAGE_SIZE);
+		const mainInner = renderTrafficMain(pageCams, p, trafficTotalPages);
+		await writePage(trafficPageFileName(p), trafficSnippetFileName(p), mainInner, `traffic | ${TITLE}`, trafficHeaderText, { dev });
+	}
+
+	for (const cam of trafficCams) {
+		const mainInner = renderTrafficDetail(cam);
+		await writePage(`${cam.slug}.html`, `${cam.slug}.html`, mainInner, `${cam.name} | ${TITLE}`, trafficHeaderText, { dev });
+	}
+
 	// ── Tags cloud (unlinked: reachable at /tags.html, not in the nav) ───────────────
 
 	const tagsHeaderText = `${tagCounts.length.toLocaleString()} ${tagCounts.length === 1 ? "tag" : "tags"}`;
 	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts), `tags | ${TITLE}`, tagsHeaderText, { dev });
 
+	// ── World map: a dot per geolocated camera across all three sources ──────────────
+	// Shodan hosts carry coarse geo-IP coords, traffic cams precise ones, and YouTube
+	// streams only whatever we hand-assigned in yt_geo; a source lacking a coord is
+	// simply skipped. Each dot links to that cam's existing detail page.
+	const loc = (...parts: (string | null)[]): string =>
+		parts.filter((v): v is string => !!v && v.trim() !== "").join(", ");
+	const mapPoints: MapPoint[] = [];
+	for (const h of hosts) {
+		if (h.latitude == null || h.longitude == null) continue;
+		const { x, y } = project(h.latitude, h.longitude);
+		mapPoints.push({ x, y, href: hostUrl(h.slug), snip: hostSnippetUrl(h.slug), title: loc(h.city, h.country_name) || h.displayName });
+	}
+	for (const c of trafficCams) {
+		if (c.lat == null || c.lng == null) continue;
+		const { x, y } = project(c.lat, c.lng);
+		mapPoints.push({ x, y, href: trafficUrl(c.slug), snip: trafficDetailSnippetUrl(c.slug), title: loc(c.city, c.country) || c.name });
+	}
+	for (const s of streams) {
+		const g = ytGeo.get(s.videoId);
+		if (!g) continue;
+		const { x, y } = project(g.lat, g.lng);
+		mapPoints.push({ x, y, href: ytUrl(s.slug), snip: ytSnippetUrl(s.slug), title: s.label });
+	}
+	await writePage(mapPageFileName, mapSnippetFileName, renderMapMain(mapPoints, mapPoints.length), `map | ${TITLE}`, homeHeaderText, { dev });
+
 	const images = written.size;
 	console.log(
 		`Wrote ${OUT_DIR}/: homepage + ${hosts.length} host(s) across ${totalPages} cams page(s), ` +
 			`${hosts.length} host page(s), ${streams.length} stream(s) across ${ytTotalPages} streams page(s), ` +
-			`tags page (${tagCounts.length} tag(s)), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
+			`${trafficCams.length} traffic cam(s) across ${trafficTotalPages} traffic page(s), ` +
+			`map (${mapPoints.length.toLocaleString()} dot(s)), tags page (${tagCounts.length} tag(s)), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
 	);
 }
 

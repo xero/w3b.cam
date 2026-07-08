@@ -9,14 +9,17 @@
     "initdb": "bun run src/initdb.ts",
     "scrape": "bun run src/scraper.ts",
     "youtube": "bun run src/youtube.ts",
+    "traffic": "bun run src/traffic.ts",
     "import": "bun run src/import.ts",
     "blacklist": "bun run src/blacklist.ts",
     "unblacklist": "bun run src/unblacklist.ts",
     "reorder": "bun run src/reorder.ts",
     "tag": "bun run src/tag.ts",
+    "geo": "bun run src/geo.ts",
     "feature": "bun run src/feature.ts",
     "purge": "bun run src/purge.ts",
     "sync": "bun run src/sync.ts",
+    "merge": "bun run src/merge.ts",
     "bake": "bun run src/build.ts",
     "serve": "bun run src/serve.ts",
     "dev": "bun run src/dev.ts",
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "hls.js": "^1.6.16",
     "htmx.org": "4.0.0-beta5",
     "typescript": "^5.9.3"
   }
