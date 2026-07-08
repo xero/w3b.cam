@@ -8,7 +8,7 @@ export function mustEnv(name: string): string {
   const value = process.env[name];
   if (!value || value.trim() === "") {
     console.error(`Missing required environment variable: ${name}`);
-    console.error(`Export your Shodan API key, e.g.  export ${name}=xxxxxxxx`);
+    console.error(`Export it, e.g.  export ${name}=xxxxxxxx`);
     process.exit(1);
   }
   return value;

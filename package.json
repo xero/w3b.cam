@@ -8,6 +8,7 @@
   "scripts": {
     "initdb": "bun run src/initdb.ts",
     "scrape": "bun run src/scraper.ts",
+    "youtube": "bun run src/youtube.ts",
     "import": "bun run src/import.ts",
     "blacklist": "bun run src/blacklist.ts",
     "unblacklist": "bun run src/unblacklist.ts",

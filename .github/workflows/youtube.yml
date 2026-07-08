@@ -1,0 +1,67 @@
+name: youtube
+
+# Adds (or refreshes) a single YouTube live stream by URL in the youtube table,
+# persists the updated DB to the db-store release, then rebuilds & deploys the
+# site. The local bulk list (in/youtube.md) is intentionally not committed, so
+# this workflow takes the stream as an argument instead of reading a file.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: YouTube video URL (watch?v=, youtu.be/, or /live/)
+        required: true
+        type: string
+      label:
+        description: Optional display title (falls back to the video's own title)
+        required: false
+        default: ''
+        type: string
+
+# Serialize with every other DB-mutating workflow so runs can't clobber the DB.
+concurrency:
+  group: db-write
+  cancel-in-progress: false
+
+jobs:
+  youtube:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release upload/create (persist the DB)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore DB from release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
+
+      # url/label passed via env (not inline ${{ }}) to avoid shell injection.
+      # The script validates the URL and exits 1 on bad input.
+      - name: Add stream
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          URL: ${{ inputs.url }}
+          LABEL: ${{ inputs.label }}
+        run: bun run youtube --url "$URL" --label "$LABEL"
+
+      - name: Save DB to release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view db-store >/dev/null 2>&1 \
+            || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
+          gh release upload db-store camhunting.sqlite --clobber
+
+  # A new stream changes the streams gallery, so rebuild & deploy.
+  call-build:
+    needs: youtube
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/build.yml

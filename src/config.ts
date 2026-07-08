@@ -9,6 +9,9 @@ export const DB_PATH = "camhunting.sqlite";
 /** Default directory the importer scans for raw Shodan JSON files. */
 export const IN_DIR = "in";
 
+/** Curated list of YouTube live-stream URLs (one `title <url>` per line) the `youtube` command ingests, kept in the import dir alongside the raw JSON inputs. */
+export const YOUTUBE_MD = `${IN_DIR}/youtube.md`;
+
 /** Generated static site: root dir, wiped and recreated on every build. */
 export const OUT_DIR = "out";
 /** htmx snippets: the inner-<main> fragment of every full page, for hx-get swaps. */
@@ -21,6 +24,9 @@ export const HTMX_OUT = `${OUT_DIR}/htmx.min.js`;
 
 /** Host entries shown per index page. */
 export const PAGE_SIZE = 8;
+
+/** YouTube streams shown per gallery page (one card per stream, never grouped). */
+export const YT_PAGE_SIZE = 12;
 
 /** Shodan returns 100 results per search page. */
 export const PER_PAGE = 100;

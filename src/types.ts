@@ -80,3 +80,74 @@ export type CamRow = {
 
 /** A row as read back from the DB (adds the generated + app-managed columns). */
 export type StoredRow = CamRow & { first_seen: string; last_seen: string; preferred: number };
+
+// ── YouTube ──────────────────────────────────────────────────────────────────
+// A second stream source: YouTube live cams, kept in their own `youtube` table.
+// We read only the `snippet` and `liveStreamingDetails` parts of a videos.list
+// item; everything else stays in raw_json. All fields are optional since the API
+// omits them freely (e.g. liveStreamingDetails is absent on a non-live video).
+
+/** One entry of the `snippet.thumbnails` map. */
+export interface YtThumbnail {
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+/** The `snippet` part of a videos.list item (subset we consume). */
+export interface YtSnippet {
+  publishedAt?: string;
+  channelId?: string;
+  title?: string;
+  description?: string;
+  channelTitle?: string;
+  /** "live" | "upcoming" | "none". */
+  liveBroadcastContent?: string;
+  /** Keyed by size: default | medium | high | standard | maxres. */
+  thumbnails?: Record<string, YtThumbnail | undefined>;
+}
+
+/** The `liveStreamingDetails` part of a videos.list item (subset we consume). */
+export interface YtLiveStreamingDetails {
+  actualStartTime?: string;
+  scheduledStartTime?: string;
+}
+
+/** A single item from a videos.list response. */
+export interface YtVideoItem {
+  id?: string;
+  snippet?: YtSnippet;
+  liveStreamingDetails?: YtLiveStreamingDetails;
+}
+
+/** A videos.list response envelope (the fields we read). */
+export interface YtVideoListResponse {
+  items?: YtVideoItem[];
+}
+
+/**
+ * A row to INSERT into the `youtube` table. Keys map 1:1 to the insert columns
+ * (an index signature is included so it binds to Bun's named-parameter API).
+ * `ss_hash` is a sha256 hex string (TEXT), unlike the numeric Shodan hash.
+ */
+export type YtRow = {
+  video_id: string;
+  url: string;
+  label: string | null; // curated title from youtube.md
+  title: string | null; // snippet.title
+  description: string | null;
+  channel_id: string | null;
+  channel_title: string | null;
+  published_at: string | null;
+  live_content: string | null;
+  scheduled_start: string | null;
+  actual_start: string | null;
+  thumbnail_url: string | null;
+  ss_mime: string | null;
+  ss_hash: string | null;
+  ss_base64: string | null;
+  raw_json: string;
+} & Record<string, string | number | null>;
+
+/** A youtube row as read back from the DB (adds the generated columns). */
+export type StoredYtRow = YtRow & { first_seen: string; last_seen: string };

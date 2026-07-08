@@ -3,7 +3,7 @@
 // is HTML-escaped before interpolation, exactly as the original single-page build did.
 
 import { displayParts, escapeHtml, pickDisplayName } from "./util.ts";
-import type { StoredRow } from "./types.ts";
+import type { StoredRow, StoredYtRow } from "./types.ts";
 
 export const TITLE = "w3b.cam";
 export const THEME_COLOR = "#0f1117";
@@ -73,6 +73,26 @@ export const snippetUrl = (p: number): string => `/snips/page${pad(p)}.html`;
 
 export const hostUrl = (slug: string): string => `/${slug}.html`;
 export const hostSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
+
+// YouTube streams live on their own paginated gallery (streams.html, then
+// streams002.html …) with one detail page per video (yt-<id>.html). Same
+// conventions as the index: page 1 is the pretty streams.html, snippets are
+// uniformly numbered.
+
+/** Disk filename of full streams page p (page 1 is streams.html). */
+export const streamsPageFileName = (p: number): string => (p === 1 ? "streams.html" : `streams${pad(p)}.html`);
+/** Pretty URL pushed into history for streams page p. */
+export const streamsPageUrl = (p: number): string => `/${p === 1 ? "streams.html" : `streams${pad(p)}.html`}`;
+/** Disk filename of the snippet for streams page p (uniform, includes page 1). */
+export const streamsSnippetFileName = (p: number): string => `streams${pad(p)}.html`;
+/** hx-get URL of the snippet for streams page p. */
+export const streamsSnippetUrl = (p: number): string => `/snips/streams${pad(p)}.html`;
+
+/** Filename-safe slug for a video's detail page. Ids are already [A-Za-z0-9_-]; this is defensive. */
+export const ytSlug = (id: string): string => `yt-${id.replace(/[^A-Za-z0-9_-]+/g, "")}`;
+
+export const ytUrl = (slug: string): string => `/${slug}.html`;
+export const ytSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
 
 /**
  * Live-view URL for a host:port (external link, opened in a new tab). IPv6 literals
@@ -283,9 +303,9 @@ function btnLayers(label: string): string {
 }
 
 /** Navigable pager entry: a real link (works without JS), styled as a `.btn`. */
-function pageLink(p: number, label: string): string {
+function pageLink(href: string, snip: string, label: string): string {
 	return [
-		`<a class="btn" href="${pageUrl(p)}" hx-get="${snippetUrl(p)}" hx-push-url="${pageUrl(p)}">`,
+		`<a class="btn" href="${href}" hx-get="${snip}" hx-push-url="${href}">`,
 		btnLayers(label),
 		`</a>`,
 	].join("\n");
@@ -301,25 +321,45 @@ function pageCurrent(p: number): string {
 	return [`<button class="btn" aria-current="page" disabled>`, btnLayers(String(p)), `</button>`].join("\n");
 }
 
-/** Numbered pager (`« ‹ 1 … 4 [5] 6 … 77 › »`). Empty when there is only one page. */
-export function renderPager(cur: number, total: number): string {
+/**
+ * Numbered pager (`« ‹ 1 … 4 [5] 6 … 77 › »`), parameterized by the URL builders
+ * so the index and the streams gallery share one implementation. Empty when
+ * there is only one page.
+ */
+function renderPagerWith(
+	cur: number,
+	total: number,
+	urlFor: (p: number) => string,
+	snipFor: (p: number) => string,
+): string {
 	if (total <= 1) return "";
 	const parts: string[] = [];
 	const first = cur > 1;
 	const last = cur < total;
+	const link = (p: number, label: string) => pageLink(urlFor(p), snipFor(p), label);
 
-	parts.push(first ? pageLink(1, "&laquo;") : pageDisabled("&laquo;"));
-	parts.push(first ? pageLink(cur - 1, "&lsaquo;") : pageDisabled("&lsaquo;"));
+	parts.push(first ? link(1, "&laquo;") : pageDisabled("&laquo;"));
+	parts.push(first ? link(cur - 1, "&lsaquo;") : pageDisabled("&lsaquo;"));
 	for (const p of pageWindow(cur, total)) {
 		if (p === "…") parts.push(`<span class="gap">&hellip;</span>`);
 		else if (p === cur) parts.push(pageCurrent(p));
-		else parts.push(pageLink(p, String(p)));
+		else parts.push(link(p, String(p)));
 	}
-	parts.push(last ? pageLink(cur + 1, "&rsaquo;") : pageDisabled("&rsaquo;"));
-	parts.push(last ? pageLink(total, "&raquo;") : pageDisabled("&raquo;"));
+	parts.push(last ? link(cur + 1, "&rsaquo;") : pageDisabled("&rsaquo;"));
+	parts.push(last ? link(total, "&raquo;") : pageDisabled("&raquo;"));
 
 	const items = parts.map((p) => indentBlock(p, 1)).join("\n");
 	return [`<nav class="pager" aria-label="Pagination">`, items, `</nav>`].join("\n");
+}
+
+/** Numbered pager for the index gallery. */
+export function renderPager(cur: number, total: number): string {
+	return renderPagerWith(cur, total, pageUrl, snippetUrl);
+}
+
+/** Numbered pager for the YouTube streams gallery. */
+export function renderStreamsPager(cur: number, total: number): string {
+	return renderPagerWith(cur, total, streamsPageUrl, streamsSnippetUrl);
 }
 
 // ── Index cards ──────────────────────────────────────────────────────────────
@@ -482,6 +522,174 @@ export function renderHostMain(host: Host, opts: RenderOpts = {}): string {
 		`${T(2)}</tbody>`,
 		`${T(1)}</table>`,
 		`${T(1)}<a class="back" href="/" hx-get="${snippetUrl(1)}" hx-push-url="/">&larr; Back to gallery</a>`,
+		`</article>`,
+	].join("\n");
+}
+
+// ── YouTube streams ────────────────────────────────────────────────────────────
+// A second source with its own flat gallery: every stream is its own card (no
+// grouping like the Shodan hosts). Channel grouping surfaces only on a detail
+// page, which links sibling streams sharing a channel_id.
+
+export interface YtStream {
+	videoId: string;
+	slug: string;
+	/** Canonical watch URL (external link). */
+	url: string;
+	/** Display title: the curated youtube.md label, else the API title, else the id. */
+	label: string;
+	channelId: string | null;
+	channelTitle: string | null;
+	/** "live" | "upcoming" | "none" | null. */
+	liveContent: string | null;
+	publishedAt: string | null;
+	scheduledStart: string | null;
+	actualStart: string | null;
+	description: string | null;
+	/** URL of the already-extracted thumbnail file, or "" when none was stored. */
+	thumbHref: string;
+	thumbAlt: string;
+}
+
+/** Map a stored youtube row (plus its extracted image URL) into a view model. */
+export function toYtStream(row: StoredYtRow, thumbHref: string): YtStream {
+	const label = (row.label && row.label.trim()) || (row.title && row.title.trim()) || row.video_id;
+	return {
+		videoId: row.video_id,
+		slug: ytSlug(row.video_id),
+		url: row.url,
+		label,
+		channelId: row.channel_id,
+		channelTitle: row.channel_title,
+		liveContent: row.live_content,
+		publishedAt: row.published_at,
+		scheduledStart: row.scheduled_start,
+		actualStart: row.actual_start,
+		description: row.description,
+		thumbHref,
+		thumbAlt: `Thumbnail for ${label}`,
+	};
+}
+
+/** Corner badge for a stream card: "live" or "upcoming", nothing for offline/unknown. */
+function liveBadge(liveContent: string | null): string {
+	if (liveContent === "live") return `\n${T(2)}<span class="badge live">live</span>`;
+	if (liveContent === "upcoming") return `\n${T(2)}<span class="badge upcoming">upcoming</span>`;
+	return "";
+}
+
+/** Human-readable live status for the detail metadata table. */
+function liveStatusText(liveContent: string | null): string | null {
+	switch (liveContent) {
+		case "live":
+			return "Live now";
+		case "upcoming":
+			return "Upcoming";
+		case "none":
+			return "Offline";
+		default:
+			return null;
+	}
+}
+
+/**
+ * One stream card for the streams gallery. Same shape as a host card (thumbnail
+ * figure with a corner badge, a one-line title, a subtitle line) so both
+ * galleries render identically; here the title is the stream label and the
+ * subtitle is the channel.
+ */
+export function renderYtCard(stream: YtStream): string {
+	const badge = liveBadge(stream.liveContent);
+	const channel = stream.channelTitle
+		? `\n${T(1)}<p class="loc">${escapeHtml(stream.channelTitle)}</p>`
+		: "";
+	return [
+		`<a class="card" href="${ytUrl(stream.slug)}" hx-get="${ytSnippetUrl(stream.slug)}" hx-push-url="${ytUrl(stream.slug)}">`,
+		`${T(1)}<figure role="img" aria-label="${escapeHtml(stream.thumbAlt)}" style="background-image:url('${escapeHtml(stream.thumbHref)}')">${badge}`,
+		`${T(1)}</figure>`,
+		`${T(1)}<h2>`,
+		`${T(2)}<span class="dn-line dn-name">${escapeHtml(stream.label)}</span>`,
+		`${T(1)}</h2>${channel}`,
+		`</a>`,
+	].join("\n");
+}
+
+/** Inner-<main> content for a streams gallery page: the card grid plus the pager. */
+export function renderYtMain(streams: YtStream[], page: number, totalPages: number): string {
+	if (streams.length === 0) {
+		return `<p class="empty">No streams stored yet. Run <code>bun run youtube</code> first.</p>`;
+	}
+	const cards = streams.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
+	const pager = renderStreamsPager(page, totalPages);
+	return [
+		`<section class="gallery">`,
+		cards,
+		`</section>`,
+		...(pager ? [pager] : []),
+	].join("\n");
+}
+
+/** "More from {channel}" section: sibling streams on the same channel, as cards. Empty when there are none. */
+function renderSiblings(stream: YtStream, siblings: YtStream[]): string {
+	const others = siblings.filter((s) => s.videoId !== stream.videoId);
+	if (others.length === 0) return "";
+	const heading = stream.channelTitle ? `More from ${stream.channelTitle}` : "More from this channel";
+	const cards = others.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
+	return [
+		`<section class="siblings">`,
+		`${T(1)}<h3>${escapeHtml(heading)}</h3>`,
+		`${T(1)}<div class="gallery">`,
+		indentBlock(cards, 1),
+		`${T(1)}</div>`,
+		`</section>`,
+	].join("\n");
+}
+
+/**
+ * Inner-<main> content for a stream's detail page: the thumbnail with a "Watch
+ * on YouTube" button, a lean metadata table, then any sibling streams from the
+ * same channel. `siblings` is the full set for this channel (this stream is
+ * filtered out inside renderSiblings).
+ */
+export function renderYtDetail(stream: YtStream, siblings: YtStream[]): string {
+	const media = stream.thumbHref
+		? `${T(2)}<img src="${escapeHtml(stream.thumbHref)}" alt="${escapeHtml(stream.thumbAlt)}" loading="lazy" />`
+		: `${T(2)}<div class="noshot" role="img" aria-label="${escapeHtml(stream.thumbAlt)}">no thumbnail</div>`;
+	const figure = [
+		`${T(1)}<figure class="shot">`,
+		media,
+		`${T(2)}<a class="btn" href="${escapeHtml(stream.url)}" target="_blank" rel="noopener noreferrer">`,
+		indentBlock(btnLayers("Watch on YouTube"), 2),
+		`${T(2)}</a>`,
+		`${T(1)}</figure>`,
+	].join("\n");
+
+	const rows: string[] = [];
+	const push = (label: string, value: string | null | undefined): void => {
+		if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
+	};
+	push("Channel", stream.channelTitle);
+	push("Status", liveStatusText(stream.liveContent));
+	push("Published", stream.publishedAt);
+	push("Scheduled", stream.scheduledStart);
+	push("Started", stream.actualStart);
+	push("Description", stream.description);
+
+	const siblingSection = renderSiblings(stream, siblings);
+
+	return [
+		`<article class="host">`,
+		`${T(1)}<h2>${escapeHtml(stream.label)}</h2>`,
+		`${T(1)}<div class="shots">`,
+		indentBlock(figure, 1),
+		`${T(1)}</div>`,
+		`${T(1)}<table class="meta">`,
+		`${T(2)}<tbody>`,
+		indentBlock(rows.join("\n"), 3),
+		`${T(2)}</tbody>`,
+		`${T(1)}</table>`,
+		...(siblingSection ? [indentBlock(siblingSection, 1)] : []),
+		`${T(1)}<a class="back" href="/streams.html" hx-get="${streamsSnippetUrl(1)}" hx-push-url="/streams.html">&larr; Back to streams</a>`,
 		`</article>`,
 	].join("\n");
 }
@@ -844,6 +1052,54 @@ body > footer {
 	border-top: 1px solid var(--border);
 }
 
+.nav {
+	display: flex;
+	flex-flow: row wrap;
+	gap: 1rem;
+	align-items: baseline;
+
+	& a {
+		color: var(--muted);
+		text-decoration: none;
+	}
+
+	& a:hover,
+	& a:focus-visible {
+		color: var(--accent);
+	}
+}
+
+.badge.live {
+	background: #c0392b;
+}
+
+.badge.upcoming {
+	background: var(--poseidon);
+}
+
+.siblings {
+	display: flex;
+	flex-flow: column nowrap;
+	gap: var(--gap);
+
+	& > h3 {
+		font-size: 1.1rem;
+		font-weight: 600;
+		color: var(--accent);
+	}
+}
+
+.noshot {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20rem;
+	max-width: 100%;
+	aspect-ratio: 4 / 3;
+	background: #000;
+	color: var(--muted);
+}
+
 @media (prefers-color-scheme: light) {
 	:root {
 		--bg:      #f4f6f8;
@@ -872,6 +1128,12 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		.split(" · ")
 		.map((c) => `<span>${escapeHtml(c.trim())}</span>`)
 		.join("");
+	// Header links (brand + nav) live outside <main>, so they can't inherit its
+	// hx-target:inherited / hx-swap:inherited. Without a resolvable target htmx
+	// falls back to a full-page navigation on the href, which loads the whole
+	// document (its own <main> included) and appends it. Set both explicitly so
+	// these links swap the snippet into <main>, exactly like the in-main links.
+	const navAttrs = 'hx-target="main" hx-swap="innerHTML show:top"';
 	return [
 		"<!DOCTYPE html>",
 		'<html lang="en">',
@@ -888,9 +1150,13 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		"\t<body>",
 		"\t\t<header>",
 		`\t\t\t<div class="brand">`,
-		`\t\t\t\t<h1><a href="/" hx-get="${snippetUrl(1)}" hx-push-url="/">${escapeHtml(TITLE)}</a></h1>`,
+		`\t\t\t\t<h1><a href="/" hx-get="${snippetUrl(1)}" ${navAttrs} hx-push-url="/">${escapeHtml(TITLE)}</a></h1>`,
 		`\t\t\t\t<em>internet voyeurism</em>`,
 		`\t\t\t</div>`,
+		`\t\t\t<nav class="nav">`,
+		`\t\t\t\t<a href="/" hx-get="${snippetUrl(1)}" ${navAttrs} hx-push-url="/">cams</a>`,
+		`\t\t\t\t<a href="/streams.html" hx-get="${streamsSnippetUrl(1)}" ${navAttrs} hx-push-url="/streams.html">streams</a>`,
+		`\t\t\t</nav>`,
 		`\t\t\t<p class="count">${counts}</p>`,
 		"\t\t</header>",
 		'\t\t<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">',

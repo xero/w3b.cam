@@ -1,6 +1,6 @@
 import { Database, constants } from "bun:sqlite";
 import { DB_PATH } from "./config.ts";
-import type { CamRow, StoredRow, WebcamMatch } from "./types.ts";
+import type { CamRow, StoredRow, StoredYtRow, WebcamMatch, YtRow } from "./types.ts";
 import { BLOCKED_PRODUCTS } from "./util.ts";
 
 const SCHEMA = `
@@ -46,6 +46,50 @@ const COLUMNS = [
   "domains", "org", "isp", "asn", "os", "product", "country_name",
   "country_code", "city", "region_code", "latitude", "longitude", "tags",
   "ss_mime", "ss_hash", "ss_base64", "raw_json",
+] as const;
+
+/**
+ * YouTube live streams, a second source kept apart from the Shodan `webcams`
+ * table because the metadata is different (video/channel, live status, dates).
+ * One row per video, keyed on `video_id`. Screenshot columns are nullable: a
+ * thumbnail fetch can fail and the stream should still be catalogued. `ss_hash`
+ * is a sha256 hex string, unlike the numeric Shodan hash, so a re-run that pulls
+ * an updated live thumbnail registers as a changed screenshot. `channel_id` is
+ * the grouping key used only to link sibling streams on a detail page; the
+ * gallery lists every row.
+ */
+const YOUTUBE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS youtube (
+  video_id        TEXT    NOT NULL PRIMARY KEY,
+  url             TEXT    NOT NULL,
+  label           TEXT,             -- curated title from youtube.md
+  title           TEXT,             -- snippet.title
+  description     TEXT,             -- snippet.description
+  channel_id      TEXT,             -- grouping key (sibling streams)
+  channel_title   TEXT,
+  published_at    TEXT,             -- snippet.publishedAt
+  live_content    TEXT,             -- snippet.liveBroadcastContent: live|upcoming|none
+  scheduled_start TEXT,             -- liveStreamingDetails.scheduledStartTime
+  actual_start    TEXT,             -- liveStreamingDetails.actualStartTime
+  thumbnail_url   TEXT,             -- the snippet.thumbnails url we fetched
+  ss_mime         TEXT,             -- nullable: a fetch can fail
+  ss_hash         TEXT,             -- sha256 hex of the fetched bytes, for change detection
+  ss_base64       TEXT,             -- nullable
+  raw_json        TEXT    NOT NULL, -- full API item
+  first_seen      TEXT    NOT NULL DEFAULT (datetime('now')),
+  last_seen       TEXT    NOT NULL DEFAULT (datetime('now'))
+) STRICT;
+`;
+
+/**
+ * YouTube insert columns, in order. Excludes the generated `first_seen` (kept on
+ * conflict) and `last_seen` (set explicitly to datetime('now')), mirroring how
+ * COLUMNS treats the webcams table.
+ */
+const YT_COLUMNS = [
+  "video_id", "url", "label", "title", "description", "channel_id",
+  "channel_title", "published_at", "live_content", "scheduled_start",
+  "actual_start", "thumbnail_url", "ss_mime", "ss_hash", "ss_base64", "raw_json",
 ] as const;
 
 /** IPs we've removed and never want to ingest again. Keyed on IP only (every port). */
@@ -131,6 +175,7 @@ export function openDb(path = DB_PATH): Database {
   db.run("PRAGMA busy_timeout = 5000;");
   db.run(SCHEMA);
   migrate(db);
+  db.run(YOUTUBE_SCHEMA);
   db.run(BLACKLIST_SCHEMA);
   db.run(HOST_BLACKLIST_SCHEMA);
   db.run(IP_TAGS_SCHEMA);
@@ -223,6 +268,71 @@ export function allRows(db: Database): StoredRow[] {
   return db
     .query("SELECT * FROM webcams ORDER BY country_name, ip_str, port")
     .all() as StoredRow[];
+}
+
+// ── YouTube ───────────────────────────────────────────────────────────────────
+
+/**
+ * Build a transactional bulk upserter for the `youtube` table. Inserts new
+ * `video_id` rows and refreshes existing ones (metadata + thumbnail + last_seen),
+ * preserving the original first_seen. Returns a tally of added / updated /
+ * changed rows. Mirrors makeInserter; `changed` counts refreshes whose thumbnail
+ * hash differed (a genuinely new frame).
+ */
+export function makeYtInserter(db: Database): (rows: YtRow[]) => InsertResult {
+  const placeholders = YT_COLUMNS.map((c) => `$${c}`).join(", ");
+  const updates = YT_COLUMNS
+    .filter((c) => c !== "video_id")
+    .map((c) => `${c} = excluded.${c}`)
+    .join(", ");
+  const stmt = db.query(
+    `INSERT INTO youtube (${YT_COLUMNS.join(", ")}, last_seen)
+     VALUES (${placeholders}, datetime('now'))
+     ON CONFLICT(video_id) DO UPDATE SET ${updates}, last_seen = excluded.last_seen`,
+  );
+  // ON CONFLICT DO UPDATE reports changes>0 for both inserts and updates, so peek
+  // at the prior screenshot hash to tell a new row from a refreshed one.
+  const prior = db.query("SELECT ss_hash AS h FROM youtube WHERE video_id = ?");
+  return db.transaction((rows: YtRow[]): InsertResult => {
+    let added = 0;
+    let updated = 0;
+    let changed = 0;
+    for (const row of rows) {
+      const before = prior.get(row.video_id) as { h: string | null } | null;
+      stmt.run(row);
+      if (before == null) {
+        added++;
+      } else {
+        updated++;
+        if (before.h !== row.ss_hash) changed++;
+      }
+    }
+    return { added, updated, changed };
+  });
+}
+
+export function countYtRows(db: Database): number {
+  const row = db.query("SELECT COUNT(*) AS c FROM youtube").get() as { c: number };
+  return row.c;
+}
+
+/**
+ * Every YouTube row, ordered so live streams sort first and streams sharing a
+ * channel stay adjacent (then newest-first within a channel). The renderer does
+ * the channel grouping for detail-page siblings; the gallery never collapses
+ * rows, so this order is exactly the card order.
+ */
+export function allYtRows(db: Database): StoredYtRow[] {
+  return db
+    .query(
+      `SELECT * FROM youtube
+       ORDER BY
+         CASE live_content WHEN 'live' THEN 0 WHEN 'upcoming' THEN 1 ELSE 2 END,
+         channel_title,
+         published_at DESC,
+         video_id`,
+    )
+    .all() as StoredYtRow[];
 }
 
 /** True when any stored camera has this exact IP (any port). */

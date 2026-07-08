@@ -1,7 +1,7 @@
 # Shodan Webcam Visualizer
 
 > [!NOTE]
-> A handful of Bun scripts around a local SQLite database. One scrapes webcam screenshots from the Shodan REST API into the database; another bakes a paginated static site from it, and the rest import, curate, and publish the data.
+> A handful of Bun scripts around a local SQLite database. One scrapes webcam screenshots from the Shodan REST API, another catalogs YouTube live cams from a curated list, and a third bakes a paginated static site from it all; the rest import, curate, and publish the data.
 
 ---
 
@@ -27,6 +27,12 @@
 export SHODANTOKEN=your_api_key_here
 ```
 
+To ingest YouTube streams you also need a YouTube Data API v3 key, exported as `YOUTUBE_API_KEY`. It reads public video metadata only; an API key cannot modify a channel (that needs OAuth, which this project never uses). Skip it if you only use the Shodan source.
+
+```sh
+export YOUTUBE_API_KEY=your_api_key_here
+```
+
 ---
 
 ## Setup
@@ -43,7 +49,7 @@ Run `bun typecheck` at any point to type-check the sources with `tsc --noEmit`.
 
 ## Usage
 
-The core pipeline is four commands. Cameras come from two sources: the Shodan API (`scrape`) or raw JSON files you already have (`import`). Both write to the same database, `bake` turns it into a static site, and `serve` hosts that site locally.
+The core pipeline is four commands. Cameras come from two sources: the Shodan API (`scrape`) or raw JSON files you already have (`import`). A separate command, `youtube`, adds YouTube live cams from a curated list. Every source writes to the same database, `bake` turns it into a static site, and `serve` hosts that site locally.
 
 **`bun scrape [--pages N]`.** Fetches `N` search pages (default 1, 100 results per page) and saves new cameras to `camhunting.sqlite`. Re-running is safe; cameras already stored are skipped. Costs 1 query credit per page.
 
@@ -68,6 +74,21 @@ has_screenshot:1 screenshot.label:webcam -screenshot.label:desktop
 ```
 
 That matches hosts with a screenshot labeled as a webcam, excluding desktop captures.
+
+### YouTube streams
+
+**`bun youtube [--limit N]`.** Reads the local list at `in/youtube.md` (one `title <url>` per line, mixing `watch?v=`, `youtu.be/`, and `youtube.com/live/` forms), the list living in the same `in/` dir the importer reads. Both `in/` and `out/` are gitignored, so this list stays on your machine. Fetches each video's metadata and thumbnail from the YouTube Data API and upserts them into a separate `youtube` table keyed on the video id. Re-running refreshes existing streams and picks up updated live thumbnails rather than duplicating them. `--limit N` processes only the first N unique entries for a quick test. Needs `YOUTUBE_API_KEY`.
+
+**`bun youtube --url <url> [--label "Title"]`.** Adds or refreshes a single stream by URL without touching the file. This is how the `youtube` CI workflow ingests one stream at a time, since the bulk list is not committed. `--label` sets the display title; omit it to fall back to the video's own title.
+
+Streams get their own gallery at `/streams.html`, reachable from the header nav. `bake` renders every stream as its own card, and each stream's detail page links the other streams from the same channel.
+
+```sh
+export YOUTUBE_API_KEY=your_api_key_here
+bun youtube
+bun bake
+bun serve
+```
 
 ---
 
@@ -106,7 +127,8 @@ A few details worth knowing:
 - **Removed hosts stay removed.** `bun blacklist <ip-or-hostname>` deletes every matching row and records the entry in a blacklist table; the scraper and importer skip anything listed, so a host you drop never comes back on a later run. An IP matches exactly (every port); a hostname or domain matches itself and any subdomain, so `bun blacklist cloudzy.com` also drops `cam.node.cloudzy.com`. IPs live in a `blacklist` table, hostnames in a `host_blacklist` table. Reverse either with `bun unblacklist <ip-or-hostname>`, then re-run `bun scrape` to fetch the host again. A fresh database starts with a built-in list of blacklisted hostnames; IPs start empty.
 - **You pick a host's card image.** A host seen on several ports has several screenshots, and its gallery card shows the most recent one by default. `bun reorder <ip> <port>` pins one port so its screenshot leads instead, and `bun reorder <ip> --clear` reverts to the default. The pin lives in a `preferred` column that the scraper and importer never overwrite, so it survives later runs. Re-run `bun bake` to rebuild the site.
 - **You can tag a host.** `bun tag <ip> <tag>` attaches a free-form label to an IP, stored in an `ip_tags` table and shown on the host's page. Tags are normalized to lowercase and deduplicated, and a host can carry several. Re-run `bun bake` to rebuild the site.
-- **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory.
+- **YouTube streams live in their own table.** `bun youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in a `youtube` table keyed on the video id, apart from the Shodan `webcams` table because the metadata differs. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams.html`, one card per stream, and each stream's page links the other streams sharing its channel.
+- **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
 - **The site works without JavaScript.** Every index page and per-host page is a real file with plain links, so it stays browsable on its own. When JavaScript is on, htmx intercepts those links and swaps only the page body, which skips reloading the shell and shared assets. Each page is generated in two forms, the full document and a body-only snippet, from a single source string so the two cannot drift.
 
 ---
@@ -127,8 +149,10 @@ src/
   types.ts        screenshot, match, and row interfaces
   util.ts         escaping, screenshot extraction, row mapping
   shodan.ts       client factory and retry/backoff wrapper
+  yt-api.ts       YouTube Data API client, youtube.md parser, thumbnail fetch
   db.ts           schema, open/close, and inserts
   scraper.ts      fetch cameras from the Shodan API, dedupe, store
+  youtube.ts      fetch YouTube live-stream metadata + thumbnails, store
   import.ts       load cameras from raw Shodan JSON files, no API
   blacklist.ts    drop a host and record it so scrapes skip it
   unblacklist.ts  reverse a blacklist entry
@@ -141,25 +165,33 @@ src/
   dev.ts          local dev server with right-click blacklist/reorder/tag
   dev-client/     browser editing UI (js and css), served from source
   sync.ts         pull/push the database to and from the db-store release
+in/                curated inputs (gitignored)
+  youtube.md       YouTube live-stream list, source for `bun youtube`
+  *.json           raw Shodan JSON for `bun import`
 camhunting.sqlite  generated database (gitignored)
 out/               generated site (gitignored)
-  index.html   page 1 of the paginated index
-  page002.html full index pages 2..N
-  <ip>.html    one page per host (dots become hyphens)
-  img/         extracted screenshots
-  snips/       body-only snippets for htmx swaps
-  htmx.min.js  vendored htmx library
+  index.html    page 1 of the paginated index
+  page002.html  full index pages 2..N
+  streams.html  page 1 of the YouTube streams gallery
+  streams002.html  full streams pages 2..N
+  <ip>.html     one page per host (dots become hyphens)
+  yt-<id>.html  one page per YouTube stream
+  img/          extracted screenshots and thumbnails
+  snips/        body-only snippets for htmx swaps
+  htmx.min.js   vendored htmx library
 ```
 
 ---
 
 ## GitHub Actions
 
-Six workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and blacklist, reorder, and tag edits happen from the Actions tab without a local checkout.
+Seven workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, and tag edits happen from the Actions tab without a local checkout.
 
 **`build`.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
 
 **`scrape`.** Runs every six hours (`0 */6 * * *`), or on demand with a page count. It restores the database, fetches new cameras, saves the database, then calls `build`. This is the only workflow that uses the `SHODANTOKEN` secret.
+
+**`youtube`.** Adds or refreshes one stream on demand. Give it a YouTube URL and an optional label; it restores the database, fetches that video's metadata and thumbnail, saves the database, then calls `build`. This is the only workflow that uses the `YOUTUBE_API_KEY` secret, and it installs no extra binaries. The bulk list at `in/youtube.md` is not committed, so ingest many at once locally with `bun youtube` followed by `bun sync --push`.
 
 **`blacklist`.** Takes an IP or a hostname, removes the matching cameras, saves the database, then calls `build` so the site drops them.
 
@@ -171,18 +203,18 @@ Six workflows in `.github/workflows/` run the same commands in CI. The site buil
 
 ### The database store
 
-`camhunting.sqlite` is too large for git (a few hundred MB, and it only grows), so it lives as an asset on a prerelease named `db-store` instead of in the repo. Every workflow that changes the database restores it from that release first and uploads the new copy when it finishes. `build` reads it without saving. All three writing workflows share one concurrency group, so a scheduled scrape and a manual blacklist can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine, which is how edits you make locally reach the site; see [Editing locally](#editing-locally).
+`camhunting.sqlite` is too large for git (a few hundred MB, and it only grows), so it lives as an asset on a prerelease named `db-store` instead of in the repo. Every workflow that changes the database restores it from that release first and uploads the new copy when it finishes. `build` reads it without saving. All the writing workflows share one concurrency group (`db-write`), so a scheduled scrape, the YouTube ingester, and a manual blacklist can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine, which is how edits you make locally reach the site; see [Editing locally](#editing-locally).
 
 ### Running a workflow
 
-Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, and `tag` takes an IP and a label. Invalid input fails the run immediately.
+Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, and `tag` takes an IP and a label. Invalid input fails the run immediately.
 
 ### One-time setup
 
 Before the first run:
 
 1. **Enable Pages.** Settings → Pages → Source = GitHub Actions.
-2. **Add the secret.** Create a repo secret named `SHODANTOKEN`.
+2. **Add the secrets.** Create a repo secret named `SHODANTOKEN`, and `YOUTUBE_API_KEY` too if you want the YouTube ingester.
 3. **Seed the DB store.** Upload your local database from your machine. If you have no database yet, run `bun initdb` first to create a fresh, seeded `camhunting.sqlite`, then upload that.
 
 ```sh
