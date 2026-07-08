@@ -17,12 +17,13 @@ import {
 	SNIPS_DIR,
 	YT_PAGE_SIZE,
 } from "./config.ts";
-import { allRows, allYtRows, closeDb, loadIpTags, openDb } from "./db.ts";
+import { allRows, allYtRows, closeDb, loadFeatured, loadIpTags, openDb } from "./db.ts";
 import { isBlockedProduct } from "./util.ts";
 import {
 	extFromMime,
 	groupByIp,
 	pageFileName,
+	renderHomeMain,
 	renderHostMain,
 	renderIndexMain,
 	renderShell,
@@ -77,6 +78,30 @@ async function writePage(fullName: string, snipName: string, mainInner: string, 
 	await Bun.write(`${SNIPS_DIR}/${snipName}`, `${mainInner}\n`);
 }
 
+/** Cards shown per kind on the homepage: the featured pins first, then the newest fill the rest. */
+const HOME_PER_KIND = 4;
+
+/**
+ * Assemble one homepage row: resolve the featured `refs` against `byRef` (a pin
+ * whose row is gone is skipped), then top up from `newest` until `limit` cards,
+ * never repeating one (`keyOf` dedupes featured vs newest). With two live pins and
+ * `newest` sorted newest-first, this yields the two featured then the two newest.
+ */
+function pickHome<T>(refs: string[], byRef: Map<string, T>, newest: T[], keyOf: (item: T) => string, limit: number): T[] {
+	const picked: T[] = [];
+	const used = new Set<string>();
+	const take = (item: T | undefined): void => {
+		if (!item || picked.length >= limit) return;
+		const k = keyOf(item);
+		if (used.has(k)) return;
+		used.add(k);
+		picked.push(item);
+	};
+	for (const ref of refs) take(byRef.get(ref));
+	for (const item of newest) take(item);
+	return picked;
+}
+
 /**
  * Read the DB and write the paginated static site into out/. `dev` bakes the
  * in-browser editing hooks (data-* attributes on cards/shots) and the dev client
@@ -92,12 +117,14 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	let rows: StoredRow[];
 	let tagsByIp: Map<string, string[]>;
 	let ytRows: StoredYtRow[];
+	let featured: { cams: string[]; streams: string[] };
 	try {
 		// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
 		// that guard can still be in the DB. Never render them, whatever the DB holds.
 		rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
 		tagsByIp = loadIpTags(db);
 		ytRows = allYtRows(db);
+		featured = loadFeatured(db);
 	} finally {
 		closeDb(db);
 	}
@@ -127,7 +154,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	const headerText = `${hosts.length.toLocaleString()} ${hosts.length === 1 ? "host" : "hosts"} · ${rows.length.toLocaleString()} ${rows.length === 1 ? "camera" : "cameras"}`;
 
-	// ── Paginated index (page 1 is index.html; empty DB still yields one index page) ─
+	// ── Paginated cams gallery (page 1 is page001.html; empty DB still yields one page) ─
 
 	const totalPages = Math.max(1, Math.ceil(hosts.length / PAGE_SIZE));
 	for (let p = 1; p <= totalPages; p++) {
@@ -165,6 +192,28 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	const ytHeaderText = `${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}`;
 
+	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
+
+	// `hosts` is already newest-first (groupByIp). Streams sort newest-first by
+	// first_seen (then published_at, then video_id) for a stable "newest" order.
+	const camByIp = new Map(hosts.map((h) => [h.ip, h]));
+	const streamByVideo = new Map(streams.map((s) => [s.videoId, s]));
+	const newestStreams = [...ytRows]
+		.sort((a, b) => {
+			if (a.first_seen !== b.first_seen) return a.first_seen < b.first_seen ? 1 : -1;
+			const ap = a.published_at ?? "";
+			const bp = b.published_at ?? "";
+			if (ap !== bp) return ap < bp ? 1 : -1;
+			return a.video_id < b.video_id ? -1 : 1;
+		})
+		.map((r) => streamByVideo.get(r.video_id))
+		.filter((s): s is YtStream => s !== undefined);
+
+	const homeCams = pickHome(featured.cams, camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
+	const homeStreams = pickHome(featured.streams, streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
+	const homeHeaderText = `${headerText} · ${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}`;
+	await writePage("index.html", "index.html", renderHomeMain(homeCams, homeStreams, { dev }), TITLE, homeHeaderText, { dev });
+
 	const ytTotalPages = Math.max(1, Math.ceil(streams.length / YT_PAGE_SIZE));
 	for (let p = 1; p <= ytTotalPages; p++) {
 		const pageStreams = streams.slice((p - 1) * YT_PAGE_SIZE, p * YT_PAGE_SIZE);
@@ -180,7 +229,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	const images = written.size;
 	console.log(
-		`Wrote ${OUT_DIR}/: ${hosts.length} host(s) across ${totalPages} index page(s), ` +
+		`Wrote ${OUT_DIR}/: homepage + ${hosts.length} host(s) across ${totalPages} cams page(s), ` +
 			`${hosts.length} host page(s), ${streams.length} stream(s) across ${ytTotalPages} streams page(s), ` +
 			`${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
 	);

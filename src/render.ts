@@ -56,19 +56,23 @@ export function hostSlug(ip: string): string {
 }
 
 // ── Page / snippet URL helpers ───────────────────────────────────────────────
-// Root-relative (served at the domain root by src/serve.ts). Page 1 lives at
-// index.html and pushes "/"; snippets are uniformly named so every pager link
-// computes its hx-get with no special case.
+// Root-relative (served at the domain root by src/serve.ts). index.html is the
+// curated homepage (see renderHomeMain), so the cams gallery is uniformly
+// paginated: page 1 is page001.html, matching every other page and its snippet.
 
 const pad = (p: number): string => String(p).padStart(3, "0");
 
-/** Disk filename of full index page p (page 1 is index.html, no page001.html). */
-export const pageFileName = (p: number): string => (p === 1 ? "index.html" : `page${pad(p)}.html`);
-/** Pretty URL pushed into history for index page p. */
-export const pageUrl = (p: number): string => (p === 1 ? "/" : `/page${pad(p)}.html`);
-/** Disk filename of the snippet for index page p (uniform, includes page 1). */
+/** The homepage lives at index.html; "/" and its snippet reference it. */
+export const homeUrl = "/";
+export const homeSnippetUrl = "/snips/index.html";
+
+/** Disk filename of full cams gallery page p (uniform: page001.html, page002.html, …). */
+export const pageFileName = (p: number): string => `page${pad(p)}.html`;
+/** Pretty URL pushed into history for cams gallery page p. */
+export const pageUrl = (p: number): string => `/page${pad(p)}.html`;
+/** Disk filename of the snippet for cams gallery page p (uniform, includes page 1). */
 export const snippetFileName = (p: number): string => `page${pad(p)}.html`;
-/** hx-get URL of the snippet for index page p. */
+/** hx-get URL of the snippet for cams gallery page p. */
 export const snippetUrl = (p: number): string => `/snips/page${pad(p)}.html`;
 
 export const hostUrl = (slug: string): string => `/${slug}.html`;
@@ -454,6 +458,42 @@ export function renderIndexMain(hosts: Host[], page: number, totalPages: number,
 	].join("\n");
 }
 
+// ── Homepage ─────────────────────────────────────────────────────────────────
+
+/**
+ * Inner-<main> for the homepage (index.html): a curated landing page with a cams
+ * section and a streams section, each showing up to four cards — the featured pins
+ * first, then the newest (build.ts assembles the ordering). Reuses the gallery
+ * cards verbatim; a "more" link jumps to the full paginated gallery. An empty
+ * section is dropped, and if both are empty the galleries' "nothing yet" note shows.
+ */
+export function renderHomeMain(cams: Host[], streams: YtStream[], opts: RenderOpts = {}): string {
+	const section = (title: string, cards: string, moreHref: string, moreSnip: string, moreLabel: string): string =>
+		[
+			`<section class="home">`,
+			`${T(1)}<h2 class="section-title">${escapeHtml(title)}</h2>`,
+			`${T(1)}<div class="gallery">`,
+			indentBlock(cards, 1),
+			`${T(1)}</div>`,
+			`${T(1)}<a class="more" href="${moreHref}" hx-get="${moreSnip}" hx-push-url="${moreHref}">${escapeHtml(moreLabel)} &rarr;</a>`,
+			`</section>`,
+		].join("\n");
+
+	const parts: string[] = [];
+	if (cams.length) {
+		const cards = cams.map((h) => indentBlock(renderHostCard(h, opts), 1)).join("\n");
+		parts.push(section("cams", cards, pageUrl(1), snippetUrl(1), "all cams"));
+	}
+	if (streams.length) {
+		const cards = streams.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
+		parts.push(section("streams", cards, streamsPageUrl(1), streamsSnippetUrl(1), "all streams"));
+	}
+	if (parts.length === 0) {
+		return `<p class="empty">Nothing to feature yet. Run <code>bun run scrape</code> or <code>bun run youtube</code> first.</p>`;
+	}
+	return parts.join("\n");
+}
+
 // ── Host page ────────────────────────────────────────────────────────────────
 
 function metaRow(label: string, valueHtml: string): string {
@@ -521,7 +561,7 @@ export function renderHostMain(host: Host, opts: RenderOpts = {}): string {
 		indentBlock(rows.join("\n"), 3),
 		`${T(2)}</tbody>`,
 		`${T(1)}</table>`,
-		`${T(1)}<a class="back" href="/" hx-get="${snippetUrl(1)}" hx-push-url="/">&larr; Back to gallery</a>`,
+		`${T(1)}<a class="back" href="${pageUrl(1)}" hx-get="${snippetUrl(1)}" hx-push-url="${pageUrl(1)}">&larr; Back to gallery</a>`,
 		`</article>`,
 	].join("\n");
 }
@@ -1100,6 +1140,32 @@ body > footer {
 	color: var(--muted);
 }
 
+.home {
+	display: flex;
+	flex-flow: column nowrap;
+	gap: var(--gap);
+	margin-bottom: calc(var(--gap) * 1.5);
+
+	& .section-title {
+		font-size: clamp(1.1rem, 3vw, 1.5rem);
+		font-weight: 600;
+		color: var(--accent);
+		border-bottom: 1px solid var(--border);
+		padding-bottom: 0.35rem;
+	}
+
+	& .more {
+		align-self: flex-start;
+		color: var(--accent);
+		text-decoration: none;
+	}
+
+	& .more:hover,
+	& .more:focus-visible {
+		text-decoration: underline;
+	}
+}
+
 @media (prefers-color-scheme: light) {
 	:root {
 		--bg:      #f4f6f8;
@@ -1150,11 +1216,11 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		"\t<body>",
 		"\t\t<header>",
 		`\t\t\t<div class="brand">`,
-		`\t\t\t\t<h1><a href="/" hx-get="${snippetUrl(1)}" ${navAttrs} hx-push-url="/">${escapeHtml(TITLE)}</a></h1>`,
+		`\t\t\t\t<h1><a href="${homeUrl}" hx-get="${homeSnippetUrl}" ${navAttrs} hx-push-url="${homeUrl}">${escapeHtml(TITLE)}</a></h1>`,
 		`\t\t\t\t<em>internet voyeurism</em>`,
 		`\t\t\t</div>`,
 		`\t\t\t<nav class="nav">`,
-		`\t\t\t\t<a href="/" hx-get="${snippetUrl(1)}" ${navAttrs} hx-push-url="/">cams</a>`,
+		`\t\t\t\t<a href="${pageUrl(1)}" hx-get="${snippetUrl(1)}" ${navAttrs} hx-push-url="${pageUrl(1)}">cams</a>`,
 		`\t\t\t\t<a href="/streams.html" hx-get="${streamsSnippetUrl(1)}" ${navAttrs} hx-push-url="/streams.html">streams</a>`,
 		`\t\t\t</nav>`,
 		`\t\t\t<p class="count">${counts}</p>`,

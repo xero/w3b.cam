@@ -169,6 +169,38 @@ const IP_TAGS_SEED: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/**
+ * The cams and streams pinned to the homepage (index.html). Two slots per kind;
+ * the homepage renders each slot's featured card alongside the two newest of that
+ * kind. `ref` is an `ip_str` when kind='cam' and a `video_id` when kind='stream',
+ * so this one table pins both sources (unlike ip_tags, which is IP-only). Keyed on
+ * (kind, slot) so a slot holds exactly one ref and `setFeatured` upserts in place.
+ */
+const FEATURED_SCHEMA = `
+CREATE TABLE IF NOT EXISTS featured (
+  kind      TEXT    NOT NULL,   -- 'cam' | 'stream'
+  slot      INTEGER NOT NULL,   -- 1-based position within its kind
+  ref       TEXT    NOT NULL,   -- ip_str for cams, video_id for streams
+  added_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (kind, slot)
+) STRICT;
+`;
+
+/** Which source a featured slot points at: an IP (cam) or a YouTube video id (stream). */
+export type FeaturedKind = "cam" | "stream";
+
+/**
+ * Homepage seed applied to `featured` on a fresh database. Like the other seeds it
+ * runs only when the table is empty (see seedFeatured), so a slot re-pointed by hand
+ * (or via `bun run feature`) never reverts.
+ */
+const FEATURED_SEED: readonly { kind: FeaturedKind; slot: number; ref: string }[] = [
+  { kind: "cam", slot: 1, ref: "149.232.130.7" },
+  { kind: "cam", slot: 2, ref: "160.72.56.179" },
+  { kind: "stream", slot: 1, ref: "Yw8CZCEOdXE" },
+  { kind: "stream", slot: 2, ref: "UNbOvsRAx9U" },
+];
+
 export function openDb(path = DB_PATH): Database {
   const db = new Database(path, { create: true, strict: true });
   db.run("PRAGMA journal_mode = WAL;");
@@ -179,8 +211,10 @@ export function openDb(path = DB_PATH): Database {
   db.run(BLACKLIST_SCHEMA);
   db.run(HOST_BLACKLIST_SCHEMA);
   db.run(IP_TAGS_SCHEMA);
+  db.run(FEATURED_SCHEMA);
   seedHostBlacklist(db);
   seedIpTags(db);
+  seedFeatured(db);
   return db;
 }
 
@@ -430,6 +464,53 @@ export function addIpTag(db: Database, ip: string, tag: string): boolean {
 export function distinctTags(db: Database): string[] {
   return (db.query("SELECT DISTINCT tag FROM ip_tags ORDER BY tag").all() as { tag: string }[])
     .map((r) => r.tag);
+}
+
+// ── Featured (homepage pins) ──────────────────────────────────────────────────
+
+/**
+ * Seed the `featured` table from FEATURED_SEED, but only on a fresh (empty) table.
+ * Idempotent: once any slot is set this is a no-op, so a slot re-pointed by hand
+ * never reverts. Mirrors seedIpTags / seedHostBlacklist.
+ */
+export function seedFeatured(db: Database): void {
+  const { c } = db.query("SELECT COUNT(*) AS c FROM featured").get() as { c: number };
+  if (c > 0) return;
+  const stmt = db.query("INSERT OR IGNORE INTO featured (kind, slot, ref) VALUES (?, ?, ?)");
+  db.transaction((seed: readonly { kind: FeaturedKind; slot: number; ref: string }[]) => {
+    for (const s of seed) stmt.run(s.kind, s.slot, s.ref);
+  })(FEATURED_SEED);
+}
+
+/**
+ * The homepage's featured refs, split by kind and ordered by slot: `cams` holds
+ * ip_strs, `streams` holds video_ids. The build resolves each ref against the
+ * current rows (a ref whose row is gone is simply skipped, see build.ts).
+ */
+export function loadFeatured(db: Database): { cams: string[]; streams: string[] } {
+  const rows = db
+    .query("SELECT kind, slot, ref FROM featured ORDER BY kind, slot")
+    .all() as { kind: string; slot: number; ref: string }[];
+  const cams: string[] = [];
+  const streams: string[] = [];
+  for (const r of rows) {
+    if (r.kind === "cam") cams.push(r.ref);
+    else if (r.kind === "stream") streams.push(r.ref);
+  }
+  return { cams, streams };
+}
+
+/** Pin `ref` into (kind, slot), replacing whatever that slot held. Upsert, so re-featuring a slot never dupes a row. */
+export function setFeatured(db: Database, kind: FeaturedKind, slot: number, ref: string): void {
+  db.query(
+    `INSERT INTO featured (kind, slot, ref) VALUES (?, ?, ?)
+     ON CONFLICT(kind, slot) DO UPDATE SET ref = excluded.ref, added_at = datetime('now')`,
+  ).run(kind, slot, ref);
+}
+
+/** True when a stream with this exact video_id is stored. Companion to hasHost. */
+export function hasStream(db: Database, videoId: string): boolean {
+  return db.query("SELECT 1 FROM youtube WHERE video_id = ? LIMIT 1").get(videoId) != null;
 }
 
 /** True when `name` equals, or is a subdomain of, any listed host. Case/dot-insensitive. */

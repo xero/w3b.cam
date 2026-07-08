@@ -14,6 +14,7 @@
     "unblacklist": "bun run src/unblacklist.ts",
     "reorder": "bun run src/reorder.ts",
     "tag": "bun run src/tag.ts",
+    "feature": "bun run src/feature.ts",
     "purge": "bun run src/purge.ts",
     "sync": "bun run src/sync.ts",
     "bake": "bun run src/build.ts",

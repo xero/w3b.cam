@@ -128,6 +128,7 @@ A few details worth knowing:
 - **You pick a host's card image.** A host seen on several ports has several screenshots, and its gallery card shows the most recent one by default. `bun reorder <ip> <port>` pins one port so its screenshot leads instead, and `bun reorder <ip> --clear` reverts to the default. The pin lives in a `preferred` column that the scraper and importer never overwrite, so it survives later runs. Re-run `bun bake` to rebuild the site.
 - **You can tag a host.** `bun tag <ip> <tag>` attaches a free-form label to an IP, stored in an `ip_tags` table and shown on the host's page. Tags are normalized to lowercase and deduplicated, and a host can carry several. Re-run `bun bake` to rebuild the site.
 - **YouTube streams live in their own table.** `bun youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in a `youtube` table keyed on the video id, apart from the Shodan `webcams` table because the metadata differs. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams.html`, one card per stream, and each stream's page links the other streams sharing its channel.
+- **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row and a streams row, each two pinned cards followed by the two newest of that kind. `bun feature <cam|stream> <slot> <ref>` sets one of two slots per kind — an IP for a cam, a video id for a stream — stored in a `featured` table keyed on `(kind, slot)`. A pin whose row is gone is skipped and backfilled from the newest, so the page always fills four and four. The full paginated galleries are unchanged: cams move to `/page001.html`, streams stay at `/streams.html`, both reachable from the header nav. Re-run `bun bake` to rebuild the site.
 - **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
 - **The site works without JavaScript.** Every index page and per-host page is a real file with plain links, so it stays browsable on its own. When JavaScript is on, htmx intercepts those links and swaps only the page body, which skips reloading the shell and shared assets. Each page is generated in two forms, the full document and a body-only snippet, from a single source string so the two cannot drift.
 
@@ -158,6 +159,7 @@ src/
   unblacklist.ts  reverse a blacklist entry
   reorder.ts      pin a host's card image to one port
   tag.ts          attach a free-form label to a host
+  feature.ts      pin a cam or stream to a homepage slot
   purge.ts        remove stored RDP/VNC rows that predate the ingest filter
   render.ts       pure HTML rendering (grouping, pager, pages, shell)
   build.ts        database to static site (orchestrator)
@@ -170,8 +172,9 @@ in/                curated inputs (gitignored)
   *.json           raw Shodan JSON for `bun import`
 camhunting.sqlite  generated database (gitignored)
 out/               generated site (gitignored)
-  index.html    page 1 of the paginated index
-  page002.html  full index pages 2..N
+  index.html    curated homepage (featured + newest cams and streams)
+  page001.html  page 1 of the paginated cams gallery
+  page002.html  full cams pages 2..N
   streams.html  page 1 of the YouTube streams gallery
   streams002.html  full streams pages 2..N
   <ip>.html     one page per host (dots become hyphens)
@@ -185,7 +188,7 @@ out/               generated site (gitignored)
 
 ## GitHub Actions
 
-Seven workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, and tag edits happen from the Actions tab without a local checkout.
+Eight workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, and feature edits happen from the Actions tab without a local checkout.
 
 **`build`.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
 
@@ -201,13 +204,15 @@ Seven workflows in `.github/workflows/` run the same commands in CI. The site bu
 
 **`tag`.** Takes an IP and a tag, attaches the label to the host, saves the database, then calls `build` so the tag appears on the site.
 
+**`feature`.** Takes a kind (cam or stream), a slot (1 or 2), and a ref (an IP for a cam, a video id for a stream), pins it to that homepage slot, saves the database, then calls `build` so the homepage updates.
+
 ### The database store
 
 `camhunting.sqlite` is too large for git (a few hundred MB, and it only grows), so it lives as an asset on a prerelease named `db-store` instead of in the repo. Every workflow that changes the database restores it from that release first and uploads the new copy when it finishes. `build` reads it without saving. All the writing workflows share one concurrency group (`db-write`), so a scheduled scrape, the YouTube ingester, and a manual blacklist can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine, which is how edits you make locally reach the site; see [Editing locally](#editing-locally).
 
 ### Running a workflow
 
-Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, and `tag` takes an IP and a label. Invalid input fails the run immediately.
+Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` takes an IP and a label, and `feature` takes a kind, a slot, and a ref. Invalid input fails the run immediately.
 
 ### One-time setup
 
