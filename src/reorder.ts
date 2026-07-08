@@ -37,7 +37,7 @@ try {
     console.log(`IP:         ${ip}`);
     console.log(`Pin:        ${cleared ? "cleared, reverts to newest screenshot" : "none was set"}`);
     if (!cleared && !hasHost(db, ip)) {
-      console.warn(`⚠ ${ip} isn't in the DB — check for a typo.`);
+      console.warn(`⚠ ${ip} isn't in the DB. Check for a typo.`);
     }
     console.log(`Next:       run \`bun run bake\` to regenerate the site.`);
   } else if (setPreferred(db, ip, port)) {
@@ -47,7 +47,7 @@ try {
     console.log(`Next:       run \`bun run bake\` to regenerate the site.`);
   } else {
     const why = hasHost(db, ip) ? `port ${port} not found for ${ip}` : `${ip} isn't in the DB (typo?)`;
-    console.error(`No stored screenshot for ${ip}:${port} — ${why}. Nothing changed.`);
+    console.error(`No stored screenshot for ${ip}:${port} (${why}). Nothing changed.`);
     failed = true;
   }
 } finally {

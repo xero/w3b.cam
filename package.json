@@ -12,9 +12,12 @@
     "blacklist": "bun run src/blacklist.ts",
     "unblacklist": "bun run src/unblacklist.ts",
     "reorder": "bun run src/reorder.ts",
+    "tag": "bun run src/tag.ts",
     "purge": "bun run src/purge.ts",
+    "sync": "bun run src/sync.ts",
     "bake": "bun run src/build.ts",
     "serve": "bun run src/serve.ts",
+    "dev": "bun run src/dev.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

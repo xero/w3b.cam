@@ -50,61 +50,74 @@ async function extractImages(rows: StoredRow[]): Promise<Map<string, string>> {
 	return byKey;
 }
 
-async function writePage(fullName: string, snipName: string, mainInner: string, title: string, headerText: string): Promise<void> {
-	await Bun.write(`${OUT_DIR}/${fullName}`, renderShell({ title, headerText, mainInner }));
+async function writePage(fullName: string, snipName: string, mainInner: string, title: string, headerText: string, opts: { dev?: boolean } = {}): Promise<void> {
+	await Bun.write(`${OUT_DIR}/${fullName}`, renderShell({ title, headerText, mainInner, dev: opts.dev }));
 	await Bun.write(`${SNIPS_DIR}/${snipName}`, `${mainInner}\n`);
 }
 
-// ── Load ──────────────────────────────────────────────────────────────────────
+/**
+ * Read the DB and write the paginated static site into out/. `dev` bakes the
+ * in-browser editing hooks (data-* attributes on cards/shots) and the dev client
+ * into every page; off (the default) yields the byte-identical production site.
+ * `bun bake` calls this with no options; `bun dev` (src/dev.ts) passes `{ dev: true }`.
+ */
+export async function build(opts: { dev?: boolean } = {}): Promise<void> {
+	const dev = opts.dev ?? false;
 
-const db = openDb();
-let rows: StoredRow[];
-let tagsByIp: Map<string, string[]>;
-try {
-	// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
-	// that guard can still be in the DB. Never render them, whatever the DB holds.
-	rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
-	tagsByIp = loadIpTags(db);
-} finally {
-	closeDb(db);
+	// ── Load ──────────────────────────────────────────────────────────────────────
+
+	const db = openDb();
+	let rows: StoredRow[];
+	let tagsByIp: Map<string, string[]>;
+	try {
+		// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
+		// that guard can still be in the DB. Never render them, whatever the DB holds.
+		rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
+		tagsByIp = loadIpTags(db);
+	} finally {
+		closeDb(db);
+	}
+
+	// ── Wipe and recreate out/ from scratch ─────────────────────────────────────────
+
+	await rm(OUT_DIR, { recursive: true, force: true });
+
+	if (!(await Bun.file(HTMX_VENDOR_SRC).exists())) {
+		console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
+		process.exit(1);
+	}
+	await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
+
+	// ── Build the grouped model ──────────────────────────────────────────────────
+
+	const imgByKey = await extractImages(rows);
+	const imgHref = (row: StoredRow): string => imgByKey.get(`${row.ip_str}:${row.port}`) ?? "";
+	const hosts: Host[] = groupByIp(rows, imgHref, tagsByIp);
+
+	const headerText = `${hosts.length.toLocaleString()} ${hosts.length === 1 ? "host" : "hosts"} · ${rows.length.toLocaleString()} ${rows.length === 1 ? "camera" : "cameras"}`;
+
+	// ── Paginated index (page 1 is index.html; empty DB still yields one index page) ─
+
+	const totalPages = Math.max(1, Math.ceil(hosts.length / PAGE_SIZE));
+	for (let p = 1; p <= totalPages; p++) {
+		const pageHosts = hosts.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+		const mainInner = renderIndexMain(pageHosts, p, totalPages, { dev });
+		await writePage(pageFileName(p), snippetFileName(p), mainInner, TITLE, headerText, { dev });
+	}
+
+	// ── Per-host pages ─────────────────────────────────────────────────────────────
+
+	for (const host of hosts) {
+		const mainInner = renderHostMain(host, { dev });
+		await writePage(`${host.slug}.html`, `${host.slug}.html`, mainInner, `${host.displayName} | ${TITLE}`, headerText, { dev });
+	}
+
+	const images = new Set(imgByKey.values()).size;
+	console.log(
+		`Wrote ${OUT_DIR}/: ${hosts.length} host(s) across ${totalPages} index page(s), ` +
+			`${hosts.length} host page(s), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
+	);
 }
 
-// ── Wipe and recreate out/ from scratch ─────────────────────────────────────────
-
-await rm(OUT_DIR, { recursive: true, force: true });
-
-if (!(await Bun.file(HTMX_VENDOR_SRC).exists())) {
-	console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
-	process.exit(1);
-}
-await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
-
-// ── Build the grouped model ──────────────────────────────────────────────────
-
-const imgByKey = await extractImages(rows);
-const imgHref = (row: StoredRow): string => imgByKey.get(`${row.ip_str}:${row.port}`) ?? "";
-const hosts: Host[] = groupByIp(rows, imgHref, tagsByIp);
-
-const headerText = `${hosts.length.toLocaleString()} ${hosts.length === 1 ? "host" : "hosts"} · ${rows.length.toLocaleString()} ${rows.length === 1 ? "camera" : "cameras"}`;
-
-// ── Paginated index (page 1 is index.html; empty DB still yields one index page) ─
-
-const totalPages = Math.max(1, Math.ceil(hosts.length / PAGE_SIZE));
-for (let p = 1; p <= totalPages; p++) {
-	const pageHosts = hosts.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
-	const mainInner = renderIndexMain(pageHosts, p, totalPages);
-	await writePage(pageFileName(p), snippetFileName(p), mainInner, TITLE, headerText);
-}
-
-// ── Per-host pages ─────────────────────────────────────────────────────────────
-
-for (const host of hosts) {
-	const mainInner = renderHostMain(host);
-	await writePage(`${host.slug}.html`, `${host.slug}.html`, mainInner, `${host.displayName} | ${TITLE}`, headerText);
-}
-
-const images = new Set(imgByKey.values()).size;
-console.log(
-	`Wrote ${OUT_DIR}/: ${hosts.length} host(s) across ${totalPages} index page(s), ` +
-		`${hosts.length} host page(s), ${images} image(s). Run \`bun run serve\`.`,
-);
+// Direct run (`bun run bake` / `bun run src/build.ts`) bakes the production site.
+if (import.meta.main) await build();

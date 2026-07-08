@@ -325,6 +325,15 @@ export function renderPager(cur: number, total: number): string {
 // ── Index cards ──────────────────────────────────────────────────────────────
 
 /**
+ * Rendering toggles. Only `dev` today: it bakes data-* hooks onto cards/shots and
+ * injects the dev client. Threaded as a trailing optional param (default `{}`) so
+ * every production call is unchanged and, with `dev` falsy, output is byte-identical.
+ */
+export interface RenderOpts {
+	dev?: boolean;
+}
+
+/**
  * The `ip:ports` half of a host title, tinted. The `:` separator keeps the default
  * text colour; the ip and ports are coloured. Always present (ports may be empty).
  * Every segment is escaped since these values are attacker-controlled. Shared by
@@ -365,7 +374,7 @@ function renderHostName(host: Host): string {
  * (`ip:ports` then `(hostname)`) so every card occupies the same height even when a
  * host has no hostname; location follows on a third line.
  */
-export function renderHostCard(host: Host): string {
+export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 	const badge =
 		host.count > 1
 			? `\n${T(2)}<span class="badge">${host.count} screenshots</span>`
@@ -375,9 +384,11 @@ export function renderHostCard(host: Host): string {
 		.map(escapeHtml)
 		.join(", ");
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
+	// Dev hook: blacklist/tag act on the IP; reorder is per-screenshot, not per-card.
+	const devAttrs = opts.dev ? ` data-ip="${escapeHtml(host.ip)}"` : "";
 
 	return [
-		`<a class="card" href="${hostUrl(host.slug)}" hx-get="${hostSnippetUrl(host.slug)}" hx-push-url="${hostUrl(host.slug)}">`,
+		`<a class="card" href="${hostUrl(host.slug)}" hx-get="${hostSnippetUrl(host.slug)}" hx-push-url="${hostUrl(host.slug)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(host.thumbAlt)}" style="background-image:url('${escapeHtml(host.thumbHref)}')">${badge}`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
@@ -389,11 +400,11 @@ export function renderHostCard(host: Host): string {
 }
 
 /** Inner-<main> content for an index page: the card grid plus the pager. */
-export function renderIndexMain(hosts: Host[], page: number, totalPages: number): string {
+export function renderIndexMain(hosts: Host[], page: number, totalPages: number, opts: RenderOpts = {}): string {
 	if (hosts.length === 0) {
 		return `<p class="empty">No cameras stored yet. Run <code>bun run scrape</code> first.</p>`;
 	}
-	const cards = hosts.map((h) => indentBlock(renderHostCard(h), 1)).join("\n");
+	const cards = hosts.map((h) => indentBlock(renderHostCard(h, opts), 1)).join("\n");
 	const pager = renderPager(page, totalPages);
 	return [
 		`<section class="gallery">`,
@@ -414,7 +425,7 @@ function metaRow(label: string, valueHtml: string): string {
 	].join("\n");
 }
 
-function shotFigure(shot: Shot): string {
+function shotFigure(shot: Shot, ip: string, opts: RenderOpts = {}): string {
 	const caption = [
 		`Port ${escapeHtml(shot.port)}`,
 		shot.product && shot.product.trim() ? escapeHtml(shot.product) : "",
@@ -422,8 +433,10 @@ function shotFigure(shot: Shot): string {
 	]
 		.filter((s) => s !== "")
 		.join(" &middot; ");
+	// Dev hook: reorder/blacklist/tag act on this exact (ip, port).
+	const devAttrs = opts.dev ? ` data-ip="${escapeHtml(ip)}" data-port="${escapeHtml(shot.port)}"` : "";
 	return [
-		`${T(1)}<figure class="shot">`,
+		`${T(1)}<figure class="shot"${devAttrs}>`,
 		`${T(2)}<img src="${escapeHtml(shot.imgHref)}" alt="${escapeHtml(shot.imgAlt)}" loading="lazy" />`,
 		`${T(2)}<figcaption>${caption}</figcaption>`,
 		`${T(2)}<a class="btn" href="${escapeHtml(shot.liveHref)}" target="_blank" rel="noopener noreferrer">`,
@@ -434,8 +447,8 @@ function shotFigure(shot: Shot): string {
 }
 
 /** Inner-<main> content for a host page: screenshots up top, one shared metadata table. */
-export function renderHostMain(host: Host): string {
-	const shots = host.shots.map(shotFigure).join("\n");
+export function renderHostMain(host: Host, opts: RenderOpts = {}): string {
+	const shots = host.shots.map((s) => shotFigure(s, host.ip, opts)).join("\n");
 
 	const rows: string[] = [];
 	const push = (label: string, value: string | null | undefined): void => {
@@ -849,10 +862,12 @@ export interface ShellOpts {
 	headerText: string;
 	/** Inner-<main> content, the exact same string written as the snippet. */
 	mainInner: string;
+	/** Dev mode: link /__dev/dev.css and load /__dev/dev.js (both served by src/dev.ts). */
+	dev?: boolean;
 }
 
 /** Wrap inner-<main> content in the full HTML document. */
-export function renderShell({ title, headerText, mainInner }: ShellOpts): string {
+export function renderShell({ title, headerText, mainInner, dev = false }: ShellOpts): string {
 	const counts = headerText
 		.split(" · ")
 		.map((c) => `<span>${escapeHtml(c.trim())}</span>`)
@@ -868,6 +883,7 @@ export function renderShell({ title, headerText, mainInner }: ShellOpts): string
 		"\t\t<style>",
 		indentBlock(CSS, 2),
 		"\t\t</style>",
+		...(dev ? ['\t\t<link rel="stylesheet" href="/__dev/dev.css" />'] : []),
 		"\t</head>",
 		"\t<body>",
 		"\t\t<header>",
@@ -881,6 +897,7 @@ export function renderShell({ title, headerText, mainInner }: ShellOpts): string
 		indentBlock(mainInner, 3),
 		"\t\t</main>",
 		'\t\t<script src="/htmx.min.js"></script>',
+		...(dev ? ['\t\t<script src="/__dev/dev.js"></script>'] : []),
 		"\t</body>",
 		"</html>",
 		"",

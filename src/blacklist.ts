@@ -35,7 +35,7 @@ try {
     console.log(`Deleted:    ${changes} row(s)`);
     console.log(`Blacklist:  ${added ? "added" : "already listed"}`);
     if (changes === 0 && added) {
-      console.warn(`⚠ No stored camera matched ${arg} — check for a typo. Recorded anyway so future scrapes skip it.`);
+      console.warn(`⚠ No stored camera matched ${arg}. Check for a typo. Recorded anyway so future scrapes skip it.`);
     }
   } else {
     const deleted = deleteWebcamsByHost(db, arg);
@@ -44,7 +44,7 @@ try {
     console.log(`Deleted:    ${deleted} row(s)`);
     console.log(`Blacklist:  ${added ? "added" : "already listed"}`);
     if (deleted === 0 && added) {
-      console.warn(`⚠ No stored camera matched ${arg} — check for a typo. Recorded anyway so future scrapes skip it.`);
+      console.warn(`⚠ No stored camera matched ${arg}. Check for a typo. Recorded anyway so future scrapes skip it.`);
     }
   }
 } finally {

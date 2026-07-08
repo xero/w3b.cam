@@ -1,0 +1,201 @@
+/* Dev-mode context menu + toast. Loaded only under `bun dev`. Consumes the page's
+   own theme variables (--surface/--border/--text/--muted/--accent/--bg, defined in
+   render.ts), so light/dark themes come for free; fallbacks cover a missing var. */
+
+:root {
+	--dev-z:      2147483000;
+	--dev-radius: 6px;
+	--dev-danger: #c0392b;
+}
+
+.dev-menu {
+	position: fixed;
+	z-index: var(--dev-z);
+	display: flex;
+	flex-flow: column nowrap;
+	min-width: 12rem;
+	max-width: 90vw;
+	padding: 0.35rem;
+	background: var(--surface, #161925);
+	color: var(--text, #c6dabf);
+	border: 1px solid var(--border, #114b5f);
+	border-radius: var(--dev-radius);
+	box-shadow: 0 8px 24px hsl(0deg 0% 0% / 0.45);
+	font-family: var(--font-family, system-ui, sans-serif);
+	font-size: 0.95rem;
+	user-select: none;
+}
+
+.dev-head {
+	padding: 0.3rem 0.5rem 0.4rem;
+	margin-bottom: 0.25rem;
+	color: var(--muted, #8a94a6);
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+	border-bottom: 1px solid var(--border, #114b5f);
+}
+
+.dev-item {
+	display: block;
+	width: 100%;
+	padding: 0.45rem 0.6rem;
+	background: transparent;
+	border: none;
+	border-radius: 4px;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+
+	&:hover,
+	&:focus-visible {
+		background: var(--accent, #1c7293);
+		color: #fff;
+		outline: none;
+	}
+
+	&.danger {
+		color: #e08a8a;
+
+		&:hover,
+		&:focus-visible {
+			background: var(--dev-danger);
+			color: #fff;
+		}
+	}
+}
+
+.dev-msg {
+	padding: 0.25rem 0.5rem 0.5rem;
+	overflow-wrap: anywhere;
+}
+
+.dev-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.4rem;
+	padding: 0.25rem;
+}
+
+.dev-btn {
+	padding: 0.4rem 0.8rem;
+	background: var(--border, #114b5f);
+	border: none;
+	border-radius: 4px;
+	color: var(--text, #c6dabf);
+	font: inherit;
+	cursor: pointer;
+
+	&:hover {
+		filter: brightness(1.15);
+	}
+
+	&.accent {
+		background: var(--accent, #1c7293);
+		color: #fff;
+	}
+
+	&.danger {
+		background: var(--dev-danger);
+		color: #fff;
+	}
+}
+
+.dev-tagform {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.4rem;
+	padding: 0.25rem;
+}
+
+.dev-inputwrap {
+	position: relative;
+	flex: 1 1 auto;
+}
+
+.dev-input {
+	width: 100%;
+	padding: 0.4rem 0.5rem;
+	background: var(--bg, #0f1117);
+	border: 1px solid var(--border, #114b5f);
+	border-radius: 4px;
+	color: var(--text, #c6dabf);
+	font: inherit;
+
+	&:focus-visible {
+		outline: none;
+		border-color: var(--accent, #1c7293);
+	}
+}
+
+.dev-suggest {
+	position: absolute;
+	inset-inline: 0;
+	top: calc(100% + 2px);
+	z-index: 1;
+	display: none;
+	flex-flow: column nowrap;
+	max-height: 12rem;
+	overflow-y: auto;
+	padding: 0.2rem;
+	list-style: none;
+	background: var(--surface, #161925);
+	border: 1px solid var(--border, #114b5f);
+	border-radius: 4px;
+	box-shadow: 0 6px 18px hsl(0deg 0% 0% / 0.4);
+
+	&.show {
+		display: flex;
+	}
+}
+
+.dev-sug {
+	padding: 0.35rem 0.5rem;
+	border-radius: 3px;
+	cursor: pointer;
+	overflow-wrap: anywhere;
+
+	&:hover,
+	&.active {
+		background: var(--accent, #1c7293);
+		color: #fff;
+	}
+}
+
+.dev-toast {
+	position: fixed;
+	right: 1rem;
+	bottom: 1rem;
+	z-index: var(--dev-z);
+	max-width: min(24rem, 90vw);
+	padding: 0.6rem 0.9rem;
+	background: var(--surface, #161925);
+	color: var(--text, #c6dabf);
+	border: 1px solid var(--border, #114b5f);
+	border-left: 3px solid var(--accent, #1c7293);
+	border-radius: 4px;
+	box-shadow: 0 8px 24px hsl(0deg 0% 0% / 0.45);
+	font-family: var(--font-family, system-ui, sans-serif);
+	font-size: 0.9rem;
+	opacity: 0;
+	transform: translateY(0.5rem);
+	transition: opacity 0.18s ease, transform 0.18s ease;
+	pointer-events: none;
+	overflow-wrap: anywhere;
+
+	&.show {
+		opacity: 1;
+		transform: translateY(0);
+	}
+
+	&[data-kind="error"] {
+		border-left-color: var(--dev-danger);
+	}
+}
+
+.card.dev-removing {
+	opacity: 0;
+	transform: scale(0.97);
+	transition: opacity 0.2s ease, transform 0.2s ease;
+	pointer-events: none;
+}

@@ -305,6 +305,23 @@ export function loadIpTags(db: Database): Map<string, string[]> {
   return map;
 }
 
+/**
+ * Add a single tag to an IP, normalized (see normalizeTag). Mirrors the tag CLI's
+ * `INSERT OR IGNORE INTO ip_tags`. Returns true if newly added, false if the IP
+ * already carried that tag (or the tag normalizes to empty).
+ */
+export function addIpTag(db: Database, ip: string, tag: string): boolean {
+  const t = normalizeTag(tag);
+  if (t === "") return false;
+  return db.query("INSERT OR IGNORE INTO ip_tags (ip_str, tag) VALUES (?, ?)").run(ip, t).changes > 0;
+}
+
+/** Every distinct tag name across all IPs, sorted. Feeds the dev-mode tag autocomplete. */
+export function distinctTags(db: Database): string[] {
+  return (db.query("SELECT DISTINCT tag FROM ip_tags ORDER BY tag").all() as { tag: string }[])
+    .map((r) => r.tag);
+}
+
 /** True when `name` equals, or is a subdomain of, any listed host. Case/dot-insensitive. */
 function hostBlocked(name: string, hosts: Set<string>): boolean {
   const n = normalizeHost(name);
