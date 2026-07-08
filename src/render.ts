@@ -98,6 +98,13 @@ export const ytSlug = (id: string): string => `yt-${id.replace(/[^A-Za-z0-9_-]+/
 export const ytUrl = (slug: string): string => `/${slug}.html`;
 export const ytSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
 
+// The tag cloud is a single, unpaginated page. Unlinked from the nav for now
+// (visit /tags.html directly); it just surfaces how the per-IP tagging is going.
+export const tagsPageFileName = "tags.html";
+export const tagsSnippetFileName = "tags.html";
+export const tagsUrl = "/tags.html";
+export const tagsSnippetUrl = "/snips/tags.html";
+
 /**
  * Live-view URL for a host:port (external link, opened in a new tab). IPv6 literals
  * are bracketed; scheme-default ports are dropped for clean URLs. 443 -> https, 554
@@ -734,6 +741,57 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[]): string {
 	].join("\n");
 }
 
+// ── Tags cloud ─────────────────────────────────────────────────────────────────
+// A cloud of every free-form tag applied to hosts (ip_tags), each sized by how
+// many hosts carry it. Ported from the blog's tagCloud(): a linear map from a
+// tag's count to a font-size percentage, biggest count = biggest tag. Unlinked
+// for now and read-only (no per-tag pages yet), so tags render as plain spans
+// rather than links; each carries its exact host count in a title tooltip.
+
+export interface TagCount {
+	tag: string;
+	count: number;
+}
+
+/** Smallest / largest font-size (percent) a tag maps to; the count range spans these. */
+const TAG_MIN_SIZE = 100;
+const TAG_MAX_SIZE = 320;
+
+/**
+ * Inner-<main> content for the tags page: a cloud of every tag, sized linearly
+ * between TAG_MIN_SIZE and TAG_MAX_SIZE by host count. When every tag shares one
+ * count (or there is a single tag) the spread is zero, so it is floored to 1 to
+ * avoid a divide-by-zero and every tag renders at the minimum size. Tags are
+ * attacker-controlled (entered via `bun run tag`), so each name is escaped before
+ * it lands in both the text and the title attribute.
+ */
+export function renderTagsMain(tags: TagCount[]): string {
+	if (tags.length === 0) {
+		return `<p class="empty">No tags yet. Tag a host with <code>bun run tag &lt;ip&gt; &lt;tag&gt;</code>, then re-bake.</p>`;
+	}
+	const counts = tags.map((t) => t.count);
+	const minCount = Math.min(...counts);
+	const spread = Math.max(1, Math.max(...counts) - minCount);
+	const step = (TAG_MAX_SIZE - TAG_MIN_SIZE) / spread;
+
+	const items = tags
+		.map((t) => {
+			const size = Math.round(TAG_MIN_SIZE + (t.count - minCount) * step);
+			const name = escapeHtml(t.tag);
+			const title = `${t.count} ${t.count === 1 ? "host" : "hosts"} tagged ${name}`;
+			return `<li><span style="font-size: ${size}%" title="${title}">${name}</span></li>`;
+		})
+		.join("\n");
+
+	return [
+		`<section class="tagcloud">`,
+		`${T(1)}<ul class="tags">`,
+		indentBlock(items, 2),
+		`${T(1)}</ul>`,
+		`</section>`,
+	].join("\n");
+}
+
 // ── Page shell + CSS ─────────────────────────────────────────────────────────
 
 const CSS = `:root {
@@ -1140,6 +1198,26 @@ body > footer {
 	color: var(--muted);
 }
 
+.tagcloud {
+	border-top: 1px solid var(--accent);
+	padding-top: 10px;
+}
+
+.tags {
+	display: flex;
+	flex-flow: row wrap;
+	align-items: baseline;
+	gap: 0.4rem 1.1rem;
+	list-style: none;
+	line-height: 1.3;
+
+	& span {
+		color: var(--ice);
+		font-variant-numeric: tabular-nums;
+		cursor: default;
+	}
+}
+
 .home {
 	display: flex;
 	flex-flow: column nowrap;
@@ -1208,6 +1286,12 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		'\t\t<meta name="viewport" content="width=device-width, initial-scale=1" />',
 		`\t\t<meta name="theme-color" content="${THEME_COLOR}" />`,
 		`\t\t<title>${escapeHtml(title)}</title>`,
+		'\t\t<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />',
+		'\t\t<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+		'\t\t<link rel="shortcut icon" href="/favicon.ico" />',
+		'\t\t<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />',
+		`\t\t<meta name="apple-mobile-web-app-title" content="${escapeHtml(TITLE)}" />`,
+		'\t\t<link rel="manifest" href="/site.webmanifest" />',
 		"\t\t<style>",
 		indentBlock(CSS, 2),
 		"\t\t</style>",

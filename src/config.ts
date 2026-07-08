@@ -21,6 +21,8 @@ export const IMG_DIR = `${OUT_DIR}/img`;
 /** Vendored htmx library (installed via bun) and its build-time destination. */
 export const HTMX_VENDOR_SRC = "node_modules/htmx.org/dist/htmx.min.js";
 export const HTMX_OUT = `${OUT_DIR}/htmx.min.js`;
+/** Static assets (favicons, web manifest) copied verbatim into out/ root on build. */
+export const ASSETS_DIR = "assets";
 
 /** Host entries shown per index page. */
 export const PAGE_SIZE = 8;

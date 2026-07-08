@@ -466,6 +466,19 @@ export function distinctTags(db: Database): string[] {
     .map((r) => r.tag);
 }
 
+/**
+ * Every distinct tag with how many IPs carry it, ordered by tag name. Since
+ * ip_tags is keyed on (ip_str, tag), a tag can't repeat on one IP, so COUNT(*)
+ * per tag is exactly its host count. Counts every tagged IP in the table, whether
+ * or not that host has stored cameras, so the tag cloud reflects the raw tagging
+ * effort. Feeds the tags-cloud page (see renderTagsMain).
+ */
+export function loadTagCounts(db: Database): { tag: string; count: number }[] {
+  return db
+    .query("SELECT tag, COUNT(*) AS count FROM ip_tags GROUP BY tag ORDER BY tag")
+    .all() as { tag: string; count: number }[];
+}
+
 // ── Featured (homepage pins) ──────────────────────────────────────────────────
 
 /**

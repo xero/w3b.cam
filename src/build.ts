@@ -7,8 +7,10 @@
 // Usage:  bun run bake   (then: bun run serve)
 
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import {
+	ASSETS_DIR,
 	HTMX_OUT,
 	HTMX_VENDOR_SRC,
 	IMG_DIR,
@@ -17,7 +19,7 @@ import {
 	SNIPS_DIR,
 	YT_PAGE_SIZE,
 } from "./config.ts";
-import { allRows, allYtRows, closeDb, loadFeatured, loadIpTags, openDb } from "./db.ts";
+import { allRows, allYtRows, closeDb, loadFeatured, loadIpTags, loadTagCounts, openDb } from "./db.ts";
 import { isBlockedProduct } from "./util.ts";
 import {
 	extFromMime,
@@ -27,11 +29,14 @@ import {
 	renderHostMain,
 	renderIndexMain,
 	renderShell,
+	renderTagsMain,
 	renderYtDetail,
 	renderYtMain,
 	snippetFileName,
 	streamsPageFileName,
 	streamsSnippetFileName,
+	tagsPageFileName,
+	tagsSnippetFileName,
 	TITLE,
 	toYtStream,
 	type Host,
@@ -116,6 +121,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const db = openDb();
 	let rows: StoredRow[];
 	let tagsByIp: Map<string, string[]>;
+	let tagCounts: { tag: string; count: number }[];
 	let ytRows: StoredYtRow[];
 	let featured: { cams: string[]; streams: string[] };
 	try {
@@ -123,6 +129,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		// that guard can still be in the DB. Never render them, whatever the DB holds.
 		rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
 		tagsByIp = loadIpTags(db);
+		tagCounts = loadTagCounts(db);
 		ytRows = allYtRows(db);
 		featured = loadFeatured(db);
 	} finally {
@@ -138,6 +145,18 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		process.exit(1);
 	}
 	await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
+
+	// Copy static assets (favicons, web manifest) verbatim into out/ root, the
+	// same flat copy the htmx write above does. Guard on the dir so a missing
+	// assets/ warns instead of aborting the bake (mirrors the htmx guard).
+	// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
+	if (existsSync(ASSETS_DIR)) {
+		for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
+			if (ent.isFile()) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
+		}
+	} else {
+		console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);
+	}
 
 	// ── Build the grouped model ──────────────────────────────────────────────────
 
@@ -227,11 +246,16 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		await writePage(`${s.slug}.html`, `${s.slug}.html`, mainInner, `${s.label} | ${TITLE}`, ytHeaderText, { dev });
 	}
 
+	// ── Tags cloud (unlinked: reachable at /tags.html, not in the nav) ───────────────
+
+	const tagsHeaderText = `${tagCounts.length.toLocaleString()} ${tagCounts.length === 1 ? "tag" : "tags"}`;
+	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts), `tags | ${TITLE}`, tagsHeaderText, { dev });
+
 	const images = written.size;
 	console.log(
 		`Wrote ${OUT_DIR}/: homepage + ${hosts.length} host(s) across ${totalPages} cams page(s), ` +
 			`${hosts.length} host page(s), ${streams.length} stream(s) across ${ytTotalPages} streams page(s), ` +
-			`${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
+			`tags page (${tagCounts.length} tag(s)), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
 	);
 }
 
