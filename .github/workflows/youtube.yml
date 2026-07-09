@@ -47,7 +47,7 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           URL: ${{ inputs.url }}
           LABEL: ${{ inputs.label }}
-        run: bun run youtube --url "$URL" --label "$LABEL"
+        run: bun run import --youtube --url "$URL" --label "$LABEL"
 
       - name: Save DB to release store
         env:

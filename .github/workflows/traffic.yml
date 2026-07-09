@@ -69,7 +69,7 @@ jobs:
           args=("$FILE")
           if [ -n "$LIMIT" ]; then args+=(--limit "$LIMIT"); fi
           if [ -n "$SOURCE" ]; then args+=(--source "$SOURCE"); fi
-          bun run traffic "${args[@]}"
+          bun run osiris "${args[@]}"
 
       - name: Save DB to release store
         env:

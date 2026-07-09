@@ -507,4 +507,33 @@
 	});
 	window.addEventListener("scroll", closeMenu, true);
 	document.addEventListener("htmx:beforeSwap", closeMenu);
+
+	// ── Import forms (the dev-only import view) ────────────────────────────────────
+	// The nav "import" button hx-gets the form view into <main>, and each type button
+	// swaps a per-type form into #import-form. This submit is delegated on document so
+	// it survives those swaps with no re-binding; the forms carry no hx-*, so we own the
+	// POST, clear the form, and toast exactly like the tag tool.
+
+	function importSummary(type, r) {
+		if (type === "youtube" && r.missing) return "that video wasn't found (deleted or private)";
+		const base = `imported ${r.added} new, ${r.updated} refreshed`;
+		if (type === "shodan" && r.skipped) return `${base}, ${r.skipped} skipped (no screenshot). run \`bun run bake\``;
+		if (r.noThumb) return `${base} (no thumbnail). run \`bun run bake\``;
+		return `${base}. run \`bun run bake\``;
+	}
+
+	document.addEventListener("submit", async (e) => {
+		const form = e.target.closest("form.import-form");
+		if (!form) return; // not ours (the tag form is form.dev-tagform, handled elsewhere)
+		e.preventDefault();
+		const type = form.dataset.importType;
+		const fields = Object.fromEntries(new FormData(form)); // { json } or { url, label }
+		try {
+			const r = await api("/import", "POST", { type, ...fields });
+			form.reset();
+			toast(importSummary(type, r));
+		} catch (err) {
+			toast(`import failed: ${err.message}`, "error");
+		}
+	});
 })();

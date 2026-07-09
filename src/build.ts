@@ -39,6 +39,11 @@ import {
 	renderIndexMain,
 	renderMapMain,
 	renderShell,
+	renderImportMain,
+	renderImportForm,
+	importPageFileName,
+	importSnippetFileName,
+	importFormSnippetFileName,
 	renderTagBrowseMain,
 	renderTagsMain,
 	renderTipsMain,
@@ -67,11 +72,59 @@ import {
 	ytUrl,
 	type Host,
 	type MapPoint,
+	type SiteStats,
 	type TagItem,
 	type TrafficCam,
 	type YtStream,
 } from "./render.ts";
 import type { StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
+
+/** Scrape workflow, read at build time so the site surfaces its own cron cadence. */
+const SCRAPE_WORKFLOW = ".github/workflows/scrape.yml";
+/** Cadence shown when the workflow is missing or its cron is unrecognized. */
+const DEFAULT_INTERVAL = "6 hrs";
+
+/** Build time as "YYYY-MM-DD @ HH:MM" in UTC (the CI bake runs in UTC). */
+function formatBuiltAt(d: Date): string {
+	const p = (n: number): string => String(n).padStart(2, "0");
+	return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} @ ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+// Human cadence from a 5-field cron: a step in the hour field ("0 */6 * * *")
+// yields "6 hrs"; a step in the minute field ("*/30 * * * *") yields "30 min"; a
+// single fixed hour yields "24 hrs". Returns null if unrecognized.
+function cronToInterval(expr: string): string | null {
+	const f = expr.trim().split(/\s+/);
+	const min = f[0];
+	const hour = f[1];
+	if (!min || !hour) return null;
+	if (hour.startsWith("*/")) {
+		const n = Number(hour.slice(2));
+		if (n > 0) return `${n} hr${n === 1 ? "" : "s"}`;
+	}
+	if (hour === "*" && min.startsWith("*/")) {
+		const n = Number(min.slice(2));
+		if (n > 0) return `${n} min`;
+	}
+	if (hour === "*") return "1 hr";
+	if (/^\d+$/.test(hour)) return "24 hrs";
+	return null;
+}
+
+/**
+ * Human refresh cadence derived from the scrape workflow's cron, so the header
+ * self-updates if the schedule changes. Reads the first `cron:` line with a regex
+ * (the repo has no YAML dep) and falls back to the documented six hours.
+ */
+async function readScrapeInterval(): Promise<string> {
+	try {
+		const yml = await Bun.file(SCRAPE_WORKFLOW).text();
+		const expr = yml.match(/cron:\s*['"]([^'"]+)['"]/)?.[1];
+		return (expr && cronToInterval(expr)) || DEFAULT_INTERVAL;
+	} catch {
+		return DEFAULT_INTERVAL;
+	}
+}
 
 /**
  * Decode each row's screenshot to a file under out/img/ (deduped by content
@@ -107,8 +160,8 @@ async function extractImages<T>(
 	return byKey;
 }
 
-async function writePage(fullName: string, snipName: string, mainInner: string, title: string, headerText: string, opts: { dev?: boolean } = {}): Promise<void> {
-	await Bun.write(`${OUT_DIR}/${fullName}`, renderShell({ title, headerText, mainInner, dev: opts.dev }));
+async function writePage(fullName: string, snipName: string, mainInner: string, title: string, stats: SiteStats, opts: { dev?: boolean } = {}): Promise<void> {
+	await Bun.write(`${OUT_DIR}/${fullName}`, renderShell({ title, stats, mainInner, dev: opts.dev }));
 	await Bun.write(`${SNIPS_DIR}/${snipName}`, `${mainInner}\n`);
 }
 
@@ -218,7 +271,15 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const imgHref = (row: StoredRow): string => imgByKey.get(`${row.ip_str}:${row.port}`) ?? "";
 	const hosts: Host[] = groupByIp(rows, imgHref, tagsByIp);
 
-	const headerText = `${hosts.length.toLocaleString()} ${hosts.length === 1 ? "host" : "hosts"} · ${rows.length.toLocaleString()} ${rows.length === 1 ? "camera" : "cameras"}`;
+	// One camera-wide stat block, identical on every page: the combined total across
+	// all three DB sources (cams + streams + traffic), the build time, and the scrape
+	// cadence. streams/trafficCams (built below) are 1:1 maps of ytRows/trafficRows, so
+	// the raw row counts here are the source-of-truth totals.
+	const stats: SiteStats = {
+		discovered: (rows.length + ytRows.length + trafficRows.length).toLocaleString(),
+		updated: formatBuiltAt(new Date()),
+		interval: await readScrapeInterval(),
+	};
 
 	// Deduped tag -> slug map: the single source of truth for tag-browse URLs. Two
 	// distinct tags can slug identically, so a suffix loop keeps their files apart
@@ -241,14 +302,14 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	for (let p = 1; p <= totalPages; p++) {
 		const pageHosts = hosts.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
 		const mainInner = renderIndexMain(pageHosts, p, totalPages, { dev });
-		await writePage(pageFileName(p), snippetFileName(p), mainInner, TITLE, headerText, { dev });
+		await writePage(pageFileName(p), snippetFileName(p), mainInner, TITLE, stats, { dev });
 	}
 
 	// ── Per-host pages ─────────────────────────────────────────────────────────────
 
 	for (const host of hosts) {
 		const mainInner = renderHostMain(host, { dev, slugForTag });
-		await writePage(`${host.slug}.html`, `${host.slug}.html`, mainInner, `${host.displayName} | ${TITLE}`, headerText, { dev });
+		await writePage(`${host.slug}.html`, `${host.slug}.html`, mainInner, `${host.displayName} | ${TITLE}`, stats, { dev });
 	}
 
 	// ── YouTube streams: flat gallery (every stream) + per-video detail pages ────────
@@ -271,8 +332,6 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		else streamsByChannel.set(s.channelId, [s]);
 	}
 
-	const ytHeaderText = `${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}`;
-
 	// ── Traffic (Osiris) cams: baked thumbnails + view models ────────────────────────
 	// Same hybrid pipeline as the other sources for the card image (a baked, deduped
 	// thumbnail); the live feed itself is embedded client-side on the detail page.
@@ -284,7 +343,6 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		written,
 	);
 	const trafficCams: TrafficCam[] = trafficRows.map((r) => toTrafficCam(r, trafficImgById.get(r.id) ?? "", tagsByTraffic.get(r.id) ?? []));
-	const trafficHeaderText = `${trafficCams.length.toLocaleString()} ${trafficCams.length === 1 ? "cam" : "cams"}`;
 
 	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
 
@@ -320,22 +378,19 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const homeCams = pickHome(featured.cams, camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
 	const homeStreams = pickHome(featured.streams, streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
 	const homeTraffic = newestTraffic.slice(0, HOME_PER_KIND);
-	const homeHeaderText =
-		`${headerText} · ${streams.length.toLocaleString()} ${streams.length === 1 ? "stream" : "streams"}` +
-		` · ${trafficCams.length.toLocaleString()} traffic`;
-	await writePage("index.html", "index.html", renderHomeMain(homeCams, homeStreams, homeTraffic, { dev }), TITLE, homeHeaderText, { dev });
+	await writePage("index.html", "index.html", renderHomeMain(homeCams, homeStreams, homeTraffic, { dev }), TITLE, stats, { dev });
 
 	const ytTotalPages = Math.max(1, Math.ceil(streams.length / YT_PAGE_SIZE));
 	for (let p = 1; p <= ytTotalPages; p++) {
 		const pageStreams = streams.slice((p - 1) * YT_PAGE_SIZE, p * YT_PAGE_SIZE);
 		const mainInner = renderYtMain(pageStreams, p, ytTotalPages, { dev });
-		await writePage(streamsPageFileName(p), streamsSnippetFileName(p), mainInner, `streams | ${TITLE}`, ytHeaderText, { dev });
+		await writePage(streamsPageFileName(p), streamsSnippetFileName(p), mainInner, `streams | ${TITLE}`, stats, { dev });
 	}
 
 	for (const s of streams) {
 		const siblings = s.channelId ? (streamsByChannel.get(s.channelId) ?? [s]) : [s];
 		const mainInner = renderYtDetail(s, siblings, { dev, slugForTag });
-		await writePage(`${s.slug}.html`, `${s.slug}.html`, mainInner, `${s.label} | ${TITLE}`, ytHeaderText, { dev });
+		await writePage(`${s.slug}.html`, `${s.slug}.html`, mainInner, `${s.label} | ${TITLE}`, stats, { dev });
 	}
 
 	// ── Traffic cams: paginated gallery + per-cam detail pages ────────────────────────
@@ -344,21 +399,33 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	for (let p = 1; p <= trafficTotalPages; p++) {
 		const pageCams = trafficCams.slice((p - 1) * TRAFFIC_PAGE_SIZE, p * TRAFFIC_PAGE_SIZE);
 		const mainInner = renderTrafficMain(pageCams, p, trafficTotalPages, { dev });
-		await writePage(trafficPageFileName(p), trafficSnippetFileName(p), mainInner, `traffic | ${TITLE}`, trafficHeaderText, { dev });
+		await writePage(trafficPageFileName(p), trafficSnippetFileName(p), mainInner, `traffic | ${TITLE}`, stats, { dev });
 	}
 
 	for (const cam of trafficCams) {
 		const mainInner = renderTrafficDetail(cam, { dev, slugForTag });
-		await writePage(`${cam.slug}.html`, `${cam.slug}.html`, mainInner, `${cam.name} | ${TITLE}`, trafficHeaderText, { dev });
+		await writePage(`${cam.slug}.html`, `${cam.slug}.html`, mainInner, `${cam.name} | ${TITLE}`, stats, { dev });
 	}
 
 	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────
 
-	const tagsHeaderText = `${tagCounts.length.toLocaleString()} ${tagCounts.length === 1 ? "tag" : "tags"}`;
-	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts, slugForTag), `tags | ${TITLE}`, tagsHeaderText, { dev });
+	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts, slugForTag), `tags | ${TITLE}`, stats, { dev });
 
 	// ── Tips: a single static standalone page (content baked from tips.md) ────────────
-	await writePage(tipsPageFileName, tipsSnippetFileName, renderTipsMain(), `tips | ${TITLE}`, headerText, { dev });
+	await writePage(tipsPageFileName, tipsSnippetFileName, renderTipsMain(), `tips | ${TITLE}`, stats, { dev });
+
+	// ── Import (DEV-ONLY): add cams from the browser instead of the CLI ───────────────
+	// Baked only under `bun dev`; a production bake emits none of it, and the nav button
+	// is gated the same way in renderShell. out/ is wiped at the start of every build, so
+	// a stale dev import.* can never leak into a production site. The per-type fragments
+	// are snippet-only (the type buttons hx-get them into #import-form; nothing navigates
+	// to them as a page), so they skip writePage and go straight to SNIPS_DIR.
+	if (dev) {
+		await writePage(importPageFileName, importSnippetFileName, renderImportMain(), `import | ${TITLE}`, stats, { dev });
+		for (const t of ["shodan", "youtube", "mjpeg"] as const) {
+			await Bun.write(`${SNIPS_DIR}/${importFormSnippetFileName(t)}`, `${renderImportForm(t)}\n`);
+		}
+	}
 
 	// ── Tag browse pages: one paginated, blended gallery per tag ─────────────────────
 	// Resolve each tagged (kind, ref) against the in-memory view models via the maps
@@ -379,11 +446,10 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 			...trafficCams.filter((c) => trafficRefs.has(c.id)).map((c): TagItem => ({ kind: "traffic", cam: c })),
 		];
 		const tagTotalPages = Math.max(1, Math.ceil(items.length / TAG_PAGE_SIZE));
-		const tagHeaderText = `#${tag} · ${items.length.toLocaleString()} tagged`;
 		for (let p = 1; p <= tagTotalPages; p++) {
 			const pageItems = items.slice((p - 1) * TAG_PAGE_SIZE, p * TAG_PAGE_SIZE);
 			const mainInner = renderTagBrowseMain(tag, pageItems, p, tagTotalPages, slug, { dev, slugForTag });
-			await writePage(tagBrowsePageFileName(slug, p), tagBrowseSnippetFileName(slug, p), mainInner, `#${tag} | ${TITLE}`, tagHeaderText, { dev });
+			await writePage(tagBrowsePageFileName(slug, p), tagBrowseSnippetFileName(slug, p), mainInner, `#${tag} | ${TITLE}`, stats, { dev });
 			tagPagesWritten++;
 		}
 	}
@@ -411,7 +477,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		const { x, y } = project(g.lat, g.lng);
 		mapPoints.push({ x, y, href: ytUrl(s.slug), snip: ytSnippetUrl(s.slug), title: s.label });
 	}
-	await writePage(mapPageFileName, mapSnippetFileName, renderMapMain(mapPoints, mapPoints.length), `map | ${TITLE}`, homeHeaderText, { dev });
+	await writePage(mapPageFileName, mapSnippetFileName, renderMapMain(mapPoints, mapPoints.length), `map | ${TITLE}`, stats, { dev });
 
 	const images = written.size;
 	console.log(

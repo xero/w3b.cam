@@ -25,6 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release upload/create (persist the DB)
+    # Neutral stop signal: the scraper sets this true only when a new camera or a
+    # changed screenshot actually alters the baked site. A credits-out / nothing-new
+    # run stays green but leaves it false, so call-build (below) skips.
+    outputs:
+      build_needed: ${{ steps.scrape.outputs.build_needed }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -33,18 +38,31 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Cheap credit check first (getApiInfo spends nothing). If we're out of query
+      # credits there's no point downloading the ~375MB DB or scraping, so gate the
+      # heavy steps below on has_credits — the job still exits green (neutral stop).
+      - name: Check Shodan credits
+        id: preflight
+        env:
+          SHODANTOKEN: ${{ secrets.SHODANTOKEN }}
+        run: bun run preflight
+
       - name: Restore DB from release store
+        if: steps.preflight.outputs.has_credits == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
 
       - name: Scrape
+        id: scrape
+        if: steps.preflight.outputs.has_credits == 'true'
         env:
           SHODANTOKEN: ${{ secrets.SHODANTOKEN }}
           PAGES: ${{ inputs.pages || '2' }}
         run: bun run scrape --pages "$PAGES"
 
       - name: Save DB to release store
+        if: steps.preflight.outputs.has_credits == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -53,8 +71,10 @@ jobs:
           gh release upload db-store camhunting.sqlite --clobber
 
   # Rebuild & deploy from the DB we just saved (build re-restores it from the store).
+  # Skipped when the scrape changed nothing, so scheduled no-op runs don't redeploy.
   call-build:
     needs: scrape
+    if: needs.scrape.outputs.build_needed == 'true'
     permissions:
       contents: read
       pages: write

@@ -10,22 +10,23 @@ export const DB_PATH = process.env.DB_PATH ?? "camhunting.sqlite";
 /** Default directory the importer scans for raw Shodan JSON files. */
 export const IN_DIR = "in";
 
-/** Curated list of YouTube live-stream URLs (one `title <url>` per line) the `youtube` command ingests, kept in the import dir alongside the raw JSON inputs. */
+/** Curated list of YouTube live-stream URLs (one `title <url>` per line) `bun import --youtube` ingests, kept in the import dir alongside the raw JSON inputs. */
 export const YOUTUBE_MD = `${IN_DIR}/youtube.md`;
 
 /**
- * Consolidated OSINT camera dump (the Osiris dataset) the `traffic` command
- * ingests: an envelope `{ generated_at, sources, cameras: [...] }`. Kept under the
- * import dir; override with a path argument to `bun run traffic <file>`.
+ * Consolidated OSINT camera dump (the Osiris dataset) the internal `bun run osiris`
+ * command ingests: an envelope `{ generated_at, sources, cameras: [...] }`. Kept
+ * under `in/new/`, deliberately outside the top-level `in/*.json` glob that
+ * `bun import --shodan` scans; override with a path argument to `bun run osiris <file>`.
  */
 export const OSIRIS_JSON = `${IN_DIR}/new/osiris-cameras.json`;
 
 /**
- * Curated MJPEG camera list the `mjpeg` command ingests: one bare URL per line (blank
- * lines and `#` comments skipped, an optional `label ` before the URL kept). Kept
- * under the import dir; override with a path argument to `bun run mjpeg <file>`.
+ * Curated MJPEG camera list `bun import --mjpeg` ingests: one bare URL per line (blank
+ * lines and `#` comments skipped, an optional `label ` before the URL kept). Kept in
+ * the import dir; override with a path argument to `bun import --mjpeg <file>`.
  */
-export const MJPEG_MD = `${IN_DIR}/new/mjpeg.md`;
+export const MJPEG_MD = `${IN_DIR}/mjpeg.md`;
 
 /** Generated static site: root dir, wiped and recreated on every build. */
 export const OUT_DIR = "out";
@@ -46,13 +47,13 @@ export const ASSETS_DIR = "assets";
 export const PAGE_SIZE = 8;
 
 /** YouTube streams shown per gallery page (one card per stream, never grouped). */
-export const YT_PAGE_SIZE = 12;
+export const YT_PAGE_SIZE = 8;
 
 /** Traffic (Osiris) cams shown per gallery page (one card per cam; the curated set is large). */
-export const TRAFFIC_PAGE_SIZE = 24;
+export const TRAFFIC_PAGE_SIZE = 8;
 
 /** Entities shown per tag-browse page (a blended grid of cams, streams, and traffic cards). */
-export const TAG_PAGE_SIZE = 24;
+export const TAG_PAGE_SIZE = 8;
 
 /** Shodan returns 100 results per search page. */
 export const PER_PAGE = 100;

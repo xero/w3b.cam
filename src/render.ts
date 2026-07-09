@@ -163,6 +163,18 @@ export const tipsSnippetFileName = "tips.html";
 export const tipsUrl = "/tips.html";
 export const tipsSnippetUrl = "/snips/tips.html";
 
+// Import is a DEV-ONLY view. `bun dev` bakes it (build.ts) and adds an "import"
+// nav button (renderShell, gated on `dev`); a production `bun bake` emits none of
+// it. The nav button hx-gets import.html into <main>, where the type buttons swap
+// per-type form fragments (import-<type>.html) into #import-form.
+export const importPageFileName = "import.html";
+export const importSnippetFileName = "import.html";
+export const importUrl = "/import.html";
+export const importSnippetUrl = "/snips/import.html";
+/** Disk filename / hx-get URL of a per-type import form fragment (dev-only snippet). */
+export const importFormSnippetFileName = (type: string): string => `import-${type}.html`;
+export const importFormSnippetUrl = (type: string): string => `/snips/import-${type}.html`;
+
 /**
  * Live-view URL for a host:port (external link, opened in a new tab). IPv6 literals
  * are bracketed; scheme-default ports are dropped for clean URLs. 443 -> https, 554
@@ -1221,6 +1233,63 @@ export function renderTipsMain(): string {
 	return [`<section class="tips">`, indentBlock(TIPS_HTML.trim(), 1), `</section>`].join("\n");
 }
 
+/**
+ * One import form (DEV-ONLY). Shodan takes pasted JSON (its cameras carry embedded
+ * screenshots and no url/title/coords); youtube and mjpeg take a feed URL plus an
+ * optional label. HTML5 `required`/`type=url` do the validation; dev-client/dev.js
+ * intercepts the submit, POSTs to /__dev/import, and toasts the result. The forms
+ * carry no hx-* (submit is a fetch), so htmx never processes them.
+ */
+export function renderImportForm(type: "shodan" | "youtube" | "mjpeg"): string {
+	if (type === "shodan") {
+		return [
+			`<form class="import-form" data-import-type="shodan">`,
+			`${T(1)}<label class="import-label" for="import-json">Shodan JSON</label>`,
+			`${T(1)}<textarea id="import-json" class="dev-input import-textarea" name="json" required spellcheck="false" placeholder="paste raw Shodan JSON: a search response, a host lookup, a bare array, or a single banner"></textarea>`,
+			`${T(1)}<button type="submit" class="btn"><span class="shadow"></span><span class="edge"></span><span class="front">import</span></button>`,
+			`</form>`,
+		].join("\n");
+	}
+	const placeholder = type === "youtube" ? "https://www.youtube.com/watch?v=…" : "https://host/axis-cgi/mjpg/video.cgi";
+	return [
+		`<form class="import-form" data-import-type="${type}">`,
+		`${T(1)}<label class="import-label" for="import-url">feed URL</label>`,
+		`${T(1)}<input id="import-url" class="dev-input" type="url" name="url" required autocomplete="off" spellcheck="false" placeholder="${placeholder}" />`,
+		`${T(1)}<label class="import-label" for="import-label-input">label <span class="import-opt">(optional)</span></label>`,
+		`${T(1)}<input id="import-label-input" class="dev-input" name="label" autocomplete="off" placeholder="display title" />`,
+			`${T(1)}<button type="submit" class="btn"><span class="shadow"></span><span class="edge"></span><span class="front">import</span></button>`,
+		`</form>`,
+	].join("\n");
+}
+
+/**
+ * Inner-<main> for the DEV-ONLY import view: an "import" title, a row of type buttons
+ * (Shodan / YouTube / MJPEG), and the #import-form container holding the default
+ * Shodan form. The type buttons hx-get their fragment into #import-form; the explicit
+ * hx-target overrides <main>'s inherited target so the title and tabs survive.
+ */
+export function renderImportMain(): string {
+	const tab = (type: string, label: string): string =>
+		[
+			`<button type="button" class="btn" hx-get="${importFormSnippetUrl(type)}" hx-target="#import-form" hx-swap="innerHTML">`,
+			btnLayers(label),
+			`</button>`,
+		].join("\n");
+	return [
+		`<section class="home import">`,
+		`${T(1)}<h2 class="section-title">import</h2>`,
+		`${T(1)}<div class="import-tabs">`,
+		indentBlock(tab("shodan", "Shodan"), 2),
+		indentBlock(tab("youtube", "YouTube"), 2),
+		indentBlock(tab("mjpeg", "MJPEG"), 2),
+		`${T(1)}</div>`,
+		`${T(1)}<div id="import-form">`,
+		indentBlock(renderImportForm("shodan"), 2),
+		`${T(1)}</div>`,
+		`</section>`,
+	].join("\n");
+}
+
 // ── Page shell + CSS ─────────────────────────────────────────────────────────
 
 const CSS = `:root {
@@ -1277,11 +1346,28 @@ body > header {
 	align-items: baseline;
 	gap: 0.75rem 1.5rem;
 	padding: var(--gap);
-}
 
-body > header a {
-	color: inherit;
-	text-decoration: none;
+	a {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.nav {
+		display: flex;
+		flex-flow: row wrap;
+		gap: 1rem;
+		align-items: center;
+
+		a {
+			color: var(--ice);
+			&:hover {
+				color: var(--sand);
+			}
+			& .front {
+				padding: 8px;
+			}
+		}
+	}
 }
 
 h1 {
@@ -1311,6 +1397,11 @@ h1 > em {
 	align-items: self-end;
 	flex-grow: 1;
 	font-size: 11px;
+	& strong {
+		color: var(--ice);
+		font-weight: 600;
+		font-size: 10px;
+	}
 }
 
 main {
@@ -1744,23 +1835,6 @@ body > footer {
 	border-top: 1px solid var(--border);
 }
 
-.nav {
-	display: flex;
-	flex-flow: row wrap;
-	gap: 1rem;
-	align-items: center;
-
-	a {
-		color: var(--ice);
-		&:hover {
-			color: var(--sand);
-		}
-		& .front {
-			padding: 12px;
-		}
-	}
-}
-
 .badge.live {
 	background: #c0392b;
 }
@@ -1971,11 +2045,21 @@ body > footer {
 	}
 }`;
 
+/** Site-wide stat block under the h1, identical on every page. */
+export interface SiteStats {
+	/** Combined cams+streams+traffic total, pre-formatted (toLocaleString). */
+	discovered: string;
+	/** Build time, e.g. "2026-07-09 @ 10:59" (UTC, no tz label). */
+	updated: string;
+	/** Refresh cadence, e.g. "6 hrs". */
+	interval: string;
+}
+
 export interface ShellOpts {
 	/** <title> for the full page (host pages differ, for bookmarks/deep links). */
 	title: string;
-	/** Count line shown under the h1; constant across pages (not updated on swap). */
-	headerText: string;
+	/** Site-wide stat block shown under the h1; identical on every page. */
+	stats: SiteStats;
 	/** Inner-<main> content, the exact same string written as the snippet. */
 	mainInner: string;
 	/** Dev mode: link /__dev/dev.css and load /__dev/dev.js (both served by src/dev.ts). */
@@ -1983,11 +2067,14 @@ export interface ShellOpts {
 }
 
 /** Wrap inner-<main> content in the full HTML document. */
-export function renderShell({ title, headerText, mainInner, dev = false }: ShellOpts): string {
-	const counts = headerText
-		.split(" · ")
-		.map((c) => `<span>${escapeHtml(c.trim())}</span>`)
-		.join("");
+export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts): string {
+	const stat = (label: string, value: string): string =>
+		`<span>${escapeHtml(label)} <strong>${escapeHtml(value)}</strong></span>`;
+	const counts = [
+		stat("cameras discovered", stats.discovered),
+		stat("updated", stats.updated),
+		stat("fresh scrapes every", stats.interval),
+	].join("");
 	// Header links (brand + nav) live outside <main>, so they can't inherit its
 	// hx-target:inherited / hx-swap:inherited. Without a resolvable target htmx
 	// falls back to a full-page navigation on the href, which loads the whole
@@ -1997,9 +2084,9 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 	// Nav links are real .btn links — larger siblings of the pager buttons: the same
 	// three stacked layers (shadow / edge / labelled front), plus the header-only
 	// hx-target/hx-swap so they swap <main> like the in-main links.
-	const navLink = (href: string, snip: string, label: string): string =>
+	const navLink = (href: string, snip: string, label: string, classes:string = ''): string =>
 		[
-			`<a class="btn" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
+			`<a class="btn ${classes}" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
 			btnLayers(label),
 			`</a>`,
 		].join("\n");
@@ -2035,6 +2122,8 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		indentBlock(navLink(tagsUrl, tagsSnippetUrl, "tags"), 4),
 		indentBlock(navLink(mapUrl, mapSnippetUrl, "map"), 4),
 		indentBlock(navLink(tipsUrl, tipsSnippetUrl, "tips"), 4),
+		// Dev-only: a nav entry that hx-gets the import view into <main> (see renderImportMain).
+		...(dev ? [indentBlock(navLink(importUrl, importSnippetUrl, "import", "dev"), 4)] : []),
 		`${T(3)}</nav>`,
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</header>`,

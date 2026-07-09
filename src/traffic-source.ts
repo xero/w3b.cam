@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { extractVideoId } from "./yt-api.ts";
 import type { Classified, OsirisCamera, TrafficRow } from "./types.ts";
 
 /** A captured still: base64 bytes, mime, and a sha256 hex of the bytes (change detection). */
@@ -95,6 +96,38 @@ export function classifyOrReason(cam: OsirisCamera): Classified | SkipReason {
   if (feed && VIEWER_PAGE.test(feed)) return "viewer-page";
   if ((cam.stream_type ?? "").toLowerCase() === "iframe" || (cam.external_url?.trim() ?? "") !== "") return "offsite";
   return "no-feed";
+}
+
+// ── Osiris dump shape + YouTube routing ─────────────────────────────────────────
+
+/** Extract the camera array from the dump: an envelope `{ cameras: [...] }`, or a bare array. */
+export function toCameras(parsed: unknown): OsirisCamera[] | null {
+  if (Array.isArray(parsed)) return parsed as OsirisCamera[];
+  if (parsed && typeof parsed === "object" && Array.isArray((parsed as { cameras?: unknown }).cameras)) {
+    return (parsed as { cameras: OsirisCamera[] }).cameras;
+  }
+  return null;
+}
+
+/** True only for real YouTube hosts. Guards extractVideoId, whose /live/ and /embed/ path patterns would otherwise false-match non-YouTube stream URLs (e.g. an HLS path like …/live/gdynia_orlo…). */
+function isYoutubeUrl(u: string): boolean {
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return h === "youtu.be" || h === "youtube.com" || h.endsWith(".youtube.com");
+  } catch {
+    return false;
+  }
+}
+
+/** The YouTube video id referenced by any of a cam's URLs, or null if it's not a YouTube cam. */
+export function youtubeIdOf(cam: OsirisCamera): string | null {
+  for (const u of [cam.stream_url, cam.external_url, cam.feed_url]) {
+    if (u && isYoutubeUrl(u)) {
+      const id = extractVideoId(u);
+      if (id) return id;
+    }
+  }
+  return null;
 }
 
 // ── Snapshotting ─────────────────────────────────────────────────────────────

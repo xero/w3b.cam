@@ -14,6 +14,7 @@
 import { isIP } from "node:net";
 import { OUT_DIR } from "./config.ts";
 import { addTag, blacklist, closeDb, distinctTags, entityTags, openDb, removeTag, setPreferred } from "./db.ts";
+import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "./ingest.ts";
 import { build } from "./build.ts";
 import { serveStatic } from "./serve.ts";
 
@@ -112,6 +113,37 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		const { changes } = db.query("DELETE FROM traffic WHERE id = ?").run(ref);
 		db.query("DELETE FROM tags WHERE kind = 'traffic' AND ref = ?").run(ref);
 		return changes ? json({ kind, ref, deleted: changes }) : json({ error: "id not stored" }, 404);
+	}
+
+	// ── POST /__dev/import {type, ...fields}, add one record from the browser ──────
+	// Dispatches on `type` to the SAME ingest core (src/ingest.ts) the CLI runs. Every
+	// failure (bad JSON, no vendor rule, network error) is caught and returned as
+	// 400 {error} so the client toasts it and the long-lived server stays up. Shodan
+	// needs no key; YouTube reads YOUTUBE_API_KEY off the env (NOT mustEnv, which would
+	// exit the process) and 400s if it is unset.
+	if (req.method === "POST" && path === "/__dev/import") {
+		const body = await readBody(req);
+		const type = body.type;
+		const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+		try {
+			if (type === "shodan") {
+				if (!str(body.json)) return json({ error: "paste some Shodan JSON" }, 400);
+				return json({ type, ...ingestShodanText(db, body.json as string) });
+			}
+			if (type === "youtube") {
+				if (!str(body.url)) return json({ error: "url required" }, 400);
+				const key = process.env.YOUTUBE_API_KEY?.trim();
+				if (!key) return json({ error: "YOUTUBE_API_KEY not set (export it and restart bun dev)" }, 400);
+				return json({ type, ...(await ingestYoutubeOne(db, { url: str(body.url), label: str(body.label) }, key)) });
+			}
+			if (type === "mjpeg") {
+				if (!str(body.url)) return json({ error: "url required" }, 400);
+				return json({ type, ...(await ingestMjpegOne(db, { url: str(body.url), label: str(body.label) })) });
+			}
+			return json({ error: "invalid import type" }, 400);
+		} catch (err) {
+			return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+		}
 	}
 
 	return json({ error: "not found" }, 404);

@@ -1,115 +1,66 @@
-// Importer: load raw Shodan JSON files from a local directory into the database.
-// No API, no query credits. Files are read in place and never modified.
+// Unified importer: one command for every non-scraped source. Pick a type with a
+// flag; each has its own optional per-type flags plus an optional positional input
+// path that overrides the default.
 //
-// Usage:  bun run import [dir]   (default dir: ./in)
+//   bun import --shodan [dir]                                       raw Shodan JSON → webcams   (default dir: in/)
+//   bun import --youtube [--url <url> [--label "Title"] | file] [--limit N]   YouTube live streams → youtube
+//   bun import --mjpeg [file] [--limit N] [--concurrency N]         curated MJPEG URLs → traffic (default: in/mjpeg.md)
 //
-// Accepts host-info objects (a `data[]` array of banners), search responses
-// (`matches[]`), a bare array of banners, or a single banner. Only banners that
-// carry a screenshot are stored; the rest are counted and skipped. Files that
-// fail to parse are skipped with a warning.
+// Shodan reads no API and spends no credits (screenshots are embedded in the JSON).
+// YouTube needs YOUTUBE_API_KEY. The one-off Osiris dump is ingested by the separate
+// internal `bun run osiris` command (src/osiris.ts), not this dispatcher.
 
-import { basename } from "node:path";
-import { IN_DIR } from "./config.ts";
-import { closeDb, countRows, loadBlacklist, makeInserter, openDb } from "./db.ts";
-import { asMatch, getScreenshot, isBlockedProduct, toRow } from "./util.ts";
-import type { CamRow, WebcamMatch } from "./types.ts";
+import { parseArgs } from "node:util";
+import { IN_DIR, MJPEG_MD, YOUTUBE_MD } from "./config.ts";
+import { closeDb, openDb } from "./db.ts";
+import { ingestMjpegFile, ingestShodanDir, ingestYoutube } from "./ingest.ts";
+import { mustEnv } from "./util.ts";
 
-const dir = Bun.argv[2] ?? IN_DIR;
+const { values, positionals } = parseArgs({
+  args: Bun.argv.slice(2),
+  options: {
+    shodan: { type: "boolean" },
+    youtube: { type: "boolean" },
+    mjpeg: { type: "boolean" },
+    url: { type: "string", short: "u" }, // youtube single-add
+    label: { type: "string" }, // youtube single-add title
+    limit: { type: "string", short: "l" }, // youtube + mjpeg
+    concurrency: { type: "string", short: "c" }, // mjpeg snapshot fan-out
+  },
+  allowPositionals: true,
+});
 
-/** Normalize any supported JSON shape into a flat list of banners, or null if unrecognized. */
-function toBanners(parsed: unknown): WebcamMatch[] | null {
-  if (Array.isArray(parsed)) return parsed as WebcamMatch[];
-  if (parsed && typeof parsed === "object") {
-    const o = parsed as Record<string, unknown>;
-    if (Array.isArray(o.matches)) return o.matches as WebcamMatch[]; // search response
-    if (Array.isArray(o.data)) return o.data as WebcamMatch[]; // host-info object
-    if (typeof o.port === "number") return [parsed as WebcamMatch]; // single banner
-  }
-  return null;
+const USAGE =
+  "Usage: bun import --shodan [dir] | --youtube [--url <url> [--label \"Title\"] | file] [--limit N] | --mjpeg [file] [--limit N] [--concurrency N]";
+
+const picked = (["shodan", "youtube", "mjpeg"] as const).filter((t) => values[t]);
+if (picked.length !== 1) {
+  console.error(picked.length === 0 ? "Pick one import type." : "Pick exactly one import type (they're mutually exclusive).");
+  console.error(USAGE);
+  process.exit(1);
 }
+const type = picked[0]!;
 
-const paths = (
-  await Array.fromAsync(new Bun.Glob("*.json").scan({ cwd: dir, absolute: true }))
-).sort();
+/** Parse a positive-int flag, or 0 (meaning "no limit / use the default") when absent/invalid. */
+const num = (s?: string): number => (s ? Math.max(1, Number.parseInt(s, 10) || 0) : 0);
 
-if (paths.length === 0) {
-  console.log(`No .json files found in ${dir}/. Nothing to import.`);
-  process.exit(0);
-}
+// Resolve the YouTube key before opening the DB so a missing key exits cleanly
+// (mustEnv → process.exit) without leaking an open handle.
+const key = type === "youtube" ? mustEnv("YOUTUBE_API_KEY") : "";
 
 const db = openDb();
-const insertMany = makeInserter(db);
-const startingRows = countRows(db);
-const blacklist = loadBlacklist(db);
-
-let failed = 0;
-let unknown = 0;
-let banners = 0;
-let screenshots = 0;
-let blocked = 0;
-let blacklisted = 0;
-let added = 0;
-let updated = 0;
-let changed = 0;
-
 try {
-  for (const path of paths) {
-    const name = basename(path);
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await Bun.file(path).text());
-    } catch (err) {
-      failed++;
-      console.warn(`skip ${name}: invalid JSON (${err instanceof Error ? err.message : err})`);
-      continue;
-    }
-
-    const list = toBanners(parsed);
-    if (!list) {
-      unknown++;
-      console.warn(`skip ${name}: unrecognized JSON shape`);
-      continue;
-    }
-
-    const rows: CamRow[] = [];
-    let fileScreenshots = 0;
-    for (const raw of list) {
-      banners++;
-      const m = asMatch(raw);
-      if (blacklist.blocks(m)) {
-        blacklisted++;
-        continue;
-      }
-      const ss = getScreenshot(m);
-      if (!ss) continue;
-      if (isBlockedProduct(m.product)) {
-        blocked++;
-        continue;
-      }
-      fileScreenshots++;
-      screenshots++;
-      const row = toRow(m, ss);
-      if (row) rows.push(row);
-    }
-
-    const { added: a, updated: u, changed: c } = insertMany(rows);
-    added += a;
-    updated += u;
-    changed += c;
-    console.log(
-      `${name}: ${list.length} banners, ${fileScreenshots} with screenshot, ` +
-        `+${a} new, ${u} refreshed${c ? ` (${c} new screenshot)` : ""}`,
-    );
+  if (type === "shodan") {
+    await ingestShodanDir(db, positionals[0] ?? IN_DIR);
+  } else if (type === "youtube") {
+    if (values.url) await ingestYoutube(db, { url: values.url, label: values.label }, key);
+    else await ingestYoutube(db, { file: positionals[0] ?? YOUTUBE_MD, limit: num(values.limit) }, key);
+  } else {
+    await ingestMjpegFile(db, positionals[0] ?? MJPEG_MD, { limit: num(values.limit), concurrency: num(values.concurrency) });
   }
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exitCode = 1;
 } finally {
-  const endingRows = countRows(db);
   closeDb(db);
-
-  console.log(`\n── Import summary ──`);
-  console.log(`Files:    ${paths.length} found, ${failed} failed to parse, ${unknown} unknown shape`);
-  console.log(`Banners:  ${banners} seen, ${screenshots} with screenshot, ${blocked} rdp/vnc skipped, ${blacklisted} blacklisted, ${banners - screenshots - blocked - blacklisted} skipped (no screenshot)`);
-  console.log(`New cameras added: ${added}`);
-  console.log(`Refreshed:         ${updated} existing (${changed} with a changed screenshot)`);
-  console.log(`DB rows:  ${startingRows} → ${endingRows}`);
 }

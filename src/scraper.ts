@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 import { MIN_REQUEST_MS, PER_PAGE, QUERY } from "./config.ts";
 import { closeDb, countRows, loadBlacklist, makeInserter, openDb } from "./db.ts";
 import { makeClient, searchPage, withBackoff } from "./shodan.ts";
-import { asMatch, getScreenshot, isBlockedProduct, mustEnv, sleep, toRow } from "./util.ts";
+import { asMatch, emitBuildNeeded, getScreenshot, isBlockedProduct, mustEnv, sleep, toRow } from "./util.ts";
 import type { CamRow } from "./types.ts";
 
 const { values } = parseArgs({
@@ -143,4 +143,8 @@ try {
   console.log(
     `Query credits:     ${creditsBefore} → ${creditsAfter} (spent ${creditsBefore - creditsAfter})`,
   );
+
+  // Neutral stop signal for CI: only new cams or changed screenshots alter the
+  // baked site, so a credits-out / nothing-new run skips the rebuild + deploy.
+  emitBuildNeeded(added > 0 || changed > 0);
 }

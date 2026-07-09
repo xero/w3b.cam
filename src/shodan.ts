@@ -34,6 +34,16 @@ export async function withBackoff<T>(
   }
 }
 
+/**
+ * Cheap preflight: return the current query-credit balance. `getApiInfo` spends
+ * no credits, so CI can call this before the expensive DB restore + scrape and
+ * bail early (a neutral stop) when there's nothing left to spend.
+ */
+export async function checkCreds(client: ShodanClient): Promise<number> {
+  const info = await withBackoff("api-info", () => client.getApiInfo());
+  return info.query_credits;
+}
+
 /** Fetch one search page with screenshots included (minify:false is required). */
 export function searchPage(client: ShodanClient, query: string, page: number) {
   return withBackoff(`search page ${page}`, () =>

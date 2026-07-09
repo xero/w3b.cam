@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import type { CamRow, ShodanScreenshot, WebcamMatch } from "./types.ts";
 
 export const sleep = (ms: number): Promise<void> =>
@@ -27,6 +28,26 @@ export function mustEnv(name: string): string {
     process.exit(1);
   }
   return value;
+}
+
+/**
+ * Register a GitHub Actions step output (`name=value`) so later steps and
+ * downstream jobs can gate on it. No-op locally (GITHUB_OUTPUT unset), so the
+ * same scripts run identically outside CI.
+ */
+export function setStepOutput(name: string, value: string | number | boolean): void {
+  const out = process.env.GITHUB_OUTPUT;
+  if (out) appendFileSync(out, `${name}=${value}\n`);
+}
+
+/**
+ * Publish a "does the site need rebuilding?" signal for CI to gate on.
+ * Prints a human line always; in GitHub Actions also sets a `build_needed`
+ * step output, so a downstream deploy job can skip when a run changed nothing.
+ */
+export function emitBuildNeeded(needed: boolean): void {
+  console.log(`\nSite rebuild ${needed ? "needed" : "not needed"}.`);
+  setStepOutput("build_needed", needed);
 }
 
 /** Escape a value for safe interpolation into HTML text or a double-quoted attribute. */
