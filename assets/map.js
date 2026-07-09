@@ -94,7 +94,6 @@
 				oy = vb.y;
 				scaleX = m.a;
 				scaleY = m.d;
-				svg.setPointerCapture(e.pointerId);
 			},
 			sig,
 		);
@@ -104,7 +103,16 @@
 				if (!dragging) return;
 				var dx = e.clientX - sx;
 				var dy = e.clientY - sy;
-				if (Math.abs(dx) + Math.abs(dy) > DRAG_PX) moved = true;
+				// Claim the pointer only once a real drag starts, so panning keeps
+				// tracking even if the cursor leaves the SVG. A plain click never
+				// crosses the threshold, so it never captures — the click then reaches
+				// the dot's <a>/htmx instead of being stolen by the <svg>.
+				if (!moved && Math.abs(dx) + Math.abs(dy) > DRAG_PX) {
+					moved = true;
+					try {
+						svg.setPointerCapture(e.pointerId);
+					} catch (x) {}
+				}
 				vb.x = ox - dx / scaleX;
 				vb.y = oy - dy / scaleY;
 				clamp();
