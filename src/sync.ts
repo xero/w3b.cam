@@ -5,21 +5,26 @@
 // the manual counterpart to that: seed the store from your local copy, or pull
 // the store (which the 6-hourly scraper keeps mutating) down to work on locally.
 //
-// Both directions clobber a whole DB, so it prints a local-vs-remote comparison
-// and asks to confirm first (--yes / -y / -f skips the prompt).
+// Both push and pull clobber a whole DB, so each prints a local-vs-remote
+// comparison and asks to confirm first (--yes / -y / -f skips the prompt).
+// --merge is the non-destructive pull: it folds the store's newly-scraped cameras
+// into your local copy instead of overwriting it, so unpushed local edits survive,
+// and it keeps a timestamped backup. It runs unattended (no prompt).
 //
-// Usage:  bun run sync --push   (local -> store, then trigger build.yml redeploy)
-//         bun run sync --pull   (store -> local, clobbering the local copy)
+// Usage:  bun run sync --push    (local -> store, then trigger build.yml redeploy)
+//         bun run sync --pull    (store -> local, clobbering the local copy)
+//         bun run sync --merge   (store -> local, merging in new cams, keeping local edits)
 
 import { $ } from "bun";
-import { unlinkSync } from "node:fs";
+import { copyFileSync, renameSync, unlinkSync } from "node:fs";
 import { DB_PATH } from "./config.ts";
 import { closeDb, openDb } from "./db.ts";
+import { mergeDbs } from "./merge.ts";
 
 const RELEASE = "db-store";
 const ASSET = DB_PATH; // "camhunting.sqlite"
 const BUILD_WORKFLOW = "build.yml";
-const USAGE = "Usage: bun run sync <--push|--pull> [--yes]";
+const USAGE = "Usage: bun run sync <--push|--pull|--merge> [--yes]";
 
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 const args = Bun.argv.slice(2);
@@ -29,20 +34,23 @@ const rest = args.filter((a) => !YES_FLAGS.includes(a));
 
 const push = rest.some((a) => a === "--push" || a === "push");
 const pull = rest.some((a) => a === "--pull" || a === "pull");
-const unknown = rest.filter((a) => !["--push", "push", "--pull", "pull"].includes(a));
+const merge = rest.some((a) => a === "--merge" || a === "merge");
+const KNOWN = ["--push", "push", "--pull", "pull", "--merge", "merge"];
+const unknown = rest.filter((a) => !KNOWN.includes(a));
 
 if (unknown.length > 0) {
   console.error(`Unknown argument: ${unknown.join(" ")}`);
   console.error(USAGE);
   process.exit(1);
 }
-if (push === pull) {
-  // Neither (nothing selected) or both (ambiguous) is invalid; a direction is required.
-  console.error(push ? "Pick one direction, not both." : "A direction is required.");
+const modeCount = [push, pull, merge].filter(Boolean).length;
+if (modeCount !== 1) {
+  // Neither (nothing selected) or several (ambiguous) is invalid; exactly one is required.
+  console.error(modeCount === 0 ? "A mode is required." : "Pick exactly one of --push / --pull / --merge.");
   console.error(USAGE);
   process.exit(1);
 }
-const direction: "push" | "pull" = push ? "push" : "pull";
+const mode: "push" | "pull" | "merge" = push ? "push" : pull ? "pull" : "merge";
 
 // ── Metadata ──────────────────────────────────────────────────────────────────
 /** A DB copy's size (bytes) and last-modified time (ms epoch, null if unknown). */
@@ -95,14 +103,23 @@ async function preflight(): Promise<void> {
 }
 
 function printComparison(local: Meta | null, remote: Meta | null): void {
-  console.log(`\n── DB sync (${direction}) ──`);
+  console.log(`\n── DB sync (${mode}) ──`);
   console.log(`Local  (${DB_PATH}):  ${local ? `${fmtSize(local.size)}   ${fmtTime(local.mtime)}` : "- (missing)"}`);
   console.log(`Remote (${RELEASE}):  ${remote ? `${fmtSize(remote.size)}   ${fmtTime(remote.mtime)}` : "- (empty)"}`);
 
-  const source = direction === "push" ? local : remote;
-  const target = direction === "push" ? remote : local;
-  const sourceName = direction === "push" ? "local copy" : "remote store";
-  const targetName = direction === "push" ? "remote store" : "local copy";
+  // Merge never clobbers, so the stale-overwrite warning below doesn't apply.
+  if (mode === "merge") {
+    console.log(
+      `\nThis will MERGE the ${RELEASE} store's new cameras into your local copy` +
+        ` (local curation preserved; a timestamped .bak is kept).`,
+    );
+    return;
+  }
+
+  const source = mode === "push" ? local : remote;
+  const target = mode === "push" ? remote : local;
+  const sourceName = mode === "push" ? "local copy" : "remote store";
+  const targetName = mode === "push" ? "remote store" : "local copy";
 
   // The whole point of the comparison: catch overwriting fresher data with stale.
   if (source?.mtime != null && target?.mtime != null && target.mtime > source.mtime) {
@@ -123,6 +140,21 @@ function confirm(): boolean {
 }
 
 // ── Directions ────────────────────────────────────────────────────────────────
+/**
+ * Download the store asset to `dest`, then drop the stale -wal/-shm sidecars left
+ * beside it — SQLite would otherwise replay old writes over the fresh file and
+ * corrupt it. `-O` writes straight to `dest`, so a merge can stage prod under a
+ * scratch name without ever touching the live DB.
+ */
+async function downloadStore(dest: string): Promise<void> {
+  await $`gh release download ${RELEASE} --pattern ${ASSET} -O ${dest} --clobber`;
+  for (const ext of ["-wal", "-shm"]) {
+    try {
+      unlinkSync(`${dest}${ext}`);
+    } catch {}
+  }
+}
+
 async function doPush(): Promise<void> {
   if (!(await Bun.file(DB_PATH).exists())) {
     console.error(`No local DB at ${DB_PATH}. Nothing to push.`);
@@ -168,24 +200,82 @@ async function doPull(): Promise<void> {
   }
 
   console.log(`Downloading ${ASSET} (${fmtSize(remote.size)}) from ${RELEASE}…`);
-  await $`gh release download ${RELEASE} --pattern ${ASSET} --clobber`;
-
-  // Drop stale WAL/SHM: left beside the freshly downloaded main file, SQLite
-  // would replay old writes over it on next open and corrupt the DB.
-  for (const ext of ["-wal", "-shm"]) {
-    try {
-      unlinkSync(`${DB_PATH}${ext}`);
-    } catch {}
-  }
+  await downloadStore(DB_PATH);
   const after = await localMeta();
   console.log(`\n✓ Pulled. Local ${DB_PATH} is now ${after ? fmtSize(after.size) : "?"}.`);
+}
+
+async function doMerge(): Promise<void> {
+  const local = await localMeta();
+  const remote = await remoteMeta();
+  if (!remote) {
+    console.error(`No ${ASSET} in the ${RELEASE} store. Nothing to pull.`);
+    process.exit(1);
+  }
+  // Nothing local to preserve → a plain pull is the whole job.
+  if (!local) {
+    printComparison(local, remote);
+    console.log(`Downloading ${ASSET} (${fmtSize(remote.size)}) from ${RELEASE}…`);
+    await downloadStore(DB_PATH);
+    const after = await localMeta();
+    console.log(`\n✓ Pulled fresh ${DB_PATH} (${after ? fmtSize(after.size) : "?"}); nothing local to merge.`);
+    return;
+  }
+  printComparison(local, remote); // Info only; merge runs unattended (no confirm).
+
+  // Scratch names derive from DB_PATH so a DB_PATH override still works in isolation.
+  const base = DB_PATH.endsWith(".sqlite") ? DB_PATH.slice(0, -".sqlite".length) : DB_PATH;
+  const stamp = Math.floor(Date.now() / 1000);
+  const backupPath = `${DB_PATH}-${stamp}.bak`;
+  const localPath = `${base}-local.sqlite`;
+  const prodPath = `${base}-prod.sqlite`;
+
+  // Fold any pending WAL back into the main file so the plain-file copies below are
+  // whole (closeDb runs wal_checkpoint(TRUNCATE); schema/migrate/seed on open are
+  // no-ops on the populated DB).
+  closeDb(openDb());
+  copyFileSync(DB_PATH, backupPath); // Safety backup — kept after a successful run.
+  copyFileSync(DB_PATH, localPath); // Working copy — becomes the merge target, then the live DB.
+  console.log(`Backed up local DB → ${backupPath}`);
+
+  try {
+    // Stage prod under a scratch name; the live DB_PATH is untouched until the rename below.
+    console.log(`Downloading ${ASSET} (${fmtSize(remote.size)}) from ${RELEASE}…`);
+    await downloadStore(prodPath);
+
+    // prod = source, local = target: local's rows (your curation) win; only prod's
+    // new cameras are added. Already committed to running, so skip merge's prompt.
+    mergeDbs(prodPath, localPath, { yes: true });
+
+    // Atomically swap the merged copy in as the live DB, then drop its stale sidecars.
+    renameSync(localPath, DB_PATH);
+    for (const ext of ["-wal", "-shm"]) {
+      try {
+        unlinkSync(`${DB_PATH}${ext}`);
+      } catch {}
+    }
+  } finally {
+    // Drop the prod scratch (+ any sidecars) and, on failure, the leftover working copy.
+    // On success localPath was renamed away, so its unlink no-ops. The .bak is kept.
+    for (const p of [prodPath, `${prodPath}-wal`, `${prodPath}-shm`, localPath]) {
+      try {
+        unlinkSync(p);
+      } catch {}
+    }
+  }
+
+  const after = await localMeta();
+  console.log(
+    `\n✓ Merged ${RELEASE} into ${DB_PATH} (now ${after ? fmtSize(after.size) : "?"}). Backup kept at ${backupPath}.`,
+  );
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 try {
   await preflight();
-  if (direction === "push") await doPush();
-  else await doPull();
+  if (mode === "push") await doPush();
+  else if (mode === "pull") await doPull();
+  else await doMerge();
 } catch (err) {
   console.error(`\n✗ Sync failed: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);

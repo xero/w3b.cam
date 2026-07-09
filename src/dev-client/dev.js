@@ -129,6 +129,10 @@
 		if (ctx.kind === "cam") {
 			menu.appendChild(itemButton("Blacklist", "danger", () => showBlacklist(ctx)));
 		}
+		// Remove drops a single traffic cam (Osiris, mjpeg camhunt, ...) from the DB.
+		if (ctx.kind === "traffic") {
+			menu.appendChild(itemButton("Remove", "danger", () => showRemove(ctx)));
+		}
 	}
 
 	// ── Reorder (per-shot, no sub-form) ────────────────────────────────────────────
@@ -164,6 +168,34 @@
 					toast(`blacklisted ${ctx.ref}, removed ${r.deleted} camera(s). run \`bun run bake\``);
 				} catch (e) {
 					toast(`blacklist failed: ${e.message}`, "error");
+				}
+			}),
+		);
+		menu.appendChild(row);
+		clampMenu();
+	}
+
+	// ── Remove (traffic cam, confirm sub-form) ─────────────────────────────────────
+
+	function showRemove(ctx) {
+		menu.replaceChildren(menuHeader(ctx));
+		const msg = document.createElement("p");
+		msg.className = "dev-msg";
+		msg.textContent = "Remove this cam from the DB? It comes back if you re-ingest its source list.";
+		menu.appendChild(msg);
+
+		const row = document.createElement("div");
+		row.className = "dev-row";
+		row.appendChild(actionButton("Cancel", "", () => showOptions(ctx)));
+		row.appendChild(
+			actionButton("Remove", "danger", async () => {
+				try {
+					await api("/remove", "POST", { kind: ctx.kind, ref: ctx.ref });
+					closeMenu();
+					removeTrafficCam(ctx);
+					toast(`removed ${ctx.ref}. run \`bun run bake\``);
+				} catch (e) {
+					toast(`remove failed: ${e.message}`, "error");
 				}
 			}),
 		);
@@ -369,6 +401,34 @@
 		back.setAttribute("hx-get", "/snips/page001.html");
 		back.setAttribute("hx-push-url", "/");
 		back.innerHTML = "&larr; Back to gallery";
+		nav.appendChild(back);
+		main.replaceChildren(p, nav);
+		if (window.htmx) window.htmx.process(main);
+	}
+
+	function removeTrafficCam(ctx) {
+		if (ctx.role === "card") {
+			// Gallery: drop the matching traffic card(s) from the grid.
+			document.querySelectorAll('.card[data-kind="traffic"]').forEach((el) => {
+				if (el.dataset.ref === ctx.ref) fadeRemove(el);
+			});
+			return;
+		}
+		// Detail page: replace the content with a notice + a link back to the gallery.
+		const main = document.querySelector("main");
+		if (!main) return;
+		const p = document.createElement("p");
+		p.className = "empty";
+		const code = document.createElement("code");
+		code.textContent = "bun run bake";
+		p.append(`Cam ${ctx.ref} removed. Run `, code, " to update the gallery.");
+		const nav = document.createElement("p");
+		const back = document.createElement("a");
+		back.className = "back";
+		back.href = "/traffic.html";
+		back.setAttribute("hx-get", "/snips/traffic001.html");
+		back.setAttribute("hx-push-url", "/traffic.html");
+		back.innerHTML = "&larr; Back to traffic";
 		nav.appendChild(back);
 		main.replaceChildren(p, nav);
 		if (window.htmx) window.htmx.process(main);

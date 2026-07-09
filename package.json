@@ -10,6 +10,7 @@
     "scrape": "bun run src/scraper.ts",
     "youtube": "bun run src/youtube.ts",
     "traffic": "bun run src/traffic.ts",
+    "mjpeg": "bun run src/mjpeg.ts",
     "import": "bun run src/import.ts",
     "blacklist": "bun run src/blacklist.ts",
     "unblacklist": "bun run src/unblacklist.ts",

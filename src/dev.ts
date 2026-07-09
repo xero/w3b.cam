@@ -1,7 +1,8 @@
 // Dev mode: build the site with in-browser editing hooks, serve it, and expose
-// mutation endpoints that emulate the blacklist / reorder / tag workflows against
-// the LOCAL camhunting.sqlite (never the GitHub Actions db-store). Right-clicking a
-// card or screenshot in the browser drives those endpoints (see src/dev-client/).
+// mutation endpoints that emulate the blacklist / reorder / tag workflows, plus a
+// traffic-cam remove, against the LOCAL camhunting.sqlite (never the GitHub Actions
+// db-store). Right-clicking a card or screenshot in the browser drives those
+// endpoints (see src/dev-client/).
 //
 // Mutations write straight to the DB; we deliberately do NOT rebuild per click. A
 // full bake re-extracts thousands of screenshots from a ~441MB DB (tens of seconds).
@@ -101,6 +102,18 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		return json({ kind, ref, tag: tag.trim().toLowerCase(), removed });
 	}
 
+	// ── POST /__dev/remove {kind, ref}, delete a traffic cam and its tags ──────────
+	// Traffic cams (Osiris, mjpeg camhunt, ...) have no re-scrape blacklist, so this is
+	// a plain delete; a removed cam returns if you re-ingest its source list.
+	if (req.method === "POST" && path === "/__dev/remove") {
+		const { kind, ref } = await readBody(req);
+		if (kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
+		const { changes } = db.query("DELETE FROM traffic WHERE id = ?").run(ref);
+		db.query("DELETE FROM tags WHERE kind = 'traffic' AND ref = ?").run(ref);
+		return changes ? json({ kind, ref, deleted: changes }) : json({ error: "id not stored" }, 404);
+	}
+
 	return json({ error: "not found" }, 404);
 }
 
@@ -114,7 +127,7 @@ const server = Bun.serve({
 
 console.log(
 	`Dev server on http://localhost:${server.port}, serving ${OUT_DIR}/. Mutations write to the local camhunting.sqlite.\n` +
-		`Right-click a card or screenshot to blacklist / reorder / tag. Run \`bun run bake\` to regenerate the static site.`,
+		`Right-click a card or screenshot to blacklist / reorder / tag / remove. Run \`bun run bake\` to regenerate the static site.`,
 );
 
 // 3. Open the browser (macOS). Fire-and-forget; ignore if `open` is unavailable.

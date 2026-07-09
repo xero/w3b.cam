@@ -256,6 +256,10 @@ export async function snapshot(c: Classified): Promise<Snapshot | null> {
       return (await fetchImage(c.live_url)) ?? (await grabFrame(c.live_url));
     case "mp4":
     case "hls":
+    case "mjpeg":
+    case "link":
+      // The MJPEG ingester grabs its own thumbnail from a dedicated URL, so it never
+      // calls this with mjpeg/link; handled here for completeness (grabFrame covers both).
       return grabFrame(c.live_url);
   }
 }

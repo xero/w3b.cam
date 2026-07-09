@@ -23,42 +23,6 @@ import { closeDb, countRows } from "./db.ts";
 
 const USAGE = "Usage: bun run merge <source-db> <target-db> [--dry-run] [--yes]";
 
-// ── Arg parsing ───────────────────────────────────────────────────────────────
-const { values, positionals } = parseArgs({
-  args: Bun.argv.slice(2),
-  options: {
-    "dry-run": { type: "boolean" },
-    yes: { type: "boolean", short: "y" },
-  },
-  allowPositionals: true,
-});
-
-const sourcePath = positionals[0];
-const targetPath = positionals[1];
-const dryRun = values["dry-run"] ?? false;
-const wantYes = values.yes ?? false;
-
-if (!sourcePath || !targetPath) {
-  console.error("Two database paths are required: <source> then <target>.");
-  console.error(USAGE);
-  process.exit(1);
-}
-if (positionals.length > 2) {
-  console.error(`Too many arguments: ${positionals.slice(2).join(" ")}`);
-  console.error(USAGE);
-  process.exit(1);
-}
-if (resolve(sourcePath) === resolve(targetPath)) {
-  console.error("Source and target are the same file; nothing to merge.");
-  process.exit(1);
-}
-for (const p of [sourcePath, targetPath]) {
-  if (!(await Bun.file(p).exists())) {
-    console.error(`No such file: ${p}`);
-    process.exit(1);
-  }
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 /** A camera's identity plus enough to preview it. `country_name` is display-only. */
 interface KeyRow {
@@ -102,15 +66,24 @@ function openReadonly(path: string): Database {
   }
 }
 
-/** Prompt y/N (default No). Bypassed by --yes; a non-TTY stdin reads as No. Mirrors sync.ts. */
-function confirm(): boolean {
-  if (wantYes) return true;
+/** Prompt y/N (default No). A non-TTY stdin reads as No. Mirrors sync.ts. */
+function promptYesNo(): boolean {
   const answer = prompt("Proceed? [y/N]");
   return answer != null && /^y(es)?$/i.test(answer.trim());
 }
 
 // ── Merge ─────────────────────────────────────────────────────────────────────
-function main(sourcePath: string, targetPath: string): void {
+/**
+ * Fold the SOURCE db's new webcam rows into the TARGET db (see the file header).
+ * Throws on failure so the caller decides how to report it. `sync --merge` calls
+ * this in-process; the CLI at the bottom wraps it for standalone `bun merge` use.
+ */
+export function mergeDbs(
+  sourcePath: string,
+  targetPath: string,
+  opts: { dryRun?: boolean; yes?: boolean } = {},
+): void {
+  const { dryRun = false, yes = false } = opts;
   const source = openReadonly(sourcePath);
   try {
     if (webcamColumns(source).length === 0) {
@@ -178,7 +151,7 @@ function main(sourcePath: string, targetPath: string): void {
       `\nThis will INSERT ${toAdd.length.toLocaleString()} new webcam(s) into ${targetPath}.`,
     );
     console.log(`Existing rows in the target are left untouched.`);
-    if (!confirm()) {
+    if (!yes && !promptYesNo()) {
       console.log("Aborted.");
       return;
     }
@@ -218,12 +191,53 @@ function main(sourcePath: string, targetPath: string): void {
       // stale -wal/-shm left beside the target.
       closeDb(target);
     }
-  } catch (err) {
-    console.error(`\n✗ Merge failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 1;
   } finally {
     source.close();
   }
 }
 
-main(sourcePath, targetPath);
+// ── CLI ───────────────────────────────────────────────────────────────────────
+if (import.meta.main) {
+  const { values, positionals } = parseArgs({
+    args: Bun.argv.slice(2),
+    options: {
+      "dry-run": { type: "boolean" },
+      yes: { type: "boolean", short: "y" },
+    },
+    allowPositionals: true,
+  });
+
+  const sourcePath = positionals[0];
+  const targetPath = positionals[1];
+
+  if (!sourcePath || !targetPath) {
+    console.error("Two database paths are required: <source> then <target>.");
+    console.error(USAGE);
+    process.exit(1);
+  }
+  if (positionals.length > 2) {
+    console.error(`Too many arguments: ${positionals.slice(2).join(" ")}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+  if (resolve(sourcePath) === resolve(targetPath)) {
+    console.error("Source and target are the same file; nothing to merge.");
+    process.exit(1);
+  }
+  for (const p of [sourcePath, targetPath]) {
+    if (!(await Bun.file(p).exists())) {
+      console.error(`No such file: ${p}`);
+      process.exit(1);
+    }
+  }
+
+  try {
+    mergeDbs(sourcePath, targetPath, {
+      dryRun: values["dry-run"] ?? false,
+      yes: values.yes ?? false,
+    });
+  } catch (err) {
+    console.error(`\n✗ Merge failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  }
+}

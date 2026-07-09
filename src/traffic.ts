@@ -25,6 +25,7 @@ import { OSIRIS_JSON } from "./config.ts";
 import { closeDb, countTrafficRows, countYtRows, makeTrafficInserter, makeYtInserter, openDb } from "./db.ts";
 import { buildTrafficRow, classifyOrReason, hasFfmpeg, snapshot } from "./traffic-source.ts";
 import { buildYtRow, extractVideoId, fetchThumbnail, fetchVideos, thumbnailUrls } from "./yt-api.ts";
+import { mapLimit } from "./util.ts";
 import type { Classified, OsirisCamera, TrafficRow, YtRow } from "./types.ts";
 
 const { values, positionals } = parseArgs({
@@ -74,21 +75,6 @@ function youtubeIdOf(cam: OsirisCamera): string | null {
   return null;
 }
 
-/** Run `fn` over `items` with at most `n` in flight, preserving input order in the results. */
-async function mapLimit<T, R>(items: T[], n: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const i = next++;
-      if (i >= items.length) return;
-      out[i] = await fn(items[i]!, i);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
-  return out;
-}
-
 const raw = Bun.file(file);
 if (!(await raw.exists())) {
   console.error(`Missing ${file}. Point me at the Osiris dump, e.g. bun run traffic in/new/osiris-cameras.json`);
@@ -112,7 +98,9 @@ if (!cameras) {
 // ── Classify (fast, in-memory) ──────────────────────────────────────────────────
 
 const skips: Record<string, number> = { "auth-gated": 0, "viewer-page": 0, offsite: 0, "no-feed": 0 };
-const byKind = { jpg: 0, mp4: 0, hls: 0 };
+// Osiris classify() only emits jpg/mp4/hls, but FeedKind is wider (mjpeg/link from
+// the mjpeg source), so list every key to index it type-safely.
+const byKind = { jpg: 0, mp4: 0, hls: 0, mjpeg: 0, link: 0 };
 let filtered = 0;
 const work: { cam: OsirisCamera; c: Classified }[] = [];
 

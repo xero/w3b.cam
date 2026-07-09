@@ -264,8 +264,8 @@ CREATE TABLE IF NOT EXISTS traffic (
 	country       TEXT,
 	lat           REAL,
 	lng           REAL,
-	feed_kind     TEXT    NOT NULL,   -- 'jpg' | 'mp4' | 'hls' | 'link'
-	live_url      TEXT    NOT NULL,   -- URL the detail page embeds (jpg/mp4/hls) or links (link)
+	feed_kind     TEXT    NOT NULL,   -- 'jpg' | 'mjpeg' | 'mp4' | 'hls' | 'link'
+	live_url      TEXT    NOT NULL,   -- URL the detail page embeds (jpg/mjpeg/mp4/hls) or links (link)
 	external_url  TEXT,               -- optional human-facing viewer page
 	ss_mime       TEXT,               -- nullable: a snapshot can fail
 	ss_hash       TEXT,               -- sha256 hex of the baked thumbnail bytes

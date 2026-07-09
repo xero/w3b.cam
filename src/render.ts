@@ -909,9 +909,9 @@ function trafficLoc(cam: TrafficCam): string {
 	return parts.filter((v) => v !== "").join(", ");
 }
 
-/** Corner badge for a traffic card: "live" for video cams, nothing for auto-refresh JPEGs. */
+/** Corner badge for a traffic card: "live" for video/MJPEG cams, nothing for stills. */
 function trafficBadge(kind: FeedKind): string {
-	if (kind === "mp4" || kind === "hls") return `\n${T(2)}<span class="badge live">live</span>`;
+	if (kind === "mp4" || kind === "hls" || kind === "mjpeg") return `\n${T(2)}<span class="badge live">live</span>`;
 	return "";
 }
 
@@ -920,10 +920,14 @@ function feedKindLabel(kind: FeedKind): string {
 	switch (kind) {
 		case "jpg":
 			return "Auto-refreshing snapshot";
+		case "mjpeg":
+			return "Live MJPEG stream";
 		case "mp4":
 			return "Live video (MP4)";
 		case "hls":
 			return "Live video (HLS)";
+		case "link":
+			return "Snapshot (view live externally)";
 	}
 }
 
@@ -962,10 +966,10 @@ export function renderTrafficMain(cams: TrafficCam[], page: number, totalPages: 
 
 /**
  * The live media element for a detail page, chosen by feed kind. The `poster` /
- * initial `src` is the baked same-origin thumbnail so there's an instant frame and
- * no broken-image flash; the client (traffic.js) then drives the live feed
- * (cache-busting the <img>, attaching hls.js to the <video>). `link` cams show a
- * placeholder — we never embed third-party DOM.
+ * initial `src` / background is the baked same-origin thumbnail so there's an instant
+ * frame and no broken-image flash; the client (traffic.js) then drives the live feed
+ * (cache-busting the jpg <img>, streaming the mjpeg <img>, attaching hls.js to the
+ * <video>). `link` cams show just the still; the "View live" button is the way through.
  */
 function trafficMedia(cam: TrafficCam): string {
 	const alt = escapeHtml(cam.thumbAlt);
@@ -975,10 +979,22 @@ function trafficMedia(cam: TrafficCam): string {
 			const src = cam.thumbHref ? ` src="${escapeHtml(cam.thumbHref)}"` : "";
 			return `${T(2)}<img class="live-img" data-refresh="${escapeHtml(cam.liveUrl)}"${src} alt="${alt}" referrerpolicy="no-referrer" />`;
 		}
+		case "mjpeg": {
+			// A multipart <img> plays a Motion JPEG stream natively, no JS needed. The baked
+			// still rides as the background (instant frame, and the fallback if the stream is
+			// blocked/dead); traffic.js also swaps src to it on error.
+			const bg = cam.thumbHref ? ` style="background-image:url('${escapeHtml(cam.thumbHref)}')"` : "";
+			const still = cam.thumbHref ? ` data-still="${escapeHtml(cam.thumbHref)}"` : "";
+			return `${T(2)}<img class="live-img" data-mjpeg src="${escapeHtml(cam.liveUrl)}"${still}${bg} alt="${alt}" referrerpolicy="no-referrer" />`;
+		}
 		case "mp4":
 			return `${T(2)}<video class="live-video" src="${escapeHtml(cam.liveUrl)}" autoplay muted loop playsinline controls${poster}></video>`;
 		case "hls":
 			return `${T(2)}<video class="live-video" data-hls="${escapeHtml(cam.liveUrl)}" autoplay muted playsinline controls${poster}></video>`;
+		case "link":
+			// Not embeddable (http feed on our https site, or a viewer page): just the baked
+			// still. The "View live" button below is the way through.
+			return cam.thumbHref ? `${T(2)}<img class="live-img" src="${escapeHtml(cam.thumbHref)}" alt="${alt}" />` : "";
 	}
 }
 
@@ -1762,7 +1778,9 @@ body > footer {
 }
 
 .live-img {
+	display: block;
 	max-width: 100%;
+	background: #000 center / contain no-repeat;
 }
 
 .yt-facade {

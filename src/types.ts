@@ -161,14 +161,14 @@ export type StoredYtRow = YtRow & { first_seen: string; last_seen: string };
 // the live feed itself is embedded only on the detail page via `live_url`/`feed_kind`.
 
 /**
- * How a traffic cam is rendered, derived once at ingest (see classify in
- * traffic-source.ts). `jpg` auto-refreshes an <img>; `mp4`/`hls` embed a <video>
- * on the detail page. The traffic table holds only these embeddable feeds — cams
- * that need auth headers, point at a viewer page, or are third-party embeds are
- * classified out (YouTube ones are routed to the `youtube` table instead; see
- * traffic.ts), so there is no "offsite link" kind here.
+ * How a traffic cam is rendered, derived once at ingest. `jpg` auto-refreshes an
+ * <img>; `mjpeg` streams a multipart <img> live; `mp4`/`hls` embed a <video>; `link`
+ * shows a baked still plus a "View live" link-out only (no embed). The Osiris
+ * ingester (classify in traffic-source.ts) emits only jpg/mp4/hls; the MJPEG
+ * ingester (mjpeg-source.ts) emits mjpeg/jpg/link. `link` covers http-only cams
+ * (mixed-content-blocked on our https site) and viewer pages we cannot embed.
  */
-export type FeedKind = "jpg" | "mp4" | "hls";
+export type FeedKind = "jpg" | "mp4" | "hls" | "mjpeg" | "link";
 
 /** One camera object from the Osiris JSON dump (`cameras[]`). Everything but `id` is optional/nullable at the edge. */
 export interface OsirisCamera {

@@ -20,6 +20,13 @@ export const YOUTUBE_MD = `${IN_DIR}/youtube.md`;
  */
 export const OSIRIS_JSON = `${IN_DIR}/new/osiris-cameras.json`;
 
+/**
+ * Curated MJPEG camera list the `mjpeg` command ingests: one bare URL per line (blank
+ * lines and `#` comments skipped, an optional `label ` before the URL kept). Kept
+ * under the import dir; override with a path argument to `bun run mjpeg <file>`.
+ */
+export const MJPEG_MD = `${IN_DIR}/new/mjpeg.md`;
+
 /** Generated static site: root dir, wiped and recreated on every build. */
 export const OUT_DIR = "out";
 /** htmx snippets: the inner-<main> fragment of every full page, for hx-get swaps. */

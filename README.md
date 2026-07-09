@@ -115,6 +115,18 @@ bun bake
 bun serve
 ```
 
+### MJPEG camhunt cams
+
+**`bun mjpeg [file] [--limit N] [--concurrency N]`.** Reads a curated list of MJPEG camera URLs, one per line, defaulting to `in/new/mjpeg.md`. Blank lines and `#` comments are skipped, and an optional `label ` before the URL is kept. Like `in/youtube.md`, the list is gitignored and stays on your machine, so append to it and re-run as you hunt more cams. Each URL is classified by vendor from the fingerprints in [tips.md](./tips.md), a still is baked with ffmpeg for the gallery card, and the cam is upserted into the shared `traffic` table. Re-running refreshes thumbnails rather than duplicating cams. `--limit N` ingests only the first N unique cams; `--concurrency N` sets the snapshot fan-out, defaulting to 24.
+
+The site is served over https, so how a cam plays depends on its feed. An https stream embeds live as a smooth Motion JPEG `<img>`; an https snapshot auto-refreshes; an http feed cannot embed, since browsers block mixed content, so it shows the baked still with a "View live" link that opens the feed in a new tab. Viewer-page URLs, such as Mobotix `guestimage.html`, Panasonic `CgiStart`, and Axis `#view`, are resolved to their real stream or snapshot endpoint so they still get a thumbnail. The cams join the traffic gallery at `/traffic.html`, labeled by vendor.
+
+```sh
+bun mjpeg
+bun bake
+bun serve
+```
+
 ---
 
 ## Editing locally
@@ -136,9 +148,11 @@ bun sync --push   # publish your edits and rebuild the live site
 Both directions overwrite a whole database, so each one prints a size and timestamp comparison of the two copies and asks you to confirm. It warns you when the copy you are about to overwrite is newer than the one replacing it, since the scheduled scraper refreshes the published database every six hours and a stale local push could clobber newer data. Pass `--yes` to skip the prompt. Sync drives the `gh` CLI, so you need it installed and authenticated.
 
 > [!WARNING]
-> `--pull` clobbers your local database and `--push` clobbers the published one and redeploys the site. Mind the direction, and back up the local file first if it holds edits you have not pushed.
+> `--pull` clobbers your local database and `--push` clobbers the published one and redeploys the site. Mind the direction. If your local copy holds edits you have not pushed, reach for `--merge` instead of `--pull` to pick up the store's new cameras without losing them.
 
-**`bun merge <source> <target>`.** Folds the new cameras from one database into another instead of overwriting either, for when your local copy holds edits you have not pushed. The scheduled scraper adds cameras to the published database every six hours, so a plain `--pull` would clobber your unpushed work just to pick them up. Pull the published copy alongside your working one under another name, then merge only its new rows in:
+**`bun sync --merge`.** Pulls the published database and folds its new cameras into your local copy in one step, for when your local copy holds edits you have not pushed. The scheduled scraper adds cameras to the store every six hours, and a plain `--pull` would clobber your unpushed work just to pick them up. It backs up your current database to a timestamped `camhunting.sqlite-<epoch>.bak`, downloads the store to a scratch file, merges the store's new rows into a copy of your local database, and swaps that copy in as the live one. Your database is never overwritten in place; it is only replaced once the merge succeeds, so an interrupted run leaves the original untouched. It runs unattended, with no prompt. The backup is kept; delete it once you are happy with the result.
+
+**`bun merge <source> <target>`.** The merge that `--merge` runs, exposed on its own for when you already have two databases side by side. It folds the new cameras from the source into the target instead of overwriting either:
 
 ```sh
 bun merge camhunting.sqlite.prod camhunting.sqlite
@@ -161,6 +175,7 @@ A few details worth knowing:
 - **You pick a host's card image.** A host seen on several ports has several screenshots, and its gallery card shows the most recent one by default. `bun reorder <ip> <port>` pins one port so its screenshot leads instead, and `bun reorder <ip> --clear` reverts to the default. The pin lives in a `preferred` column that the scraper and importer never overwrite, so it survives later runs. Re-run `bun bake` to rebuild the site.
 - **Tags are unified across all three sources.** `bun tag <cam|stream|traffic> <ref> <tag>` attaches a free-form label to a cam (by IP), a stream (by video id), or a traffic cam (by id), stored in one `tags` table keyed on `(kind, ref, tag)`. The same tag spans every source, so tagging `street` on a webcam, a stream, and a traffic cam groups all three under it. Tags are normalized to lowercase and deduplicated, and an entity can carry several. They show on each detail page, size a tag cloud at `/tags.html` in the header nav, and each tag links to a paginated browse page mixing every entity that carries it. Remove one with `bun untag <cam|stream|traffic> <ref> <tag>`, or in `bun dev` by clicking the × on a tag chip in the right-click Tag menu. Existing `ip_tags` rows migrate into the new table automatically on first run, as `kind='cam'`; the old table is kept untouched as `ip_tags_migrated`. Re-run `bun bake` to rebuild the site.
 - **YouTube streams live in their own table.** `bun youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in a `youtube` table keyed on the video id, apart from the Shodan `webcams` table because the metadata differs. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams.html`, one card per stream, and each stream's page links the other streams sharing its channel.
+- **MJPEG cams come from a curated URL list.** `bun mjpeg` reads `in/new/mjpeg.md`, one camera URL per line, and classifies each by vendor using the endpoint fingerprints in [tips.md](./tips.md). It bakes a still with ffmpeg for the card and upserts into the shared `traffic` table, distinguished by a per-vendor `source`. Because the site is https, only https feeds embed live, a smooth Motion JPEG `<img>` for streams and an auto-refreshing `<img>` for snapshots; http feeds are mixed-content-blocked, so they store as a `link` kind that shows the baked still plus a "View live" link. Viewer-page URLs resolve to their real media endpoint so they still yield a thumbnail. Re-run `bun bake` to rebuild the site.
 - **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row and a streams row, each two pinned cards followed by the two newest of that kind. `bun feature <cam|stream> <slot> <ref>` sets one of two slots per kind — an IP for a cam, a video id for a stream — stored in a `featured` table keyed on `(kind, slot)`. A pin whose row is gone is skipped and backfilled from the newest, so the page always fills four and four. The full paginated galleries are unchanged: cams move to `/page001.html`, streams stay at `/streams.html`, both reachable from the header nav. Re-run `bun bake` to rebuild the site.
 - **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
 - **Every geolocated camera plots on a world map.** `/map.html`, in the header nav, is one baked SVG that plots every located camera across all three sources as a dot linking to its detail page. Shodan and traffic cams carry coordinates already; YouTube publishes none, so `bun geo <video_id> <lat> <lng>` assigns one by hand into a `yt_geo` table (seeded with best-guess coordinates for the streams whose titles name a place). With JavaScript on you drag to pan and scroll to zoom; without it the map is a fixed world view whose dots are still plain links, each with a location tooltip. Re-run `bun bake` to rebuild the site.
@@ -190,6 +205,8 @@ src/
   scraper.ts      fetch cameras from the Shodan API, dedupe, store
   youtube.ts      fetch YouTube live-stream metadata + thumbnails, store
   import.ts       load cameras from raw Shodan JSON files, no API
+  mjpeg.ts        ingest a curated MJPEG URL list into the traffic table
+  mjpeg-source.ts classify an MJPEG cam URL by vendor (see tips.md)
   blacklist.ts    drop a host and record it so scrapes skip it
   unblacklist.ts  reverse a blacklist entry
   reorder.ts      pin a host's card image to one port
@@ -204,11 +221,12 @@ src/
   serve.ts        static file server for out/
   dev.ts          local dev server with right-click blacklist/reorder/tag
   dev-client/     browser editing UI (js and css), served from source
-  sync.ts         pull/push the database to and from the db-store release
+  sync.ts         pull, push, or merge the database with the db-store release
   merge.ts        merge new webcam rows from one database into another
 in/                curated inputs (gitignored)
   youtube.md       YouTube live-stream list, source for `bun youtube`
   *.json           raw Shodan JSON for `bun import`
+  new/mjpeg.md     MJPEG camera URL list, source for `bun mjpeg`
 camhunting.sqlite  generated database (gitignored)
 out/               generated site (gitignored)
   index.html    curated homepage (featured + newest cams and streams)

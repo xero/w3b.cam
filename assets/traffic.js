@@ -2,9 +2,11 @@
 // loaded on every page (the shell includes it) so it works however you arrive at a
 // detail page — a full load or an htmx <main> swap whose snippet carries no script.
 //
-// It drives three things:
+// It drives four things:
 //   * <img data-refresh="URL">   — a JPEG snapshot cam: swap src with a cache-buster
 //                                   every REFRESH_MS so the still keeps updating.
+//   * <img data-mjpeg src="URL"> — a multipart MJPEG stream: plays natively, so we only
+//                                   attach an error handler that falls back to the still.
 //   * <video data-hls="URL">     — an HLS stream: play natively (Safari) or via
 //                                   hls.js, which is fetched on demand the first time
 //                                   an HLS cam is actually viewed (never on other pages).
@@ -74,6 +76,20 @@
 		};
 		tick(); // go live immediately (the initial src is the baked same-origin still)
 		img.__liveTimer = setInterval(tick, REFRESH_MS);
+	}
+
+	// ── MJPEG <img> (multipart stream) ─────────────────────────────────────────
+	// A multipart/x-mixed-replace <img> plays live with no JS; we only attach an error
+	// handler so a blocked (mixed-content) or dead stream falls back to the baked still
+	// instead of a broken-image icon. No timer, so nothing to tear down.
+	function startMjpeg(img) {
+		if (img.__liveInit) return;
+		img.__liveInit = true;
+		var still = img.getAttribute("data-still") || "";
+		img.addEventListener("error", function () {
+			img.classList.add("feed-error");
+			if (still && img.getAttribute("src") !== still) img.setAttribute("src", still);
+		});
 	}
 
 	// ── HLS <video> ────────────────────────────────────────────────────────────
@@ -147,6 +163,8 @@
 		root = root || document;
 		var imgs = root.querySelectorAll ? root.querySelectorAll("img[data-refresh]") : collect(root, "img[data-refresh]");
 		for (var i = 0; i < imgs.length; i++) startImg(imgs[i]);
+		var mjpegs = root.querySelectorAll ? root.querySelectorAll("img[data-mjpeg]") : collect(root, "img[data-mjpeg]");
+		for (var m = 0; m < mjpegs.length; m++) startMjpeg(mjpegs[m]);
 		var vids = root.querySelectorAll ? root.querySelectorAll("video[data-hls]") : collect(root, "video[data-hls]");
 		for (var j = 0; j < vids.length; j++) startHls(vids[j]);
 	}

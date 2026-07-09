@@ -3,6 +3,21 @@ import type { CamRow, ShodanScreenshot, WebcamMatch } from "./types.ts";
 export const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Run `fn` over `items` with at most `n` in flight, preserving input order in the results. */
+export async function mapLimit<T, R>(items: T[], n: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]!, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+
 /** Read a required env var or exit with a clear message. */
 export function mustEnv(name: string): string {
   const value = process.env[name];
