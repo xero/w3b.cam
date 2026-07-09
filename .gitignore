@@ -2,6 +2,7 @@ node_modules/
 camhunting.sqlite
 camhunting.sqlite-wal
 camhunting.sqlite-shm
+camhunting.sqlite.bak
 out/
 in/
 .env

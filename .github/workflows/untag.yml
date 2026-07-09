@@ -1,13 +1,12 @@
-name: tag
+name: untag
 
-# Attaches a free-form metadata tag to a cam, stream, or traffic entry in the unified
-# `tags` table, persists the updated DB to the db-store release, then rebuilds &
-# deploys the site.
+# Removes a tag from a cam, stream, or traffic entry in the unified `tags` table,
+# persists the updated DB to the db-store release, then rebuilds & deploys the site.
 on:
   workflow_dispatch:
     inputs:
       kind:
-        description: What to tag
+        description: What to untag
         required: true
         type: choice
         options:
@@ -19,7 +18,7 @@ on:
         required: true
         type: string
       tag:
-        description: Tag name to attach (normalized to lowercase)
+        description: Tag name to remove (normalized to lowercase)
         required: true
         type: string
 
@@ -29,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
+  untag:
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release upload/create (persist the DB)
@@ -48,12 +47,12 @@ jobs:
 
       # kind/ref/tag passed via env (not inline ${{ }}) to avoid shell injection.
       # The script validates all three and exits 1 on bad input.
-      - name: Apply tag
+      - name: Remove tag
         env:
           KIND: ${{ inputs.kind }}
           REF: ${{ inputs.ref }}
           TAG: ${{ inputs.tag }}
-        run: bun run tag "$KIND" "$REF" "$TAG"
+        run: bun run untag "$KIND" "$REF" "$TAG"
 
       - name: Save DB to release store
         env:
@@ -63,9 +62,9 @@ jobs:
             || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
           gh release upload db-store camhunting.sqlite --clobber
 
-  # Tags render on detail pages and the tags cloud, so rebuild & deploy to reflect it.
+  # Tags render on detail pages, the tags cloud, and browse pages, so rebuild & deploy.
   call-build:
-    needs: tag
+    needs: untag
     permissions:
       contents: read
       pages: write

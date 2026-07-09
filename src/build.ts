@@ -19,10 +19,11 @@ import {
 	OUT_DIR,
 	PAGE_SIZE,
 	SNIPS_DIR,
+	TAG_PAGE_SIZE,
 	TRAFFIC_PAGE_SIZE,
 	YT_PAGE_SIZE,
 } from "./config.ts";
-import { allRows, allTrafficRows, allYtRows, closeDb, loadFeatured, loadIpTags, loadTagCounts, loadYtGeo, openDb } from "./db.ts";
+import { allRows, allTrafficRows, allYtRows, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadYtGeo, openDb } from "./db.ts";
 import { isBlockedProduct } from "./util.ts";
 import {
 	extFromMime,
@@ -38,6 +39,7 @@ import {
 	renderIndexMain,
 	renderMapMain,
 	renderShell,
+	renderTagBrowseMain,
 	renderTagsMain,
 	renderTrafficDetail,
 	renderTrafficMain,
@@ -46,6 +48,9 @@ import {
 	snippetFileName,
 	streamsPageFileName,
 	streamsSnippetFileName,
+	tagBrowsePageFileName,
+	tagBrowseSnippetFileName,
+	tagSlug,
 	tagsPageFileName,
 	tagsSnippetFileName,
 	TITLE,
@@ -59,6 +64,7 @@ import {
 	ytUrl,
 	type Host,
 	type MapPoint,
+	type TagItem,
 	type TrafficCam,
 	type YtStream,
 } from "./render.ts";
@@ -141,7 +147,10 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const db = openDb();
 	let rows: StoredRow[];
 	let tagsByIp: Map<string, string[]>;
+	let tagsByVideo: Map<string, string[]>;
+	let tagsByTraffic: Map<string, string[]>;
 	let tagCounts: { tag: string; count: number }[];
+	let tagIndex: Map<string, { kind: "cam" | "stream" | "traffic"; ref: string }[]>;
 	let ytRows: StoredYtRow[];
 	let ytGeo: Map<string, { lat: number; lng: number }>;
 	let trafficRows: StoredTrafficRow[];
@@ -150,8 +159,11 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
 		// that guard can still be in the DB. Never render them, whatever the DB holds.
 		rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
-		tagsByIp = loadIpTags(db);
+		tagsByIp = loadTags(db, "cam");
+		tagsByVideo = loadTags(db, "stream");
+		tagsByTraffic = loadTags(db, "traffic");
 		tagCounts = loadTagCounts(db);
+		tagIndex = loadTagIndex(db);
 		ytRows = allYtRows(db);
 		ytGeo = loadYtGeo(db);
 		trafficRows = allTrafficRows(db);
@@ -205,6 +217,21 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	const headerText = `${hosts.length.toLocaleString()} ${hosts.length === 1 ? "host" : "hosts"} · ${rows.length.toLocaleString()} ${rows.length === 1 ? "camera" : "cameras"}`;
 
+	// Deduped tag -> slug map: the single source of truth for tag-browse URLs. Two
+	// distinct tags can slug identically, so a suffix loop keeps their files apart
+	// (mirrors how groupByIp disambiguates host slugs). Detail pages and the cloud
+	// both link through slugForTag so a link can never miss its page.
+	const tagSlugs = new Map<string, string>();
+	const usedSlugs = new Set<string>();
+	for (const { tag } of tagCounts) {
+		const base = tagSlug(tag);
+		let slug = base;
+		for (let n = 2; usedSlugs.has(slug); n++) slug = `${base}-${n}`;
+		usedSlugs.add(slug);
+		tagSlugs.set(tag, slug);
+	}
+	const slugForTag = (tag: string): string => tagSlugs.get(tag) ?? tagSlug(tag);
+
 	// ── Paginated cams gallery (page 1 is page001.html; empty DB still yields one page) ─
 
 	const totalPages = Math.max(1, Math.ceil(hosts.length / PAGE_SIZE));
@@ -217,7 +244,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	// ── Per-host pages ─────────────────────────────────────────────────────────────
 
 	for (const host of hosts) {
-		const mainInner = renderHostMain(host, { dev });
+		const mainInner = renderHostMain(host, { dev, slugForTag });
 		await writePage(`${host.slug}.html`, `${host.slug}.html`, mainInner, `${host.displayName} | ${TITLE}`, headerText, { dev });
 	}
 
@@ -230,7 +257,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		(r) => r.ss_mime,
 		written,
 	);
-	const streams: YtStream[] = ytRows.map((r) => toYtStream(r, ytImgById.get(r.video_id) ?? ""));
+	const streams: YtStream[] = ytRows.map((r) => toYtStream(r, ytImgById.get(r.video_id) ?? "", tagsByVideo.get(r.video_id) ?? []));
 
 	// Group by channel so each detail page can link its "More from this channel" siblings.
 	const streamsByChannel = new Map<string, YtStream[]>();
@@ -253,7 +280,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		(r) => r.ss_mime,
 		written,
 	);
-	const trafficCams: TrafficCam[] = trafficRows.map((r) => toTrafficCam(r, trafficImgById.get(r.id) ?? ""));
+	const trafficCams: TrafficCam[] = trafficRows.map((r) => toTrafficCam(r, trafficImgById.get(r.id) ?? "", tagsByTraffic.get(r.id) ?? []));
 	const trafficHeaderText = `${trafficCams.length.toLocaleString()} ${trafficCams.length === 1 ? "cam" : "cams"}`;
 
 	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
@@ -298,13 +325,13 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const ytTotalPages = Math.max(1, Math.ceil(streams.length / YT_PAGE_SIZE));
 	for (let p = 1; p <= ytTotalPages; p++) {
 		const pageStreams = streams.slice((p - 1) * YT_PAGE_SIZE, p * YT_PAGE_SIZE);
-		const mainInner = renderYtMain(pageStreams, p, ytTotalPages);
+		const mainInner = renderYtMain(pageStreams, p, ytTotalPages, { dev });
 		await writePage(streamsPageFileName(p), streamsSnippetFileName(p), mainInner, `streams | ${TITLE}`, ytHeaderText, { dev });
 	}
 
 	for (const s of streams) {
 		const siblings = s.channelId ? (streamsByChannel.get(s.channelId) ?? [s]) : [s];
-		const mainInner = renderYtDetail(s, siblings);
+		const mainInner = renderYtDetail(s, siblings, { dev, slugForTag });
 		await writePage(`${s.slug}.html`, `${s.slug}.html`, mainInner, `${s.label} | ${TITLE}`, ytHeaderText, { dev });
 	}
 
@@ -313,19 +340,47 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const trafficTotalPages = Math.max(1, Math.ceil(trafficCams.length / TRAFFIC_PAGE_SIZE));
 	for (let p = 1; p <= trafficTotalPages; p++) {
 		const pageCams = trafficCams.slice((p - 1) * TRAFFIC_PAGE_SIZE, p * TRAFFIC_PAGE_SIZE);
-		const mainInner = renderTrafficMain(pageCams, p, trafficTotalPages);
+		const mainInner = renderTrafficMain(pageCams, p, trafficTotalPages, { dev });
 		await writePage(trafficPageFileName(p), trafficSnippetFileName(p), mainInner, `traffic | ${TITLE}`, trafficHeaderText, { dev });
 	}
 
 	for (const cam of trafficCams) {
-		const mainInner = renderTrafficDetail(cam);
+		const mainInner = renderTrafficDetail(cam, { dev, slugForTag });
 		await writePage(`${cam.slug}.html`, `${cam.slug}.html`, mainInner, `${cam.name} | ${TITLE}`, trafficHeaderText, { dev });
 	}
 
-	// ── Tags cloud (unlinked: reachable at /tags.html, not in the nav) ───────────────
+	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────
 
 	const tagsHeaderText = `${tagCounts.length.toLocaleString()} ${tagCounts.length === 1 ? "tag" : "tags"}`;
-	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts), `tags | ${TITLE}`, tagsHeaderText, { dev });
+	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts, slugForTag), `tags | ${TITLE}`, tagsHeaderText, { dev });
+
+	// ── Tag browse pages: one paginated, blended gallery per tag ─────────────────────
+	// Resolve each tagged (kind, ref) against the in-memory view models via the maps
+	// built above, keeping each kind's native newest-first order. Only cams can go
+	// missing (blocked/blacklisted, or an IP tagged with no stored cameras); streams
+	// and traffic always resolve. A tag whose refs are all gone still gets a page (its
+	// cloud link must not 404), rendered as the empty state.
+	let tagPagesWritten = 0;
+	for (const { tag } of tagCounts) {
+		const slug = slugForTag(tag);
+		const entries = tagIndex.get(tag) ?? [];
+		const camRefs = new Set(entries.filter((e) => e.kind === "cam").map((e) => e.ref));
+		const streamRefs = new Set(entries.filter((e) => e.kind === "stream").map((e) => e.ref));
+		const trafficRefs = new Set(entries.filter((e) => e.kind === "traffic").map((e) => e.ref));
+		const items: TagItem[] = [
+			...hosts.filter((h) => camRefs.has(h.ip)).map((h): TagItem => ({ kind: "cam", host: h })),
+			...streams.filter((s) => streamRefs.has(s.videoId)).map((s): TagItem => ({ kind: "stream", stream: s })),
+			...trafficCams.filter((c) => trafficRefs.has(c.id)).map((c): TagItem => ({ kind: "traffic", cam: c })),
+		];
+		const tagTotalPages = Math.max(1, Math.ceil(items.length / TAG_PAGE_SIZE));
+		const tagHeaderText = `#${tag} · ${items.length.toLocaleString()} tagged`;
+		for (let p = 1; p <= tagTotalPages; p++) {
+			const pageItems = items.slice((p - 1) * TAG_PAGE_SIZE, p * TAG_PAGE_SIZE);
+			const mainInner = renderTagBrowseMain(tag, pageItems, p, tagTotalPages, slug, { dev, slugForTag });
+			await writePage(tagBrowsePageFileName(slug, p), tagBrowseSnippetFileName(slug, p), mainInner, `#${tag} | ${TITLE}`, tagHeaderText, { dev });
+			tagPagesWritten++;
+		}
+	}
 
 	// ── World map: a dot per geolocated camera across all three sources ──────────────
 	// Shodan hosts carry coarse geo-IP coords, traffic cams precise ones, and YouTube
@@ -357,7 +412,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		`Wrote ${OUT_DIR}/: homepage + ${hosts.length} host(s) across ${totalPages} cams page(s), ` +
 			`${hosts.length} host page(s), ${streams.length} stream(s) across ${ytTotalPages} streams page(s), ` +
 			`${trafficCams.length} traffic cam(s) across ${trafficTotalPages} traffic page(s), ` +
-			`map (${mapPoints.length.toLocaleString()} dot(s)), tags page (${tagCounts.length} tag(s)), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
+			`map (${mapPoints.length.toLocaleString()} dot(s)), tags cloud + ${tagPagesWritten} browse page(s) across ${tagCounts.length} tag(s), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
 	);
 }
 

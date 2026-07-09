@@ -162,6 +162,52 @@
 	}
 }
 
+.dev-chips {
+	display: flex;
+	flex-flow: row wrap;
+	gap: 0.3rem;
+	padding: 0 0.25rem 0.35rem;
+	list-style: none;
+
+	&:empty {
+		display: none;
+	}
+}
+
+.dev-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.2rem 0.2rem 0.2rem 0.5rem;
+	background: var(--border, #114b5f);
+	border-radius: 999px;
+	font-size: 0.85rem;
+	overflow-wrap: anywhere;
+}
+
+.dev-chip-x {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.15rem;
+	height: 1.15rem;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: 50%;
+	color: inherit;
+	font: inherit;
+	line-height: 1;
+	cursor: pointer;
+
+	&:hover,
+	&:focus-visible {
+		background: var(--dev-danger);
+		color: #fff;
+		outline: none;
+	}
+}
+
 .dev-toast {
 	position: fixed;
 	right: 1rem;

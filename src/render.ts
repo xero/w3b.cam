@@ -128,12 +128,25 @@ export const trafficSlug = (id: string): string =>
 export const trafficUrl = (slug: string): string => `/${slug}.html`;
 export const trafficDetailSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
 
-// The tag cloud is a single, unpaginated page. Unlinked from the nav for now
-// (visit /tags.html directly); it just surfaces how the per-IP tagging is going.
+// The tag cloud is a single, unpaginated page linked from the nav; each tag links to
+// its browse page (below). It surfaces how tagging is going across all three sources.
 export const tagsPageFileName = "tags.html";
 export const tagsSnippetFileName = "tags.html";
 export const tagsUrl = "/tags.html";
 export const tagsSnippetUrl = "/snips/tags.html";
+
+// Browse-by-tag pages: one paginated, blended gallery per tag (cams + streams +
+// traffic). `tagSlug` is filename-safe and `tag-`-prefixed so it can't collide with
+// host slugs (hex only), the `t-`/`yt-` pages, or the reserved page names; build.ts
+// dedupes two tags that slug identically. Page 1 is `tag-<slug>.html`; later pages
+// append `-NNN`. Snippet files share the basename (they live under /snips/).
+export const tagSlug = (tag: string): string =>
+  tag.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "untagged";
+export const tagBrowsePageFileName = (slug: string, p: number): string =>
+  p === 1 ? `tag-${slug}.html` : `tag-${slug}-${pad(p)}.html`;
+export const tagBrowseSnippetFileName = tagBrowsePageFileName;
+export const tagBrowseUrl = (slug: string, p = 1): string => `/${tagBrowsePageFileName(slug, p)}`;
+export const tagBrowseSnippetUrl = (slug: string, p = 1): string => `/snips/${tagBrowsePageFileName(slug, p)}`;
 
 // The map is a single, unpaginated page (map.html) reachable from the nav: every
 // geolocated camera across all three sources is a dot linking to its detail page.
@@ -194,7 +207,7 @@ export interface Host {
 	domains: string[];
 	labels: string[];
 	httpTitle: string | null;
-	// Free-form tags applied per-IP (see ip_tags), shared across all of a host's ports.
+	// Free-form tags applied per-IP (the `tags` table, kind='cam'), shared across all of a host's ports.
 	tags: string[];
 }
 
@@ -248,7 +261,7 @@ function isBetterRep(candidate: StoredRow, current: StoredRow): boolean {
  * (country_name, ip_str, port), so a host's ports stay adjacent, shots keep
  * their port order, and hosts sharing a timestamp fall back to that stable
  * country-grouped order. `imgHref` maps a row to the URL of its already-extracted
- * screenshot file. `tagsByIp` supplies per-IP tags (see loadIpTags); an IP absent
+ * screenshot file. `tagsByIp` supplies per-IP tags (see loadTags); an IP absent
  * from the map has no tags.
  */
 export function groupByIp(
@@ -422,12 +435,15 @@ export function renderTrafficPager(cur: number, total: number): string {
 // ── Index cards ──────────────────────────────────────────────────────────────
 
 /**
- * Rendering toggles. Only `dev` today: it bakes data-* hooks onto cards/shots and
- * injects the dev client. Threaded as a trailing optional param (default `{}`) so
- * every production call is unchanged and, with `dev` falsy, output is byte-identical.
+ * Rendering toggles, threaded as a trailing optional param (default `{}`) so every
+ * production call is unchanged. `dev` bakes data-* hooks onto cards/shots/details and
+ * injects the dev client. `slugForTag` maps a tag to its browse-page slug so the
+ * detail-page "Tags" row can link each tag; absent (production galleries never need
+ * it) means tags render as plain text.
  */
 export interface RenderOpts {
 	dev?: boolean;
+	slugForTag?: (tag: string) => string;
 }
 
 /**
@@ -481,8 +497,8 @@ export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 		.map(escapeHtml)
 		.join(", ");
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
-	// Dev hook: blacklist/tag act on the IP; reorder is per-screenshot, not per-card.
-	const devAttrs = opts.dev ? ` data-ip="${escapeHtml(host.ip)}"` : "";
+	// Dev hook: blacklist/tag act on the IP (ref); reorder is per-screenshot, not per-card.
+	const devAttrs = opts.dev ? ` data-kind="cam" data-ref="${escapeHtml(host.ip)}"` : "";
 
 	return [
 		`<a class="card" href="${hostUrl(host.slug)}" hx-get="${hostSnippetUrl(host.slug)}" hx-push-url="${hostUrl(host.slug)}"${devAttrs}>`,
@@ -538,11 +554,11 @@ export function renderHomeMain(cams: Host[], streams: YtStream[], traffic: Traff
 		parts.push(section("cams", cards, pageUrl(1), snippetUrl(1), "all cams"));
 	}
 	if (streams.length) {
-		const cards = streams.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
+		const cards = streams.map((s) => indentBlock(renderYtCard(s, opts), 1)).join("\n");
 		parts.push(section("streams", cards, streamsPageUrl(1), streamsSnippetUrl(1), "all streams"));
 	}
 	if (traffic.length) {
-		const cards = traffic.map((c) => indentBlock(renderTrafficCard(c), 1)).join("\n");
+		const cards = traffic.map((c) => indentBlock(renderTrafficCard(c, opts), 1)).join("\n");
 		parts.push(section("traffic", cards, trafficPageUrl(1), trafficSnippetUrl(1), "all traffic"));
 	}
 	if (parts.length === 0) {
@@ -562,6 +578,22 @@ function metaRow(label: string, valueHtml: string): string {
 	].join("\n");
 }
 
+/**
+ * The comma-joined value for a "Tags" meta row. With `slugForTag` each tag is an
+ * anchor to its browse page (real href + hx-get so it works with no JS); without it
+ * (a context that has no slug map) tags fall back to plain escaped text. Names are
+ * attacker-controlled, so escaped either way.
+ */
+function renderTagLinks(tags: string[], slugForTag?: (tag: string) => string): string {
+	if (!slugForTag) return escapeHtml(tags.join(", "));
+	return tags
+		.map((t) => {
+			const slug = slugForTag(t);
+			return `<a href="${tagBrowseUrl(slug)}" hx-get="${tagBrowseSnippetUrl(slug)}" hx-push-url="${tagBrowseUrl(slug)}">${escapeHtml(t)}</a>`;
+		})
+		.join(", ");
+}
+
 function shotFigure(shot: Shot, ip: string, opts: RenderOpts = {}): string {
 	const caption = [
 		`Port ${escapeHtml(shot.port)}`,
@@ -570,8 +602,8 @@ function shotFigure(shot: Shot, ip: string, opts: RenderOpts = {}): string {
 	]
 		.filter((s) => s !== "")
 		.join(" &middot; ");
-	// Dev hook: reorder/blacklist/tag act on this exact (ip, port).
-	const devAttrs = opts.dev ? ` data-ip="${escapeHtml(ip)}" data-port="${escapeHtml(shot.port)}"` : "";
+	// Dev hook: reorder acts on this exact (ip, port); blacklist/tag act on the IP (ref).
+	const devAttrs = opts.dev ? ` data-kind="cam" data-ref="${escapeHtml(ip)}" data-port="${escapeHtml(shot.port)}"` : "";
 	return [
 		`${T(1)}<figure class="shot"${devAttrs}>`,
 		`${T(2)}<img src="${escapeHtml(shot.imgHref)}" alt="${escapeHtml(shot.imgAlt)}" loading="lazy" />`,
@@ -602,7 +634,7 @@ export function renderHostMain(host: Host, opts: RenderOpts = {}): string {
 	push("ISP", host.isp);
 	push("ASN", host.asn);
 	rows.push(metaRow("Ports", escapeHtml(host.shots.map((s) => s.port).join(", "))));
-	if (host.tags.length) rows.push(metaRow("Tags", escapeHtml(host.tags.join(", "))));
+	if (host.tags.length) rows.push(metaRow("Tags", renderTagLinks(host.tags, opts.slugForTag)));
 
 	const nameHtml = renderHostName(host);
 	const heading = nameHtml ? `${renderHostPort(host)} ${nameHtml}` : renderHostPort(host);
@@ -646,10 +678,12 @@ export interface YtStream {
 	/** URL of the already-extracted thumbnail file, or "" when none was stored. */
 	thumbHref: string;
 	thumbAlt: string;
+	/** Free-form tags applied to this stream (see the unified `tags` table), sorted. */
+	tags: string[];
 }
 
-/** Map a stored youtube row (plus its extracted image URL) into a view model. */
-export function toYtStream(row: StoredYtRow, thumbHref: string): YtStream {
+/** Map a stored youtube row (plus its extracted image URL and tags) into a view model. */
+export function toYtStream(row: StoredYtRow, thumbHref: string, tags: string[] = []): YtStream {
 	const label = (row.label && row.label.trim()) || (row.title && row.title.trim()) || row.video_id;
 	return {
 		videoId: row.video_id,
@@ -665,6 +699,7 @@ export function toYtStream(row: StoredYtRow, thumbHref: string): YtStream {
 		description: row.description,
 		thumbHref,
 		thumbAlt: `Thumbnail for ${label}`,
+		tags,
 	};
 }
 
@@ -695,13 +730,14 @@ function liveStatusText(liveContent: string | null): string | null {
  * galleries render identically; here the title is the stream label and the
  * subtitle is the channel.
  */
-export function renderYtCard(stream: YtStream): string {
+export function renderYtCard(stream: YtStream, opts: RenderOpts = {}): string {
 	const badge = liveBadge(stream.liveContent);
 	const channel = stream.channelTitle
 		? `\n${T(1)}<p class="loc">${escapeHtml(stream.channelTitle)}</p>`
 		: "";
+	const devAttrs = opts.dev ? ` data-kind="stream" data-ref="${escapeHtml(stream.videoId)}"` : "";
 	return [
-		`<a class="card" href="${ytUrl(stream.slug)}" hx-get="${ytSnippetUrl(stream.slug)}" hx-push-url="${ytUrl(stream.slug)}">`,
+		`<a class="card" href="${ytUrl(stream.slug)}" hx-get="${ytSnippetUrl(stream.slug)}" hx-push-url="${ytUrl(stream.slug)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(stream.thumbAlt)}" style="background-image:url('${escapeHtml(stream.thumbHref)}')">${badge}`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
@@ -712,11 +748,11 @@ export function renderYtCard(stream: YtStream): string {
 }
 
 /** Inner-<main> content for a streams gallery page: the card grid plus the pager. */
-export function renderYtMain(streams: YtStream[], page: number, totalPages: number): string {
+export function renderYtMain(streams: YtStream[], page: number, totalPages: number, opts: RenderOpts = {}): string {
 	if (streams.length === 0) {
 		return `<p class="empty">No streams stored yet. Run <code>bun run youtube</code> first.</p>`;
 	}
-	const cards = streams.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
+	const cards = streams.map((s) => indentBlock(renderYtCard(s, opts), 1)).join("\n");
 	const pager = renderStreamsPager(page, totalPages);
 	return [
 		`<section class="gallery">`,
@@ -727,11 +763,11 @@ export function renderYtMain(streams: YtStream[], page: number, totalPages: numb
 }
 
 /** "More from {channel}" section: sibling streams on the same channel, as cards. Empty when there are none. */
-function renderSiblings(stream: YtStream, siblings: YtStream[]): string {
+function renderSiblings(stream: YtStream, siblings: YtStream[], opts: RenderOpts = {}): string {
 	const others = siblings.filter((s) => s.videoId !== stream.videoId);
 	if (others.length === 0) return "";
 	const heading = stream.channelTitle ? `More from ${stream.channelTitle}` : "More from this channel";
-	const cards = others.map((s) => indentBlock(renderYtCard(s), 1)).join("\n");
+	const cards = others.map((s) => indentBlock(renderYtCard(s, opts), 1)).join("\n");
 	return [
 		`<section class="siblings">`,
 		`${T(1)}<h3>${escapeHtml(heading)}</h3>`,
@@ -748,9 +784,11 @@ function renderSiblings(stream: YtStream, siblings: YtStream[]): string {
  * same channel. `siblings` is the full set for this channel (this stream is
  * filtered out inside renderSiblings).
  */
-export function renderYtDetail(stream: YtStream, siblings: YtStream[]): string {
+export function renderYtDetail(stream: YtStream, siblings: YtStream[], opts: RenderOpts = {}): string {
+	// Dev hook on the figure (a `.shot`, like host pages) so right-click tags this stream.
+	const devAttrs = opts.dev ? ` data-kind="stream" data-ref="${escapeHtml(stream.videoId)}"` : "";
 	const figure = [
-		`${T(1)}<figure class="shot">`,
+		`${T(1)}<figure class="shot"${devAttrs}>`,
 		ytFacade(stream),
 		`${T(2)}<a class="btn" href="${escapeHtml(stream.url)}" target="_blank" rel="noopener noreferrer">`,
 		indentBlock(btnLayers("Watch on YouTube"), 2),
@@ -768,8 +806,9 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[]): string {
 	push("Scheduled", stream.scheduledStart);
 	push("Started", stream.actualStart);
 	push("Description", stream.description);
+	if (stream.tags.length) rows.push(metaRow("Tags", renderTagLinks(stream.tags, opts.slugForTag)));
 
-	const siblingSection = renderSiblings(stream, siblings);
+	const siblingSection = renderSiblings(stream, siblings, opts);
 
 	return [
 		`<article class="host">`,
@@ -829,10 +868,12 @@ export interface TrafficCam {
 	/** URL of the already-extracted thumbnail file, or "" when none was captured. */
 	thumbHref: string;
 	thumbAlt: string;
+	/** Free-form tags applied to this cam (see the unified `tags` table), sorted. */
+	tags: string[];
 }
 
-/** Map a stored traffic row (plus its extracted image URL) into a view model. */
-export function toTrafficCam(row: StoredTrafficRow, thumbHref: string): TrafficCam {
+/** Map a stored traffic row (plus its extracted image URL and tags) into a view model. */
+export function toTrafficCam(row: StoredTrafficRow, thumbHref: string, tags: string[] = []): TrafficCam {
 	const name = (row.name && row.name.trim()) || row.id;
 	return {
 		id: row.id,
@@ -848,6 +889,7 @@ export function toTrafficCam(row: StoredTrafficRow, thumbHref: string): TrafficC
 		externalUrl: row.external_url,
 		thumbHref,
 		thumbAlt: `Snapshot from ${name}`,
+		tags,
 	};
 }
 
@@ -884,12 +926,13 @@ function feedKindLabel(kind: FeedKind): string {
  * is its location. A cam with no captured thumbnail (link cams, dead feeds) shows the
  * plain black figure.
  */
-export function renderTrafficCard(cam: TrafficCam): string {
+export function renderTrafficCard(cam: TrafficCam, opts: RenderOpts = {}): string {
 	const badge = trafficBadge(cam.feedKind);
 	const loc = escapeHtml(trafficLoc(cam));
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
+	const devAttrs = opts.dev ? ` data-kind="traffic" data-ref="${escapeHtml(cam.id)}"` : "";
 	return [
-		`<a class="card" href="${trafficUrl(cam.slug)}" hx-get="${trafficDetailSnippetUrl(cam.slug)}" hx-push-url="${trafficUrl(cam.slug)}">`,
+		`<a class="card" href="${trafficUrl(cam.slug)}" hx-get="${trafficDetailSnippetUrl(cam.slug)}" hx-push-url="${trafficUrl(cam.slug)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">${badge}`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
@@ -900,11 +943,11 @@ export function renderTrafficCard(cam: TrafficCam): string {
 }
 
 /** Inner-<main> content for a traffic gallery page: the card grid plus the pager. */
-export function renderTrafficMain(cams: TrafficCam[], page: number, totalPages: number): string {
+export function renderTrafficMain(cams: TrafficCam[], page: number, totalPages: number, opts: RenderOpts = {}): string {
 	if (cams.length === 0) {
 		return `<p class="empty">No traffic cams stored yet. Run <code>bun run traffic</code> first.</p>`;
 	}
-	const cards = cams.map((c) => indentBlock(renderTrafficCard(c), 1)).join("\n");
+	const cards = cams.map((c) => indentBlock(renderTrafficCard(c, opts), 1)).join("\n");
 	const pager = renderTrafficPager(page, totalPages);
 	return [`<section class="gallery">`, cards, `</section>`, ...(pager ? [pager] : [])].join("\n");
 }
@@ -936,11 +979,13 @@ function trafficMedia(cam: TrafficCam): string {
  * placeholder) with a "View live" button, then a lean metadata table. The button
  * targets the human-facing page when there is one, else the raw feed URL.
  */
-export function renderTrafficDetail(cam: TrafficCam): string {
+export function renderTrafficDetail(cam: TrafficCam, opts: RenderOpts = {}): string {
 	const media = trafficMedia(cam);
 	const liveHref = cam.externalUrl ?? cam.liveUrl;
+	// Dev hook on the figure (a `.shot`, like host pages) so right-click tags this cam.
+	const devAttrs = opts.dev ? ` data-kind="traffic" data-ref="${escapeHtml(cam.id)}"` : "";
 	const figure = [
-		`${T(1)}<figure class="shot">`,
+		`${T(1)}<figure class="shot"${devAttrs}>`,
 		media,
 		`${T(2)}<a class="btn" href="${escapeHtml(liveHref)}" target="_blank" rel="noopener noreferrer">`,
 		indentBlock(btnLayers("View live"), 2),
@@ -956,6 +1001,7 @@ export function renderTrafficDetail(cam: TrafficCam): string {
 	push("Location", trafficLoc(cam));
 	if (cam.lat != null && cam.lng != null) push("Coordinates", `${cam.lat}, ${cam.lng}`);
 	push("Type", feedKindLabel(cam.feedKind));
+	if (cam.tags.length) rows.push(metaRow("Tags", renderTagLinks(cam.tags, opts.slugForTag)));
 
 	return [
 		`<article class="host">`,
@@ -974,11 +1020,12 @@ export function renderTrafficDetail(cam: TrafficCam): string {
 }
 
 // ── Tags cloud ─────────────────────────────────────────────────────────────────
-// A cloud of every free-form tag applied to hosts (ip_tags), each sized by how
-// many hosts carry it. Ported from the blog's tagCloud(): a linear map from a
-// tag's count to a font-size percentage, biggest count = biggest tag. Unlinked
-// for now and read-only (no per-tag pages yet), so tags render as plain spans
-// rather than links; each carries its exact host count in a title tooltip.
+// A cloud of every tag across all three sources (the unified `tags` table), each
+// sized by how many entities carry it. Each tag links to its browse page; the count
+// rides along in a title tooltip. Sizing is a LOG map from count to a font-size
+// percentage (not linear): counts are a long tail (a few tags on hundreds of
+// entities, most on a handful), so a linear map crushes the tail against the minimum
+// size. ln() spreads the low/mid range so the cloud actually varies.
 
 export interface TagCount {
 	tag: string;
@@ -990,28 +1037,29 @@ const TAG_MIN_SIZE = 100;
 const TAG_MAX_SIZE = 320;
 
 /**
- * Inner-<main> content for the tags page: a cloud of every tag, sized linearly
- * between TAG_MIN_SIZE and TAG_MAX_SIZE by host count. When every tag shares one
- * count (or there is a single tag) the spread is zero, so it is floored to 1 to
- * avoid a divide-by-zero and every tag renders at the minimum size. Tags are
- * attacker-controlled (entered via `bun run tag`), so each name is escaped before
- * it lands in both the text and the title attribute.
+ * Inner-<main> content for the tags page: a cloud of every tag, each an anchor to its
+ * browse page (`slugForTag` gives the slug), sized by a log map of its entity count
+ * between TAG_MIN_SIZE and TAG_MAX_SIZE. When every tag shares one count the log span
+ * is zero, floored to ε so all render at the minimum size. Tags are attacker-controlled
+ * (entered via `bun run tag`), so each name is escaped before it lands in the link text
+ * and the title attribute.
  */
-export function renderTagsMain(tags: TagCount[]): string {
+export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => string): string {
 	if (tags.length === 0) {
-		return `<p class="empty">No tags yet. Tag a host with <code>bun run tag &lt;ip&gt; &lt;tag&gt;</code>, then re-bake.</p>`;
+		return `<p class="empty">No tags yet. Tag something with <code>bun run tag &lt;cam|stream|traffic&gt; &lt;ref&gt; &lt;tag&gt;</code>, then re-bake.</p>`;
 	}
-	const counts = tags.map((t) => t.count);
-	const minCount = Math.min(...counts);
-	const spread = Math.max(1, Math.max(...counts) - minCount);
-	const step = (TAG_MAX_SIZE - TAG_MIN_SIZE) / spread;
+	const logs = tags.map((t) => Math.log(t.count));
+	const minLog = Math.min(...logs);
+	const span = Math.max(1e-9, Math.max(...logs) - minLog);
+	const step = (TAG_MAX_SIZE - TAG_MIN_SIZE) / span;
 
 	const items = tags
 		.map((t) => {
-			const size = Math.round(TAG_MIN_SIZE + (t.count - minCount) * step);
+			const size = Math.round(TAG_MIN_SIZE + (Math.log(t.count) - minLog) * step);
 			const name = escapeHtml(t.tag);
-			const title = `${t.count} ${t.count === 1 ? "host" : "hosts"} tagged ${name}`;
-			return `<li><span style="font-size: ${size}%" title="${title}">${name}</span></li>`;
+			const slug = slugForTag(t.tag);
+			const title = `${t.count} ${t.count === 1 ? "entry" : "entries"} tagged ${name}`;
+			return `<li><a style="font-size: ${size}%" title="${title}" href="${tagBrowseUrl(slug)}" hx-get="${tagBrowseSnippetUrl(slug)}" hx-push-url="${tagBrowseUrl(slug)}">${name}</a></li>`;
 		})
 		.join("\n");
 
@@ -1021,6 +1069,63 @@ export function renderTagsMain(tags: TagCount[]): string {
 		indentBlock(items, 2),
 		`${T(1)}</ul>`,
 		`</section>`,
+	].join("\n");
+}
+
+// ── Tag browse pages ─────────────────────────────────────────────────────────────
+// One paginated page per tag, a blended gallery of every entity carrying it: cams,
+// then streams, then traffic (each kind newest-first, from build.ts). Reuses the same
+// card renderers as the galleries, so a tag page looks like any other gallery. Real
+// <a>/hx-get links throughout, so browsing works with no JS (only tagging is JS-only).
+
+/** One entity on a tag browse page, tagged with its kind so the right card renderer is used. */
+export type TagItem =
+	| { kind: "cam"; host: Host }
+	| { kind: "stream"; stream: YtStream }
+	| { kind: "traffic"; cam: TrafficCam };
+
+/** Render one browse-page card, dispatching on the item's kind. */
+function renderTagCard(item: TagItem, opts: RenderOpts = {}): string {
+	switch (item.kind) {
+		case "cam":
+			return renderHostCard(item.host, opts);
+		case "stream":
+			return renderYtCard(item.stream, opts);
+		case "traffic":
+			return renderTrafficCard(item.cam, opts);
+	}
+}
+
+/** Numbered pager for a tag browse page (URL builders closed over the tag's slug). */
+export function renderTagPager(cur: number, total: number, slug: string): string {
+	return renderPagerWith(
+		cur,
+		total,
+		(p) => tagBrowseUrl(slug, p),
+		(p) => tagBrowseSnippetUrl(slug, p),
+	);
+}
+
+/** Inner-<main> content for a tag browse page: the blended card grid plus the pager. */
+export function renderTagBrowseMain(
+	tag: string,
+	items: TagItem[],
+	page: number,
+	totalPages: number,
+	slug: string,
+	opts: RenderOpts = {},
+): string {
+	if (items.length === 0) {
+		return `<p class="empty">Nothing tagged <strong>${escapeHtml(tag)}</strong> is visible right now.</p>`;
+	}
+	const cards = items.map((it) => indentBlock(renderTagCard(it, opts), 1)).join("\n");
+	const pager = renderTagPager(page, totalPages, slug);
+	return [
+		`<section class="gallery">`,
+		cards,
+		`</section>`,
+		...(pager ? [pager] : []),
+		`<a class="back" href="${tagsUrl}" hx-get="${tagsSnippetUrl}" hx-push-url="${tagsUrl}">&larr; All tags</a>`,
 	].join("\n");
 }
 
@@ -1573,10 +1678,17 @@ body > footer {
 	list-style: none;
 	line-height: 1.3;
 
-	& span {
+	& a {
 		color: var(--ice);
 		font-variant-numeric: tabular-nums;
-		cursor: default;
+		text-decoration: none;
+		transition: color 0.15s;
+	}
+
+	& a:hover,
+	& a:focus-visible {
+		color: var(--accent);
+		text-decoration: underline;
 	}
 }
 
@@ -1727,6 +1839,7 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		indentBlock(navLink(pageUrl(1), snippetUrl(1), "cams"), 4),
 		indentBlock(navLink("/streams.html", streamsSnippetUrl(1), "streams"), 4),
 		indentBlock(navLink("/traffic.html", trafficSnippetUrl(1), "traffic"), 4),
+		indentBlock(navLink(tagsUrl, tagsSnippetUrl, "tags"), 4),
 		indentBlock(navLink(mapUrl, mapSnippetUrl, "map"), 4),
 		`${T(3)}</nav>`,
 		`${T(3)}<p class="count">${counts}</p>`,

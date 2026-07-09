@@ -91,7 +91,8 @@
 	function menuHeader(ctx) {
 		const h = document.createElement("div");
 		h.className = "dev-head";
-		h.textContent = ctx.kind === "shot" ? `${ctx.ip}:${ctx.port}` : ctx.ip;
+		// Cam shots carry a port (ref:port); everything else is just the ref.
+		h.textContent = ctx.port ? `${ctx.ref}:${ctx.port}` : ctx.ref;
 		return h;
 	}
 
@@ -118,12 +119,16 @@
 
 	function showOptions(ctx) {
 		menu.replaceChildren(menuHeader(ctx));
-		// Reorder pins a single screenshot, so it only makes sense per-shot.
-		if (ctx.kind === "shot") {
+		// Reorder pins a single screenshot: cam-only and per-shot.
+		if (ctx.kind === "cam" && ctx.role === "shot") {
 			menu.appendChild(itemButton("Reorder", "", () => doReorder(ctx)));
 		}
+		// Tag applies to every kind.
 		menu.appendChild(itemButton("Tag", "", () => showTag(ctx)));
-		menu.appendChild(itemButton("Blacklist", "danger", () => showBlacklist(ctx)));
+		// Blacklist removes a whole host: a cam-only concept.
+		if (ctx.kind === "cam") {
+			menu.appendChild(itemButton("Blacklist", "danger", () => showBlacklist(ctx)));
+		}
 	}
 
 	// ── Reorder (per-shot, no sub-form) ────────────────────────────────────────────
@@ -131,8 +136,8 @@
 	async function doReorder(ctx) {
 		closeMenu();
 		try {
-			await api("/reorder", "POST", { ip: ctx.ip, port: Number(ctx.port) });
-			toast(`pinned ${ctx.ip}:${ctx.port} as the card image. Run \`bun run bake\` to apply`);
+			await api("/reorder", "POST", { ip: ctx.ref, port: Number(ctx.port) });
+			toast(`pinned ${ctx.ref}:${ctx.port} as the card image. Run \`bun run bake\` to apply`);
 		} catch (e) {
 			toast(`reorder failed: ${e.message}`, "error");
 		}
@@ -144,7 +149,7 @@
 		menu.replaceChildren(menuHeader(ctx));
 		const msg = document.createElement("p");
 		msg.className = "dev-msg";
-		msg.textContent = `Blacklist ${ctx.ip}? This removes every camera for this host from the DB.`;
+		msg.textContent = `Blacklist ${ctx.ref}? This removes every camera for this host from the DB.`;
 		menu.appendChild(msg);
 
 		const row = document.createElement("div");
@@ -153,10 +158,10 @@
 		row.appendChild(
 			actionButton("Blacklist", "danger", async () => {
 				try {
-					const r = await api("/blacklist", "POST", { ip: ctx.ip });
+					const r = await api("/blacklist", "POST", { ip: ctx.ref });
 					closeMenu();
 					removeHost(ctx);
-					toast(`blacklisted ${ctx.ip}, removed ${r.deleted} camera(s). run \`bun run bake\``);
+					toast(`blacklisted ${ctx.ref}, removed ${r.deleted} camera(s). run \`bun run bake\``);
 				} catch (e) {
 					toast(`blacklist failed: ${e.message}`, "error");
 				}
@@ -170,6 +175,12 @@
 
 	function showTag(ctx) {
 		menu.replaceChildren(menuHeader(ctx));
+
+		// Current tags for this entity, each removable (its × calls /untag). Sits above
+		// the add form, so the one submenu both adds and removes tags.
+		const chips = document.createElement("ul");
+		chips.className = "dev-chips";
+		menu.appendChild(chips);
 
 		const form = document.createElement("form");
 		form.className = "dev-tagform";
@@ -195,6 +206,42 @@
 		menu.appendChild(form);
 		clampMenu();
 		input.focus();
+
+		// Add one removable chip to the list (deduped). Its × removes the tag via /untag
+		// and, on a detail page, drops it from the meta table optimistically.
+		function addChip(tag) {
+			for (const li of chips.children) if (li.dataset.tag === tag) return;
+			const li = document.createElement("li");
+			li.className = "dev-chip";
+			li.dataset.tag = tag;
+			li.append(document.createTextNode(tag));
+			const x = document.createElement("button");
+			x.type = "button";
+			x.className = "dev-chip-x";
+			x.setAttribute("aria-label", `Remove ${tag}`);
+			x.textContent = "×";
+			x.addEventListener("click", async () => {
+				try {
+					await api("/untag", "POST", { kind: ctx.kind, ref: ctx.ref, tag });
+					li.remove();
+					removeTagFromMeta(ctx, tag);
+					toast(`untagged ${ctx.ref} #${tag}. run \`bun run bake\``);
+					clampMenu();
+				} catch (err) {
+					toast(`untag failed: ${err.message}`, "error");
+				}
+			});
+			li.appendChild(x);
+			chips.appendChild(li);
+		}
+
+		// Load this entity's existing tags into the chip list.
+		api(`/entity-tags?kind=${encodeURIComponent(ctx.kind)}&ref=${encodeURIComponent(ctx.ref)}`, "GET")
+			.then((tags) => {
+				for (const t of tags || []) addChip(t);
+				clampMenu();
+			})
+			.catch(() => {});
 
 		// Autocomplete state, closed over by the handlers below.
 		let matches = [];
@@ -269,17 +316,22 @@
 				return;
 			}
 			try {
-				const r = await api("/tag", "POST", { ip: ctx.ip, tag });
-				closeMenu();
+				const r = await api("/tag", "POST", { kind: ctx.kind, ref: ctx.ref, tag });
 				if (tagCache && !tagCache.includes(r.tag)) {
 					tagCache.push(r.tag);
 					tagCache.sort();
 				}
 				addTagToMeta(ctx, r.tag);
+				addChip(r.tag);
+				// Keep the menu open so several tags can be added/removed in one sitting.
+				input.value = "";
+				hideSuggest();
+				input.focus();
+				clampMenu();
 				toast(
 					r.added
-						? `tagged ${ctx.ip} #${r.tag}. run \`bun run bake\``
-						: `${ctx.ip} already tagged #${r.tag}`,
+						? `tagged ${ctx.ref} #${r.tag}. run \`bun run bake\``
+						: `${ctx.ref} already tagged #${r.tag}`,
 				);
 			} catch (err) {
 				toast(`tag failed: ${err.message}`, "error");
@@ -295,10 +347,10 @@
 	}
 
 	function removeHost(ctx) {
-		if (ctx.kind === "card") {
-			// Gallery: drop the matching card(s) from the grid.
-			document.querySelectorAll(".card[data-ip]").forEach((el) => {
-				if (el.dataset.ip === ctx.ip) fadeRemove(el);
+		if (ctx.role === "card") {
+			// Gallery: drop the matching cam card(s) from the grid.
+			document.querySelectorAll('.card[data-kind="cam"]').forEach((el) => {
+				if (el.dataset.ref === ctx.ref) fadeRemove(el);
 			});
 			return;
 		}
@@ -309,7 +361,7 @@
 		p.className = "empty";
 		const code = document.createElement("code");
 		code.textContent = "bun run bake";
-		p.append(`Host ${ctx.ip} blacklisted. Run `, code, " to update the gallery.");
+		p.append(`Host ${ctx.ref} blacklisted. Run `, code, " to update the gallery.");
 		const nav = document.createElement("p");
 		const back = document.createElement("a");
 		back.className = "back";
@@ -323,7 +375,7 @@
 	}
 
 	function addTagToMeta(ctx, tag) {
-		if (ctx.kind !== "shot") return; // cards don't render tags
+		if (ctx.role !== "shot") return; // only detail pages (host/stream/traffic) render a Tags row
 		for (const th of document.querySelectorAll(".meta th")) {
 			if (th.textContent.trim() === "Tags") {
 				const td = th.nextElementSibling;
@@ -347,6 +399,21 @@
 		tbody.appendChild(tr);
 	}
 
+	function removeTagFromMeta(ctx, tag) {
+		if (ctx.role !== "shot") return; // only detail pages render a Tags row
+		for (const th of document.querySelectorAll(".meta th")) {
+			if (th.textContent.trim() === "Tags") {
+				const td = th.nextElementSibling;
+				if (td) {
+					const tags = td.textContent.split(",").map((s) => s.trim()).filter(Boolean).filter((t) => t !== tag);
+					if (tags.length) td.textContent = tags.join(", ");
+					else th.closest("tr").remove(); // last tag gone, drop the whole row
+				}
+				return;
+			}
+		}
+	}
+
 	// ── Wiring ───────────────────────────────────────────────────────────────────
 
 	document.addEventListener("contextmenu", (e) => {
@@ -355,12 +422,19 @@
 			e.preventDefault();
 			return;
 		}
-		const shot = e.target.closest(".shot[data-ip]");
-		const card = e.target.closest(".card[data-ip]");
-		let ctx = null;
-		if (shot) ctx = { kind: "shot", ip: shot.dataset.ip, port: shot.dataset.port };
-		else if (card) ctx = { kind: "card", ip: card.dataset.ip };
-		if (!ctx || !ctx.ip) return; // native menu elsewhere
+		// One hook system: any card or detail figure carrying data-kind/data-ref is
+		// taggable. `role` (shot vs card) drives which actions show and whether the
+		// optimistic Tags-row update runs; `kind` (cam/stream/traffic) is the entity.
+		const shot = e.target.closest(".shot[data-kind]");
+		const card = e.target.closest(".card[data-kind]");
+		const el = shot || card;
+		if (!el || !el.dataset.kind || !el.dataset.ref) return; // native menu elsewhere
+		const ctx = {
+			role: shot ? "shot" : "card",
+			kind: el.dataset.kind,
+			ref: el.dataset.ref,
+			port: el.dataset.port, // only cam shots carry this
+		};
 		e.preventDefault();
 		openMenu(e.clientX, e.clientY, ctx);
 	});

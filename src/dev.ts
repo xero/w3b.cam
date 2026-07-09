@@ -12,7 +12,7 @@
 
 import { isIP } from "node:net";
 import { OUT_DIR } from "./config.ts";
-import { addIpTag, blacklist, closeDb, distinctTags, openDb, setPreferred } from "./db.ts";
+import { addTag, blacklist, closeDb, distinctTags, entityTags, openDb, removeTag, setPreferred } from "./db.ts";
 import { build } from "./build.ts";
 import { serveStatic } from "./serve.ts";
 
@@ -48,6 +48,16 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	// ── GET /__dev/tags → string[] (tag autocomplete) ──────────────────────────────
 	if (req.method === "GET" && path === "/__dev/tags") return json(distinctTags(db));
 
+	// ── GET /__dev/entity-tags?kind=&ref= → string[] (one entity's current tags) ────
+	if (req.method === "GET" && path === "/__dev/entity-tags") {
+		const q = new URL(req.url).searchParams;
+		const kind = q.get("kind");
+		const ref = q.get("ref");
+		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (!ref) return json({ error: "invalid ref" }, 400);
+		return json(entityTags(db, kind, ref));
+	}
+
 	// ── POST /__dev/blacklist {ip}, emulates blacklist.ts for an IP ───────────────
 	if (req.method === "POST" && path === "/__dev/blacklist") {
 		const { ip } = await readBody(req);
@@ -68,13 +78,27 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 			: json({ error: "ip:port not stored" }, 404);
 	}
 
-	// ── POST /__dev/tag {ip, tag}, the new tagging workflow (INSERT OR IGNORE) ─────
+	// ── POST /__dev/tag {kind, ref, tag}, unified tagging (INSERT OR IGNORE) ───────
+	// `kind` picks the source; `ref` is that source's key (ip_str / video_id / id).
+	// Only cams get the isIP shape-check; stream/traffic refs are opaque strings.
 	if (req.method === "POST" && path === "/__dev/tag") {
-		const { ip, tag } = await readBody(req);
-		if (typeof ip !== "string" || isIP(ip) === 0) return json({ error: "invalid ip" }, 400);
+		const { kind, ref, tag } = await readBody(req);
+		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
+		if (kind === "cam" && isIP(ref) === 0) return json({ error: "invalid ip" }, 400);
 		if (typeof tag !== "string" || tag.trim() === "") return json({ error: "invalid tag" }, 400);
-		const added = addIpTag(db, ip, tag);
-		return json({ ip, tag: tag.trim().toLowerCase(), added });
+		const added = addTag(db, kind, ref, tag);
+		return json({ kind, ref, tag: tag.trim().toLowerCase(), added });
+	}
+
+	// ── POST /__dev/untag {kind, ref, tag}, remove one tag (inverse of /tag) ───────
+	if (req.method === "POST" && path === "/__dev/untag") {
+		const { kind, ref, tag } = await readBody(req);
+		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
+		if (typeof tag !== "string" || tag.trim() === "") return json({ error: "invalid tag" }, 400);
+		const removed = removeTag(db, kind, ref, tag);
+		return json({ kind, ref, tag: tag.trim().toLowerCase(), removed });
 	}
 
 	return json({ error: "not found" }, 404);

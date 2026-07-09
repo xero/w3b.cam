@@ -129,7 +129,7 @@ bun sync --push   # publish your edits and rebuild the live site
 
 **`bun sync --pull`.** Downloads `camhunting.sqlite` from the `db-store` release and overwrites your local copy, so you start from exactly what the site is serving. It removes the stale `-wal` and `-shm` sidecars afterward so SQLite reads the fresh file cleanly.
 
-**`bun dev`.** Bakes a dev build of the site, serves it at `http://localhost:1337`, and opens your browser. Right-click any card or screenshot to blacklist the host, pin that port as the card image, or attach a tag; each action writes straight to the local database. Changes apply in the page immediately with no rebuild, because re-extracting thousands of screenshots from a database of a few hundred MB takes tens of seconds. Run `bun bake` when you want the static `out/` regenerated. It never runs in CI and never touches the published database.
+**`bun dev`.** Bakes a dev build of the site, serves it at `http://localhost:1337`, and opens your browser. Right-click a cam card or screenshot to blacklist the host, pin that port as the card image, or attach a tag; right-click a stream or traffic card, or its detail page, to tag it too. The Tag menu lists the entity's current tags as chips, each with an × to remove it, so you add and remove in one place. Each action writes straight to the local database. Changes apply in the page immediately with no rebuild, because re-extracting thousands of screenshots from a database of a few hundred MB takes tens of seconds. Run `bun bake` when you want the static `out/` regenerated. It never runs in CI and never touches the published database.
 
 **`bun sync --push`.** Uploads your local database over the `db-store` asset and triggers the `build` workflow, so the live site rebuilds from your edits. It creates the `db-store` release on the first push if none exists yet.
 
@@ -159,7 +159,7 @@ A few details worth knowing:
 - **RDP and VNC screens are filtered.** Some hosts serve a remote-desktop or VNC login that Shodan labels as a webcam. The scraper and importer skip any product of `remote desktop protocol` or `vnc` as they ingest. That guard only blocks new rows, so `bun purge` retroactively drops any that predate it. Re-run `bun bake` afterward.
 - **Removed hosts stay removed.** `bun blacklist <ip-or-hostname>` deletes every matching row and records the entry in a blacklist table; the scraper and importer skip anything listed, so a host you drop never comes back on a later run. An IP matches exactly (every port); a hostname or domain matches itself and any subdomain, so `bun blacklist cloudzy.com` also drops `cam.node.cloudzy.com`. IPs live in a `blacklist` table, hostnames in a `host_blacklist` table. Reverse either with `bun unblacklist <ip-or-hostname>`, then re-run `bun scrape` to fetch the host again. A fresh database starts with a built-in list of blacklisted hostnames; IPs start empty.
 - **You pick a host's card image.** A host seen on several ports has several screenshots, and its gallery card shows the most recent one by default. `bun reorder <ip> <port>` pins one port so its screenshot leads instead, and `bun reorder <ip> --clear` reverts to the default. The pin lives in a `preferred` column that the scraper and importer never overwrite, so it survives later runs. Re-run `bun bake` to rebuild the site.
-- **You can tag a host.** `bun tag <ip> <tag>` attaches a free-form label to an IP, stored in an `ip_tags` table and shown on the host's page. Tags are normalized to lowercase and deduplicated, and a host can carry several. Re-run `bun bake` to rebuild the site.
+- **Tags are unified across all three sources.** `bun tag <cam|stream|traffic> <ref> <tag>` attaches a free-form label to a cam (by IP), a stream (by video id), or a traffic cam (by id), stored in one `tags` table keyed on `(kind, ref, tag)`. The same tag spans every source, so tagging `street` on a webcam, a stream, and a traffic cam groups all three under it. Tags are normalized to lowercase and deduplicated, and an entity can carry several. They show on each detail page, size a tag cloud at `/tags.html` in the header nav, and each tag links to a paginated browse page mixing every entity that carries it. Remove one with `bun untag <cam|stream|traffic> <ref> <tag>`, or in `bun dev` by clicking the × on a tag chip in the right-click Tag menu. Existing `ip_tags` rows migrate into the new table automatically on first run, as `kind='cam'`; the old table is kept untouched as `ip_tags_migrated`. Re-run `bun bake` to rebuild the site.
 - **YouTube streams live in their own table.** `bun youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in a `youtube` table keyed on the video id, apart from the Shodan `webcams` table because the metadata differs. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams.html`, one card per stream, and each stream's page links the other streams sharing its channel.
 - **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row and a streams row, each two pinned cards followed by the two newest of that kind. `bun feature <cam|stream> <slot> <ref>` sets one of two slots per kind — an IP for a cam, a video id for a stream — stored in a `featured` table keyed on `(kind, slot)`. A pin whose row is gone is skipped and backfilled from the newest, so the page always fills four and four. The full paginated galleries are unchanged: cams move to `/page001.html`, streams stay at `/streams.html`, both reachable from the header nav. Re-run `bun bake` to rebuild the site.
 - **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
@@ -193,7 +193,8 @@ src/
   blacklist.ts    drop a host and record it so scrapes skip it
   unblacklist.ts  reverse a blacklist entry
   reorder.ts      pin a host's card image to one port
-  tag.ts          attach a free-form label to a host
+  tag.ts          attach a free-form label to a cam, stream, or traffic cam
+  untag.ts        remove a tag from a cam, stream, or traffic cam
   feature.ts      pin a cam or stream to a homepage slot
   geo.ts          assign a YouTube stream's map coordinates (yt_geo)
   purge.ts        remove stored RDP/VNC rows that predate the ingest filter
@@ -217,6 +218,11 @@ out/               generated site (gitignored)
   streams002.html  full streams pages 2..N
   <ip>.html     one page per host (dots become hyphens)
   yt-<id>.html  one page per YouTube stream
+  traffic.html  page 1 of the traffic cams gallery
+  traffic002.html  full traffic pages 2..N
+  t-<id>.html   one page per traffic cam
+  tags.html     tag cloud, links to per-tag browse pages
+  tag-<slug>.html  one paginated browse page per tag
   map.html      world map of every geolocated camera
   img/          extracted screenshots and thumbnails
   snips/        body-only snippets for htmx swaps
@@ -227,7 +233,7 @@ out/               generated site (gitignored)
 
 ## GitHub Actions
 
-Nine workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, feature, and geo edits happen from the Actions tab without a local checkout.
+Ten workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, untag, feature, and geo edits happen from the Actions tab without a local checkout.
 
 **`build`.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
 
@@ -241,7 +247,9 @@ Nine workflows in `.github/workflows/` run the same commands in CI. The site bui
 
 **`reorder`.** Takes an IP and a port, pins that port's screenshot as the host's gallery card, saves the database, then calls `build` so the new card appears on the site.
 
-**`tag`.** Takes an IP and a tag, attaches the label to the host, saves the database, then calls `build` so the tag appears on the site.
+**`tag`.** Takes a kind (cam, stream, or traffic), a ref (an IP, a video id, or a cam id), and a tag, attaches the label to that entity, saves the database, then calls `build` so the tag appears on the site.
+
+**`untag`.** Takes the same kind, ref, and tag as `tag` and removes that label from the entity, saves the database, then calls `build` so the tag drops from the site.
 
 **`feature`.** Takes a kind (cam or stream), a slot (1 or 2), and a ref (an IP for a cam, a video id for a stream), pins it to that homepage slot, saves the database, then calls `build` so the homepage updates.
 
@@ -253,7 +261,7 @@ Nine workflows in `.github/workflows/` run the same commands in CI. The site bui
 
 ### Running a workflow
 
-Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` takes an IP and a label, and `feature` takes a kind, a slot, and a ref. Invalid input fails the run immediately.
+Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` and `untag` each take a kind, a ref, and a label, and `feature` takes a kind, a slot, and a ref. Invalid input fails the run immediately.
 
 ### One-time setup
 

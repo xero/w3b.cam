@@ -44,6 +44,9 @@ export const YT_PAGE_SIZE = 12;
 /** Traffic (Osiris) cams shown per gallery page (one card per cam; the curated set is large). */
 export const TRAFFIC_PAGE_SIZE = 24;
 
+/** Entities shown per tag-browse page (a blended grid of cams, streams, and traffic cards). */
+export const TAG_PAGE_SIZE = 24;
+
 /** Shodan returns 100 results per search page. */
 export const PER_PAGE = 100;
 
