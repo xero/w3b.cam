@@ -388,9 +388,9 @@ function btnLayers(label: string): string {
 }
 
 /** Navigable pager entry: a real link (works without JS), styled as a `.btn`. */
-function pageLink(href: string, snip: string, label: string): string {
+function pageLink(href: string, snip: string, label: string, cls = ""): string {
 	return [
-		`<a class="btn" href="${href}" hx-get="${snip}" hx-push-url="${href}">`,
+		`<a class="btn${cls ? " " + cls : ""}" href="${href}" hx-get="${snip}" hx-push-url="${href}">`,
 		btnLayers(label),
 		`</a>`,
 	].join("\n");
@@ -421,15 +421,24 @@ function renderPagerWith(
 	const parts: string[] = [];
 	const first = cur > 1;
 	const last = cur < total;
-	const link = (p: number, label: string) => pageLink(urlFor(p), snipFor(p), label);
+	const link = (p: number, label: string, cls?: string) => pageLink(urlFor(p), snipFor(p), label, cls);
 
 	parts.push(first ? link(1, "&laquo;") : pageDisabled("&laquo;"));
 	parts.push(first ? link(cur - 1, "&lsaquo;") : pageDisabled("&lsaquo;"));
-	for (const p of pageWindow(cur, total)) {
-		if (p === "…") parts.push(`<span class="gap">&hellip;</span>`);
+	// The boundary shortcuts — leading `1 …` / trailing `… total` — carry `.pager-ends`
+	// so a narrow-width media query can hide them, leaving the local window + arrows.
+	// `pageWindow` only ever emits "…" beside a boundary sentinel, so every gap is an
+	// end, and a page number is an end only when it sits at the window edge next to a gap.
+	const win = pageWindow(cur, total);
+	win.forEach((p, i) => {
+		if (p === "…") parts.push(`<span class="gap pager-ends">&hellip;</span>`);
 		else if (p === cur) parts.push(pageCurrent(p));
-		else parts.push(link(p, String(p)));
-	}
+		else {
+			const isEnd =
+				(i === 0 && win[1] === "…") || (i === win.length - 1 && win[win.length - 2] === "…");
+			parts.push(link(p, String(p), isEnd ? "pager-ends" : undefined));
+		}
+	});
 	parts.push(last ? link(cur + 1, "&rsaquo;") : pageDisabled("&rsaquo;"));
 	parts.push(last ? link(total, "&raquo;") : pageDisabled("&raquo;"));
 
@@ -1506,6 +1515,14 @@ main {
 	& .gap {
 		padding: 0 0.25rem;
 		color: var(--muted);
+	}
+
+	/* Portrait phones: drop the leading "1 ..." / trailing "... last" boundary
+	   shortcuts so the pager fits without wrapping. The first/last arrows remain. */
+	@media (max-width: 480px) {
+		& .pager-ends {
+			display: none;
+		}
 	}
 }
 
