@@ -4,6 +4,7 @@
 
 import { displayParts, escapeHtml, pickDisplayName } from "./util.ts";
 import type { FeedKind, StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
+import { TIPS_HTML } from "./tips.ts";
 import { WORLD_PATHS } from "./worldmap.ts";
 
 export const TITLE = "w3b.cam";
@@ -154,6 +155,13 @@ export const mapPageFileName = "map.html";
 export const mapSnippetFileName = "map.html";
 export const mapUrl = "/map.html";
 export const mapSnippetUrl = "/snips/map.html";
+
+// Tips is a single, static standalone page linked from the nav. Its body is baked
+// from tips.md once (see src/tips.ts); the build just emits it like tags/map.
+export const tipsPageFileName = "tips.html";
+export const tipsSnippetFileName = "tips.html";
+export const tipsUrl = "/tips.html";
+export const tipsSnippetUrl = "/snips/tips.html";
 
 /**
  * Live-view URL for a host:port (external link, opened in a new tab). IPv6 literals
@@ -1187,6 +1195,16 @@ export function renderMapMain(points: MapPoint[], total: number): string {
 	].join("\n");
 }
 
+/**
+ * The Tips page: a static article (cam-hunting guide) whose body is pre-converted
+ * from tips.md into TIPS_HTML (src/tips.ts). No dynamic data — the same string is
+ * the full page's <main> and its htmx snippet. Headings carry GitHub-style anchor
+ * ids so the in-page table-of-contents links resolve.
+ */
+export function renderTipsMain(): string {
+	return [`<section class="tips">`, indentBlock(TIPS_HTML.trim(), 1), `</section>`].join("\n");
+}
+
 // ── Page shell + CSS ─────────────────────────────────────────────────────────
 
 const CSS = `:root {
@@ -1211,7 +1229,9 @@ const CSS = `:root {
 	--coast:   #2b3a52;
 	--dot:     #6cc6e6;
 	--dot-hi:  #f2c14e;
+	--warn:    #e0533f;
 	--font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
 	/* metrics */
 	--gap:    clamp(1rem, 2vw, 1.5rem);
@@ -1537,6 +1557,160 @@ main {
 	}
 }
 
+/* Tips: a static, markdown-derived article (renderTipsMain / src/tips.ts). The
+   shell owns the page's sole <h1>, so this content starts at <h2>. */
+.tips {
+	max-width: 48rem;
+
+	& h2,
+	& h3,
+	& h4,
+	& h5 {
+		line-height: 1.25;
+		scroll-margin-top: 1rem;
+	}
+
+	& h2 {
+		margin-bottom: 1rem;
+		padding-bottom: 0.35rem;
+		font-size: clamp(1.5rem, 4vw, 2rem);
+		color: var(--text);
+		border-bottom: 1px solid var(--border);
+	}
+
+	& h3 {
+		margin-top: 2.5rem;
+		padding-bottom: 0.3rem;
+		font-size: clamp(1.2rem, 3vw, 1.5rem);
+		color: var(--accent);
+		border-bottom: 1px solid var(--border);
+	}
+
+	& h4 {
+		margin-top: 1.75rem;
+		font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+		color: var(--text);
+	}
+
+	& h5 {
+		margin-top: 1.25rem;
+		font-size: 1rem;
+		color: var(--accent);
+	}
+
+	& p {
+		margin: 0.75rem 0;
+	}
+
+	& ul,
+	& ol {
+		margin: 0.75rem 0;
+		padding-left: 1.5rem;
+
+		& ul {
+			margin: 0.25rem 0;
+		}
+	}
+
+	& li {
+		margin: 0.3rem 0;
+	}
+
+	& a {
+		color: var(--accent);
+		text-decoration: none;
+
+		&:hover,
+		&:focus-visible {
+			text-decoration: underline;
+		}
+	}
+
+	& code {
+		padding: 0.1em 0.35em;
+		font-family: var(--font-mono);
+		font-size: 0.9em;
+		color: var(--accent);
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		overflow-wrap: anywhere;
+	}
+
+	& hr {
+		margin: 2.5rem 0;
+		border: none;
+		border-top: 1px solid var(--border);
+	}
+}
+
+/* ToC and admonitions are both authored as blockquotes. */
+.tips blockquote {
+	margin: 1.25rem 0;
+	padding: 0.6rem 1rem;
+	color: var(--muted);
+	border-left: 3px solid var(--border);
+
+	& > :first-child {
+		margin-top: 0;
+	}
+}
+
+.tips .admonition {
+	color: var(--text);
+	border-left-width: 4px;
+
+	& .admonition-label {
+		margin: 0 0 0.35rem;
+		font-size: 0.8em;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	&.caution {
+		border-left-color: var(--warn);
+
+		& .admonition-label {
+			color: var(--warn);
+		}
+	}
+
+	&.tip {
+		border-left-color: var(--dot);
+
+		& .admonition-label {
+			color: var(--dot);
+		}
+	}
+}
+
+/* Wide query/filter tables scroll instead of breaking the layout. */
+.tips .table-wrap {
+	margin: 1.25rem 0;
+	overflow-x: auto;
+}
+
+.tips table {
+	width: 100%;
+	border-collapse: collapse;
+
+	& th,
+	& td {
+		padding: 0.4rem 0.7rem;
+		text-align: left;
+		vertical-align: top;
+		border: 1px solid var(--border);
+	}
+
+	& thead th {
+		color: var(--accent);
+		font-weight: 600;
+		white-space: nowrap;
+		background: var(--surface);
+	}
+}
+
 .back {
 	align-self: flex-start;
 	color: var(--accent);
@@ -1775,6 +1949,7 @@ body > footer {
 		--coast:   #b9c4d0;
 		--dot:     #12667f;
 		--dot-hi:  #c0392b;
+		--warn:    #c0392b;
 	}
 }`;
 
@@ -1841,6 +2016,7 @@ export function renderShell({ title, headerText, mainInner, dev = false }: Shell
 		indentBlock(navLink("/traffic.html", trafficSnippetUrl(1), "traffic"), 4),
 		indentBlock(navLink(tagsUrl, tagsSnippetUrl, "tags"), 4),
 		indentBlock(navLink(mapUrl, mapSnippetUrl, "map"), 4),
+		indentBlock(navLink(tipsUrl, tipsSnippetUrl, "tips"), 4),
 		`${T(3)}</nav>`,
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</header>`,

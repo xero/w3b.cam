@@ -219,8 +219,9 @@ export async function grabFrame(url: string): Promise<Snapshot | null> {
   // Axis image.cgi / mjpeg endpoints stream multipart and often allow only one
   // connection, so a failed direct read can hold it and block the retry. Try the
   // mpjpeg demuxer first for those; everything else reads directly first (no wasted
-  // attempt for the 748 MP4/HLS cams).
-  const mjpegLikely = /image\.cgi|axis-cgi|mjpe?g/i.test(url);
+  // attempt for the 748 MP4/HLS cams). axis-cgi/media.cgi is the exception: it is an
+  // h264/mp4 stream, not multipart MJPEG, so it must read directly first.
+  const mjpegLikely = /image\.cgi|mjpe?g/i.test(url) || (/axis-cgi/i.test(url) && !/media\.cgi/i.test(url));
   const order = mjpegLikely ? [mpjpeg, direct] : [direct, mpjpeg];
 
   let snap: Snapshot | null = null;

@@ -41,6 +41,7 @@ import {
 	renderShell,
 	renderTagBrowseMain,
 	renderTagsMain,
+	renderTipsMain,
 	renderTrafficDetail,
 	renderTrafficMain,
 	renderYtDetail,
@@ -53,6 +54,8 @@ import {
 	tagSlug,
 	tagsPageFileName,
 	tagsSnippetFileName,
+	tipsPageFileName,
+	tipsSnippetFileName,
 	TITLE,
 	toTrafficCam,
 	toYtStream,
@@ -354,6 +357,9 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	const tagsHeaderText = `${tagCounts.length.toLocaleString()} ${tagCounts.length === 1 ? "tag" : "tags"}`;
 	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts, slugForTag), `tags | ${TITLE}`, tagsHeaderText, { dev });
 
+	// ── Tips: a single static standalone page (content baked from tips.md) ────────────
+	await writePage(tipsPageFileName, tipsSnippetFileName, renderTipsMain(), `tips | ${TITLE}`, headerText, { dev });
+
 	// ── Tag browse pages: one paginated, blended gallery per tag ─────────────────────
 	// Resolve each tagged (kind, ref) against the in-memory view models via the maps
 	// built above, keeping each kind's native newest-first order. Only cams can go
@@ -412,7 +418,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		`Wrote ${OUT_DIR}/: homepage + ${hosts.length} host(s) across ${totalPages} cams page(s), ` +
 			`${hosts.length} host page(s), ${streams.length} stream(s) across ${ytTotalPages} streams page(s), ` +
 			`${trafficCams.length} traffic cam(s) across ${trafficTotalPages} traffic page(s), ` +
-			`map (${mapPoints.length.toLocaleString()} dot(s)), tags cloud + ${tagPagesWritten} browse page(s) across ${tagCounts.length} tag(s), ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
+			`map (${mapPoints.length.toLocaleString()} dot(s)), tags cloud + ${tagPagesWritten} browse page(s) across ${tagCounts.length} tag(s), tips page, ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
 	);
 }
 

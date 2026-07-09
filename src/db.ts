@@ -723,8 +723,9 @@ export function normalizeTag(tag: string): string {
  * ip_tags held), then renames ip_tags out of the way so this can never re-fire:
  * guarding on "tags is empty" alone would resurrect these rows if `tags` were ever
  * cleared to re-seed (the gesture the other seeds rely on). The renamed
- * `ip_tags_migrated` stays in the DB as an untouched safety net. Runs before
- * seedTags; a fresh DB never had ip_tags, so it no-ops there.
+ * `ip_tags_migrated` lingers as a disposable safety net, fine to drop by hand once
+ * the migration is trusted. Runs before seedTags; a fresh DB never had ip_tags, so
+ * it no-ops there.
  */
 function backfillTags(db: Database): void {
 	const present = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ip_tags'").get() != null;

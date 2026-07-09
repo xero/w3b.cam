@@ -1,0 +1,33 @@
+Apexis APM-H803-MPC
+D-Link DCS-5000L webcam http interface
+D-Link DCS-5020L webcam http interface
+D-Link DCS-5211L
+D-Link DCS-5222L
+D-Link DCS-930L webcam http interface
+D-Link DCS-930LB1 webcam http interface
+D-Link DCS-931L webcam http interface
+D-Link DCS-932L webcam http interface
+D-Link DCS-932LB1 webcam http interface
+D-Link DCS-936L
+D-Link DCS-942L
+D-Link DCS-942LB1
+D-Link/Airlink IP webcam http config
+Dahua-based CM-Hybrid NVR 3108-I3
+Hikvision IP Camera
+Panasonic BB-SC384B webcam http config
+Panasonic BB-SW172 webcam http config
+Panasonic DG-SP304 webcam http config
+Panasonic WV-SC385 webcam http config
+Panasonic WV-SF135 webcam http config
+Panasonic WV-SW158 webcam http config
+TRENDnet IP Camera
+Trendnet TV-IP572PI
+Trendnet TV-IP662WI
+Trendnet TV-IP672W
+Trendnet TV-IP672WI
+Trendnet TV-IP862IC
+VCS-VideoJet-Webserver httpd
+Vivotek IP7131 Network Camera http config
+Yawcam webcam viewer httpd
+webcam 7 httpd
+webcamXP 5
