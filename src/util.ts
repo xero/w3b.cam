@@ -19,6 +19,20 @@ export async function mapLimit<T, R>(items: T[], n: number, fn: (item: T, i: num
   return out;
 }
 
+/**
+ * A random sample of up to `n` distinct items from `arr` (partial Fisher-Yates over a
+ * copy; `arr` is not mutated). Returns min(n, arr.length) items; n <= 0 yields [].
+ */
+export function pickRandom<T>(arr: readonly T[], n: number): T[] {
+  const a = arr.slice();
+  const k = Math.max(0, Math.min(n, a.length));
+  for (let i = 0; i < k; i++) {
+    const j = i + Math.floor(Math.random() * (a.length - i));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a.slice(0, k);
+}
+
 /** Read a required env var or exit with a clear message. */
 export function mustEnv(name: string): string {
   const value = process.env[name];

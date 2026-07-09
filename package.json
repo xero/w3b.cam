@@ -18,6 +18,7 @@
     "untag": "bun run src/untag.ts",
     "geo": "bun run src/geo.ts",
     "feature": "bun run src/feature.ts",
+    "unfeature": "bun run src/unfeature.ts",
     "purge": "bun run src/purge.ts",
     "sync": "bun run src/sync.ts",
     "merge": "bun run src/merge.ts",

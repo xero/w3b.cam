@@ -176,7 +176,7 @@ A few details worth knowing:
 - **Tags are unified across all three sources.** `bun tag <cam|stream|traffic> <ref> <tag>` attaches a free-form label to a cam (by IP), a stream (by video id), or a traffic cam (by id), stored in one `tags` table keyed on `(kind, ref, tag)`. The same tag spans every source, so tagging `street` on a webcam, a stream, and a traffic cam groups all three under it. Tags are normalized to lowercase and deduplicated, and an entity can carry several. They show on each detail page, size a tag cloud at `/tags.html` in the header nav, and each tag links to a paginated browse page mixing every entity that carries it. Remove one with `bun untag <cam|stream|traffic> <ref> <tag>`, or in `bun dev` by clicking the × on a tag chip in the right-click Tag menu. Existing `ip_tags` rows migrate into the new table automatically on first run, as `kind='cam'`; the old table is kept untouched as `ip_tags_migrated`. Re-run `bun bake` to rebuild the site.
 - **YouTube streams live in their own table.** `bun import --youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in a `youtube` table keyed on the video id, apart from the Shodan `webcams` table because the metadata differs. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams.html`, one card per stream, and each stream's page links the other streams sharing its channel.
 - **MJPEG cams come from a curated URL list.** `bun import --mjpeg` reads `in/mjpeg.md`, one camera URL per line, and classifies each by vendor using the endpoint fingerprints in [tips.md](./tips.md). It bakes a still with ffmpeg for the card and upserts into the shared `traffic` table, distinguished by a per-vendor `source`. Because the site is https, only https feeds embed live, a smooth Motion JPEG `<img>` for streams and an auto-refreshing `<img>` for snapshots; http feeds are mixed-content-blocked, so they store as a `link` kind that shows the baked still plus a "View live" link. Viewer-page URLs resolve to their real media endpoint so they still yield a thumbnail. Re-run `bun bake` to rebuild the site.
-- **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row and a streams row, each two pinned cards followed by the two newest of that kind. `bun feature <cam|stream> <slot> <ref>` sets one of two slots per kind — an IP for a cam, a video id for a stream — stored in a `featured` table keyed on `(kind, slot)`. A pin whose row is gone is skipped and backfilled from the newest, so the page always fills four and four. The full paginated galleries are unchanged: cams move to `/page001.html`, streams stay at `/streams.html`, both reachable from the header nav. Re-run `bun bake` to rebuild the site.
+- **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row and a streams row, each up to two featured cards followed by the newest of that kind. `bun feature <cam|stream> <ref>` adds an entry to a `featured` table keyed on `(kind, ref)` (an IP for a cam, a video id for a stream). The set is unbounded, and each build randomly picks two per kind to show, so the homepage rotates on its own. A featured entry whose row is gone is skipped and backfilled from the newest, so the page always fills four and four. Remove one with `bun unfeature <cam|stream> <ref>`, or in `bun dev` by right-clicking a card and choosing Unfeature. The full paginated galleries are unchanged: cams move to `/page001.html`, streams stay at `/streams.html`, both reachable from the header nav. Re-run `bun bake` to rebuild the site.
 - **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. IP-derived filenames are slugified against a hex allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
 - **Every geolocated camera plots on a world map.** `/map.html`, in the header nav, is one baked SVG that plots every located camera across all three sources as a dot linking to its detail page. Shodan and traffic cams carry coordinates already; YouTube publishes none, so `bun geo <video_id> <lat> <lng>` assigns one by hand into a `yt_geo` table (seeded with best-guess coordinates for the streams whose titles name a place). With JavaScript on you drag to pan and scroll to zoom; without it the map is a fixed world view whose dots are still plain links, each with a location tooltip. Re-run `bun bake` to rebuild the site.
 
@@ -214,7 +214,8 @@ src/
   reorder.ts      pin a host's card image to one port
   tag.ts          attach a free-form label to a cam, stream, or traffic cam
   untag.ts        remove a tag from a cam, stream, or traffic cam
-  feature.ts      pin a cam or stream to a homepage slot
+  feature.ts      add a cam or stream to the homepage featured set
+  unfeature.ts    remove a cam or stream from the featured set
   geo.ts          assign a YouTube stream's map coordinates (yt_geo)
   purge.ts        remove stored RDP/VNC rows that predate the ingest filter
   render.ts       pure HTML rendering (grouping, pager, pages, shell)
@@ -254,7 +255,7 @@ out/               generated site (gitignored)
 
 ## GitHub Actions
 
-Ten workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, untag, feature, and geo edits happen from the Actions tab without a local checkout.
+The workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, untag, feature, unfeature, and geo edits happen from the Actions tab without a local checkout.
 
 **`build`.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
 
@@ -272,7 +273,7 @@ Ten workflows in `.github/workflows/` run the same commands in CI. The site buil
 
 **`untag`.** Takes the same kind, ref, and tag as `tag` and removes that label from the entity, saves the database, then calls `build` so the tag drops from the site.
 
-**`feature`.** Takes a kind (cam or stream), a slot (1 or 2), and a ref (an IP for a cam, a video id for a stream), pins it to that homepage slot, saves the database, then calls `build` so the homepage updates.
+**`feature` / `unfeature`.** `feature` takes a kind (cam or stream) and a ref (an IP for a cam, a video id for a stream) and adds it to the homepage featured set; `unfeature` takes the same pair and removes it. Each saves the database, then calls `build` so the homepage updates.
 
 **`geo`.** Takes a video id, a latitude, and a longitude, assigns that stream's map coordinates in the `yt_geo` table, saves the database, then calls `build` so the stream appears on the map.
 
@@ -282,7 +283,7 @@ Ten workflows in `.github/workflows/` run the same commands in CI. The site buil
 
 ### Running a workflow
 
-Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` and `untag` each take a kind, a ref, and a label, and `feature` takes a kind, a slot, and a ref. Invalid input fails the run immediately.
+Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` and `untag` each take a kind, a ref, and a label, and `feature` and `unfeature` each take a kind and a ref. Invalid input fails the run immediately.
 
 ### One-time setup
 

@@ -519,7 +519,7 @@ function renderHostName(host: Host): string {
 export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 	const badge =
 		host.count > 1
-			? `\n${T(2)}<span class="badge">${host.count} screenshots</span>`
+			? `\n${T(2)}<span class="badge">${host.count} angles</span>`
 			: "";
 	const loc = [host.city, host.country_name]
 		.filter((v): v is string => !!v && v.trim() !== "")
@@ -732,13 +732,6 @@ export function toYtStream(row: StoredYtRow, thumbHref: string, tags: string[] =
 	};
 }
 
-/** Corner badge for a stream card: "live" or "upcoming", nothing for offline/unknown. */
-function liveBadge(liveContent: string | null): string {
-	if (liveContent === "live") return `\n${T(2)}<span class="badge live">live</span>`;
-	if (liveContent === "upcoming") return `\n${T(2)}<span class="badge upcoming">upcoming</span>`;
-	return "";
-}
-
 /** Human-readable live status for the detail metadata table. */
 function liveStatusText(liveContent: string | null): string | null {
 	switch (liveContent) {
@@ -760,14 +753,13 @@ function liveStatusText(liveContent: string | null): string | null {
  * subtitle is the channel.
  */
 export function renderYtCard(stream: YtStream, opts: RenderOpts = {}): string {
-	const badge = liveBadge(stream.liveContent);
 	const channel = stream.channelTitle
 		? `\n${T(1)}<p class="loc">${escapeHtml(stream.channelTitle)}</p>`
 		: "";
 	const devAttrs = opts.dev ? ` data-kind="stream" data-ref="${escapeHtml(stream.videoId)}"` : "";
 	return [
 		`<a class="card" href="${ytUrl(stream.slug)}" hx-get="${ytSnippetUrl(stream.slug)}" hx-push-url="${ytUrl(stream.slug)}"${devAttrs}>`,
-		`${T(1)}<figure role="img" aria-label="${escapeHtml(stream.thumbAlt)}" style="background-image:url('${escapeHtml(stream.thumbHref)}')">${badge}`,
+		`${T(1)}<figure role="img" aria-label="${escapeHtml(stream.thumbAlt)}" style="background-image:url('${escapeHtml(stream.thumbHref)}')">`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
 		`${T(2)}<span class="dn-line dn-name">${escapeHtml(stream.label)}</span>`,
@@ -930,12 +922,6 @@ function trafficLoc(cam: TrafficCam): string {
 	return parts.filter((v) => v !== "").join(", ");
 }
 
-/** Corner badge for a traffic card: "live" for video/MJPEG cams, nothing for stills. */
-function trafficBadge(kind: FeedKind): string {
-	if (kind === "mp4" || kind === "hls" || kind === "mjpeg") return `\n${T(2)}<span class="badge live">live</span>`;
-	return "";
-}
-
 /** Human label for a cam's feed kind, shown in the detail metadata table. */
 function feedKindLabel(kind: FeedKind): string {
 	switch (kind) {
@@ -960,13 +946,12 @@ function feedKindLabel(kind: FeedKind): string {
  * plain black figure.
  */
 export function renderTrafficCard(cam: TrafficCam, opts: RenderOpts = {}): string {
-	const badge = trafficBadge(cam.feedKind);
 	const loc = escapeHtml(trafficLoc(cam));
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
 	const devAttrs = opts.dev ? ` data-kind="traffic" data-ref="${escapeHtml(cam.id)}"` : "";
 	return [
 		`<a class="card" href="${trafficUrl(cam.slug)}" hx-get="${trafficDetailSnippetUrl(cam.slug)}" hx-push-url="${trafficUrl(cam.slug)}"${devAttrs}>`,
-		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">${badge}`,
+		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
 		`${T(2)}<span class="dn-line dn-name">${escapeHtml(cam.name)}</span>`,
@@ -1331,6 +1316,30 @@ const CSS = `:root {
 	--gap:    clamp(1rem, 2vw, 1.5rem);
 }
 
+@media (prefers-color-scheme: light) {
+	:root {
+		--bg:      #f4f6f8;
+		--surface: #ffffff;
+		--text:    #1a2230;
+		--muted:   #5b6472;
+		--accent:  #0d3b4a;
+		--border:  #d3dbe3;
+		--land:    #dfe6ee;
+		--coast:   #b9c4d0;
+		--dot:     #12667f;
+		--dot-hi:  #c0392b;
+		--warn:    #c0392b;
+	}
+}
+#favicon {
+	fill: var(--depths);
+}
+@media (prefers-color-scheme: dark) {
+	#favicon {
+		fill: var(--sand);
+	}
+}
+
 html,
 body {
 	height: 100%;
@@ -1377,16 +1386,13 @@ body > header {
 			}
 		}
 
-		/* Portrait phones: tighten the nav so all six buttons fit one row, give it
-		   a full-width row of its own, and centre the buttons across it. The
-		   dev-only import button may still wrap; phone users never see it. */
 		@media (max-width: 480px) {
-			gap: 0.4rem;
 			flex-basis: 100%;
-			justify-content: center;
+			justify-content: space-between;
+			gap: unset;
 
 			a .front {
-				padding: 6px 7px;
+				padding: 6px 10px;
 				font-size: 1.1rem;
 			}
 		}
@@ -1399,8 +1405,6 @@ h1 {
 	letter-spacing: 0.02em;
 	line-height: 1em;
 
-	/* Portrait phones: Roboto renders w3b.cam ~5% wider than the hook, so the
-	   title overshoots at 2rem. Nudge it down to line the right edges back up. */
 	@media (max-width: 480px) {
 		font-size: 1.9rem;
 	}
@@ -1430,6 +1434,12 @@ h1 > em {
 		color: var(--ice);
 		font-weight: 600;
 		font-size: 10px;
+	}
+
+	@media (max-width: 735px) {
+		header & {
+			display: none;
+		}
 	}
 }
 
@@ -1537,8 +1547,6 @@ main {
 		color: var(--muted);
 	}
 
-	/* Portrait phones: drop the leading "1 ..." / trailing "... last" boundary
-	   shortcuts so the pager fits without wrapping. The first/last arrows remain. */
 	@media (max-width: 480px) {
 		& .pager-ends {
 			display: none;
@@ -1701,8 +1709,6 @@ main {
 	}
 }
 
-/* Tips: a static, markdown-derived article (renderTipsMain / src/tips.ts). The
-   shell owns the page's sole <h1>, so this content starts at <h2>. */
 .tips {
 	max-width: 48rem;
 
@@ -1788,7 +1794,6 @@ main {
 	}
 }
 
-/* ToC and admonitions are both authored as blockquotes. */
 .tips blockquote {
 	margin: 1.25rem 0;
 	padding: 0.6rem 1rem;
@@ -1829,7 +1834,6 @@ main {
 	}
 }
 
-/* Wide query/filter tables scroll instead of breaking the layout. */
 .tips .table-wrap {
 	margin: 1.25rem 0;
 	overflow-x: auto;
@@ -1867,9 +1871,15 @@ main {
 }
 
 body > footer {
-	padding: var(--gap);
-	color: var(--muted);
-	border-top: 1px solid var(--border);
+	display: none;
+	@media (max-width: 735px) {
+		display: flex;
+		flex-flow: row wrap;
+		align-items: baseline;
+		gap: 0.75rem 1.5rem;
+		padding: var(--gap);
+		border-top: 1px solid var(--border);
+	}
 }
 
 .badge.live {
@@ -2064,22 +2074,6 @@ body > footer {
 		fill: var(--dot-hi);
 		fill-opacity: 1;
 	}
-}
-
-@media (prefers-color-scheme: light) {
-	:root {
-		--bg:      #f4f6f8;
-		--surface: #ffffff;
-		--text:    #1a2230;
-		--muted:   #5b6472;
-		--accent:  #0d3b4a;
-		--border:  #d3dbe3;
-		--land:    #dfe6ee;
-		--coast:   #b9c4d0;
-		--dot:     #12667f;
-		--dot-hi:  #c0392b;
-		--warn:    #c0392b;
-	}
 }`;
 
 /** Site-wide stat block under the h1, identical on every page. */
@@ -2167,6 +2161,9 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(2)}<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">`,
 		indentBlock(mainInner, 3),
 		`${T(2)}</main>`,
+		`${T(2)}<footer>`,
+		`${T(3)}<p class="count">${counts}</p>`,
+		`${T(2)}</footer>`,
 		`${T(2)}<script src="/htmx.min.js"></script>`,
 		// Live-feed client on every page (tiny): drives traffic detail feeds and must be
 		// present however you arrive, including htmx swaps whose snippets carry no script.

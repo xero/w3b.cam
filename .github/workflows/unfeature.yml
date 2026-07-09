@@ -1,13 +1,13 @@
-name: feature
+name: unfeature
 
-# Adds a cam/stream to the homepage (index.html) featured set, persists the updated DB
-# to the db-store release, then rebuilds & deploys the site. The homepage shows a random
-# couple of the featured entries per kind each build. Remove one with the unfeature workflow.
+# Removes a cam/stream from the homepage (index.html) featured set, persists the updated
+# DB to the db-store release, then rebuilds & deploys the site. The inverse of the feature
+# workflow.
 on:
   workflow_dispatch:
     inputs:
       kind:
-        description: What to feature
+        description: What to unfeature
         required: true
         type: choice
         options:
@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  feature:
+  unfeature:
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release upload/create (persist the DB)
@@ -43,11 +43,11 @@ jobs:
 
       # kind/ref passed via env (not inline ${{ }}) to avoid shell injection.
       # The script validates both and exits 1 on bad input.
-      - name: Set featured
+      - name: Remove featured
         env:
           KIND: ${{ inputs.kind }}
           REF: ${{ inputs.ref }}
-        run: bun run feature "$KIND" "$REF"
+        run: bun run unfeature "$KIND" "$REF"
 
       - name: Save DB to release store
         env:
@@ -57,9 +57,9 @@ jobs:
             || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
           gh release upload db-store camhunting.sqlite --clobber
 
-  # Featuring changes the homepage, so rebuild & deploy to reflect it.
+  # Unfeaturing changes the homepage, so rebuild & deploy to reflect it.
   call-build:
-    needs: feature
+    needs: unfeature
     permissions:
       contents: read
       pages: write

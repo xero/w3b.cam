@@ -374,19 +374,18 @@ const IP_TAGS_SEED: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
- * The cams and streams pinned to the homepage (index.html). Two slots per kind;
- * the homepage renders each slot's featured card alongside the two newest of that
- * kind. `ref` is an `ip_str` when kind='cam' and a `video_id` when kind='stream',
- * so this one table pins both sources (like the unified `tags` table). Keyed on
- * (kind, slot) so a slot holds exactly one ref and `setFeatured` upserts in place.
+ * The cams and streams eligible to be showcased on the homepage (index.html). An
+ * unbounded set keyed on (kind, ref), with no slots: the build samples a couple of
+ * each kind at random every run (see build.ts), so this table holds candidates, not
+ * fixed positions. `ref` is an `ip_str` when kind='cam' and a `video_id` when
+ * kind='stream', so this one table pins both sources (like the unified `tags` table).
  */
 const FEATURED_SCHEMA = `
 CREATE TABLE IF NOT EXISTS featured (
-	kind      TEXT    NOT NULL,   -- 'cam' | 'stream'
-	slot      INTEGER NOT NULL,   -- 1-based position within its kind
-	ref       TEXT    NOT NULL,   -- ip_str for cams, video_id for streams
-	added_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-	PRIMARY KEY (kind, slot)
+	kind      TEXT NOT NULL,   -- 'cam' | 'stream'
+	ref       TEXT NOT NULL,   -- ip_str for cams, video_id for streams
+	added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+	PRIMARY KEY (kind, ref)
 ) STRICT;
 `;
 
@@ -398,11 +397,11 @@ export type FeaturedKind = "cam" | "stream";
  * runs only when the table is empty (see seedFeatured), so a slot re-pointed by hand
  * (or via `bun run feature`) never reverts.
  */
-const FEATURED_SEED: readonly { kind: FeaturedKind; slot: number; ref: string }[] = [
-	{ kind: "cam", slot: 1, ref: "149.232.130.7" },
-	{ kind: "cam", slot: 2, ref: "160.72.56.179" },
-	{ kind: "stream", slot: 1, ref: "Yw8CZCEOdXE" },
-	{ kind: "stream", slot: 2, ref: "UNbOvsRAx9U" },
+const FEATURED_SEED: readonly { kind: FeaturedKind; ref: string }[] = [
+	{ kind: "cam", ref: "149.232.130.7" },
+	{ kind: "cam", ref: "160.72.56.179" },
+	{ kind: "stream", ref: "Yw8CZCEOdXE" },
+	{ kind: "stream", ref: "UNbOvsRAx9U" },
 ];
 
 export function openDb(path = DB_PATH): Database {
@@ -418,6 +417,7 @@ export function openDb(path = DB_PATH): Database {
 	db.run(HOST_BLACKLIST_SCHEMA);
 	db.run(TAGS_SCHEMA);
 	db.run(FEATURED_SCHEMA);
+	migrateFeatured(db);
 	seedHostBlacklist(db);
 	backfillTags(db);
 	seedTags(db);
@@ -844,28 +844,54 @@ export function loadTagCounts(db: Database): { tag: string; count: number }[] {
 // ── Featured (homepage pins) ──────────────────────────────────────────────────
 
 /**
+ * Rebuild an old (kind, slot) `featured` table into the flat (kind, ref) shape.
+ * FEATURED_SCHEMA's CREATE TABLE IF NOT EXISTS is a no-op when the table already
+ * exists, so it can't reshape an old DB; hence this. Detects the old schema by a
+ * lingering `slot` column and rebuilds, collapsing to distinct (kind, ref). Runs in
+ * one transaction so a crash rolls back to the original table, and guards on the
+ * `slot` column so it's a no-op once migrated. Mirrors migrate() for webcams.
+ */
+function migrateFeatured(db: Database): void {
+	const cols = db.query("PRAGMA table_info(featured)").all() as { name: string }[];
+	if (!cols.some((c) => c.name === "slot")) return; // already the flat shape
+	db.transaction(() => {
+		db.run(`CREATE TABLE featured_new (
+			kind      TEXT NOT NULL,
+			ref       TEXT NOT NULL,
+			added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (kind, ref)
+		) STRICT;`);
+		// INSERT OR IGNORE collapses a ref that sat in both slots, keeping the first added_at.
+		db.run("INSERT OR IGNORE INTO featured_new (kind, ref, added_at) SELECT kind, ref, added_at FROM featured");
+		db.run("DROP TABLE featured");
+		db.run("ALTER TABLE featured_new RENAME TO featured");
+	})();
+}
+
+/**
  * Seed the `featured` table from FEATURED_SEED, but only on a fresh (empty) table.
- * Idempotent: once any slot is set this is a no-op, so a slot re-pointed by hand
- * never reverts. Mirrors seedTags / seedHostBlacklist.
+ * Idempotent: once any row exists this is a no-op, so hand-featured entries never
+ * revert. Mirrors seedTags / seedHostBlacklist.
  */
 export function seedFeatured(db: Database): void {
 	const { c } = db.query("SELECT COUNT(*) AS c FROM featured").get() as { c: number };
 	if (c > 0) return;
-	const stmt = db.query("INSERT OR IGNORE INTO featured (kind, slot, ref) VALUES (?, ?, ?)");
-	db.transaction((seed: readonly { kind: FeaturedKind; slot: number; ref: string }[]) => {
-		for (const s of seed) stmt.run(s.kind, s.slot, s.ref);
+	const stmt = db.query("INSERT OR IGNORE INTO featured (kind, ref) VALUES (?, ?)");
+	db.transaction((seed: readonly { kind: FeaturedKind; ref: string }[]) => {
+		for (const s of seed) stmt.run(s.kind, s.ref);
 	})(FEATURED_SEED);
 }
 
 /**
- * The homepage's featured refs, split by kind and ordered by slot: `cams` holds
- * ip_strs, `streams` holds video_ids. The build resolves each ref against the
- * current rows (a ref whose row is gone is simply skipped, see build.ts).
+ * The homepage's candidate featured refs, split by kind: `cams` holds ip_strs,
+ * `streams` holds video_ids. Order is not meaningful (the build samples at random);
+ * the build resolves each ref against the current rows and skips any whose row is
+ * gone (see build.ts).
  */
 export function loadFeatured(db: Database): { cams: string[]; streams: string[] } {
 	const rows = db
-		.query("SELECT kind, slot, ref FROM featured ORDER BY kind, slot")
-		.all() as { kind: string; slot: number; ref: string }[];
+		.query("SELECT kind, ref FROM featured ORDER BY kind, added_at, ref")
+		.all() as { kind: string; ref: string }[];
 	const cams: string[] = [];
 	const streams: string[] = [];
 	for (const r of rows) {
@@ -875,12 +901,19 @@ export function loadFeatured(db: Database): { cams: string[]; streams: string[] 
 	return { cams, streams };
 }
 
-/** Pin `ref` into (kind, slot), replacing whatever that slot held. Upsert, so re-featuring a slot never dupes a row. */
-export function setFeatured(db: Database, kind: FeaturedKind, slot: number, ref: string): void {
-	db.query(
-		`INSERT INTO featured (kind, slot, ref) VALUES (?, ?, ?)
-		 ON CONFLICT(kind, slot) DO UPDATE SET ref = excluded.ref, added_at = datetime('now')`,
-	).run(kind, slot, ref);
+/** Mark (kind, ref) as featured. Idempotent (INSERT OR IGNORE); true if newly added. */
+export function addFeatured(db: Database, kind: FeaturedKind, ref: string): boolean {
+	return db.query("INSERT OR IGNORE INTO featured (kind, ref) VALUES (?, ?)").run(kind, ref).changes > 0;
+}
+
+/** Un-feature (kind, ref). True if a row was deleted, false if it was not featured. */
+export function removeFeatured(db: Database, kind: FeaturedKind, ref: string): boolean {
+	return db.query("DELETE FROM featured WHERE kind = ? AND ref = ?").run(kind, ref).changes > 0;
+}
+
+/** True when (kind, ref) is currently featured. */
+export function isFeatured(db: Database, kind: FeaturedKind, ref: string): boolean {
+	return db.query("SELECT 1 FROM featured WHERE kind = ? AND ref = ? LIMIT 1").get(kind, ref) != null;
 }
 
 /** True when a stream with this exact video_id is stored. Companion to hasHost. */

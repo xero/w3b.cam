@@ -125,6 +125,10 @@
 		}
 		// Tag applies to every kind.
 		menu.appendChild(itemButton("Tag", "", () => showTag(ctx)));
+		// Feature toggles homepage-showcase membership: cam + stream only (traffic has no pins).
+		if (ctx.kind === "cam" || ctx.kind === "stream") {
+			menu.appendChild(featureItem(ctx));
+		}
 		// Blacklist removes a whole host: a cam-only concept.
 		if (ctx.kind === "cam") {
 			menu.appendChild(itemButton("Blacklist", "danger", () => showBlacklist(ctx)));
@@ -145,6 +149,53 @@
 		} catch (e) {
 			toast(`reorder failed: ${e.message}`, "error");
 		}
+	}
+
+	// ── Feature / Unfeature (toggle, no sub-form) ──────────────────────────────────
+
+	/**
+	 * A one-item toggle for homepage-feature membership. Its label mirrors current DB
+	 * state, fetched async (like showTag's chip load) so the menu still opens instantly:
+	 * the button ships disabled with a provisional label and enables once GET resolves.
+	 * State lives on the button's dataset, so a second click toggles straight back. No
+	 * confirm prompt (it's a reversible toggle), and no optimistic card change (featuring
+	 * only affects which cards the next `bun run bake` shows on the homepage).
+	 */
+	function featureItem(ctx) {
+		const b = itemButton("Feature…", "", null);
+		b.dataset.state = ""; // "" (unknown) | "on" | "off"
+		b.disabled = true; // can't click until we know the current state
+
+		b.addEventListener("click", async () => {
+			if (b.dataset.state === "") return; // guard the pre-resolve window
+			const on = b.dataset.state !== "on"; // target is the opposite of current
+			try {
+				await api("/feature", "POST", { kind: ctx.kind, ref: ctx.ref, on });
+				b.dataset.state = on ? "on" : "off";
+				b.textContent = on ? "Unfeature" : "Feature"; // flip in place; menu stays open
+				toast(`${on ? "featured" : "unfeatured"} ${ctx.ref}. run \`bun run bake\``);
+			} catch (e) {
+				toast(`feature failed: ${e.message}`, "error");
+			}
+		});
+
+		// Resolve the label from current state. If the menu closes mid-fetch the button is
+		// detached (isConnected false), so both paths no-op instead of touching a dead node.
+		api(`/featured?kind=${encodeURIComponent(ctx.kind)}&ref=${encodeURIComponent(ctx.ref)}`, "GET")
+			.then(({ featured }) => {
+				if (!b.isConnected) return;
+				b.dataset.state = featured ? "on" : "off";
+				b.textContent = featured ? "Unfeature" : "Feature";
+				b.disabled = false;
+			})
+			.catch(() => {
+				if (!b.isConnected) return;
+				b.dataset.state = "off";
+				b.textContent = "Feature";
+				b.disabled = false;
+			});
+
+		return b;
 	}
 
 	// ── Blacklist (confirm sub-form) ───────────────────────────────────────────────

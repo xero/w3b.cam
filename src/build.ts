@@ -24,7 +24,7 @@ import {
 	YT_PAGE_SIZE,
 } from "./config.ts";
 import { allRows, allTrafficRows, allYtRows, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadYtGeo, openDb } from "./db.ts";
-import { isBlockedProduct } from "./util.ts";
+import { isBlockedProduct, pickRandom } from "./util.ts";
 import {
 	extFromMime,
 	groupByIp,
@@ -165,8 +165,11 @@ async function writePage(fullName: string, snipName: string, mainInner: string, 
 	await Bun.write(`${SNIPS_DIR}/${snipName}`, `${mainInner}\n`);
 }
 
-/** Cards shown per kind on the homepage: the featured pins first, then the newest fill the rest. */
+/** Cards shown per kind on the homepage: the featured picks first, then the newest fill the rest. */
 const HOME_PER_KIND = 4;
+
+/** How many of the HOME_PER_KIND cards are sampled at random from the featured set each build (rest fill from newest). */
+const HOME_FEATURED_PER_KIND = 2;
 
 /**
  * Assemble one homepage row: resolve the featured `refs` against `byRef` (a pin
@@ -375,8 +378,19 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		.map((r) => trafficById.get(r.id))
 		.filter((c): c is TrafficCam => c !== undefined);
 
-	const homeCams = pickHome(featured.cams, camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
-	const homeStreams = pickHome(featured.streams, streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
+	// Resolve featured refs to live rows, then drop the newest that will fill the rest of
+	// the row: a random featured pick must never land on a card that's about to show as
+	// "newest" anyway, which would waste a featured slot on something already visible.
+	// (pickHome dedups display, but this keeps the featured picks genuinely distinct from
+	// the fill.) Then sample a couple; pickHome tops up from the newest to HOME_PER_KIND.
+	// Net per kind: up to N random featured that AREN'T among the newest fill, then newest.
+	const fillCount = HOME_PER_KIND - HOME_FEATURED_PER_KIND;
+	const topCamIps = new Set(hosts.slice(0, fillCount).map((h) => h.ip));
+	const topStreamIds = new Set(newestStreams.slice(0, fillCount).map((s) => s.videoId));
+	const liveCamRefs = featured.cams.filter((ip) => camByIp.has(ip) && !topCamIps.has(ip));
+	const liveStreamRefs = featured.streams.filter((id) => streamByVideo.has(id) && !topStreamIds.has(id));
+	const homeCams = pickHome(pickRandom(liveCamRefs, HOME_FEATURED_PER_KIND), camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
+	const homeStreams = pickHome(pickRandom(liveStreamRefs, HOME_FEATURED_PER_KIND), streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
 	const homeTraffic = newestTraffic.slice(0, HOME_PER_KIND);
 	await writePage("index.html", "index.html", renderHomeMain(homeCams, homeStreams, homeTraffic, { dev }), TITLE, stats, { dev });
 

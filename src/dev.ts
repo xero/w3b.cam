@@ -13,7 +13,7 @@
 
 import { isIP } from "node:net";
 import { OUT_DIR } from "./config.ts";
-import { addTag, blacklist, closeDb, distinctTags, entityTags, openDb, removeTag, setPreferred } from "./db.ts";
+import { addFeatured, addTag, blacklist, closeDb, distinctTags, entityTags, isFeatured, openDb, removeFeatured, removeTag, setPreferred } from "./db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "./ingest.ts";
 import { build } from "./build.ts";
 import { serveStatic } from "./serve.ts";
@@ -58,6 +58,29 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
 		if (!ref) return json({ error: "invalid ref" }, 400);
 		return json(entityTags(db, kind, ref));
+	}
+
+	// ── GET /__dev/featured?kind=&ref= → { featured } (labels the toggle menu item) ─
+	// cam|stream ONLY: traffic has no featured pins (the homepage slices newest traffic
+	// directly, see build.ts), so a traffic ref can never be featured.
+	if (req.method === "GET" && path === "/__dev/featured") {
+		const q = new URL(req.url).searchParams;
+		const kind = q.get("kind");
+		const ref = q.get("ref");
+		if (kind !== "cam" && kind !== "stream") return json({ error: "invalid kind" }, 400);
+		if (!ref) return json({ error: "invalid ref" }, 400);
+		return json({ featured: isFeatured(db, kind, ref) });
+	}
+
+	// ── POST /__dev/feature {kind, ref, on} → set homepage-feature membership ───────
+	if (req.method === "POST" && path === "/__dev/feature") {
+		const { kind, ref, on } = await readBody(req);
+		if (kind !== "cam" && kind !== "stream") return json({ error: "invalid kind" }, 400);
+		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
+		if (typeof on !== "boolean") return json({ error: "invalid on" }, 400);
+		if (on) addFeatured(db, kind, ref);
+		else removeFeatured(db, kind, ref);
+		return json({ kind, ref, featured: on });
 	}
 
 	// ── POST /__dev/blacklist {ip}, emulates blacklist.ts for an IP ───────────────
