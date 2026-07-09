@@ -1376,11 +1376,25 @@ body > header {
 				padding: 8px;
 			}
 		}
+
+		/* Portrait phones: tighten the nav so all six buttons fit one row, give it
+		   a full-width row of its own, and centre the buttons across it. The
+		   dev-only import button may still wrap; phone users never see it. */
+		@media (max-width: 480px) {
+			gap: 0.4rem;
+			flex-basis: 100%;
+			justify-content: center;
+
+			a .front {
+				padding: 5px 6px;
+				font-size: 1rem;
+			}
+		}
 	}
 }
 
 h1 {
-	font-size: clamp(1.3rem, 4vw, 2rem);
+	font-size: 2rem;
 	font-weight: 600;
 	letter-spacing: 0.02em;
 	line-height: 1em;
