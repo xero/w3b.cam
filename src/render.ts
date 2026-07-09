@@ -1386,8 +1386,8 @@ body > header {
 			justify-content: center;
 
 			a .front {
-				padding: 5px 6px;
-				font-size: 1rem;
+				padding: 6px 7px;
+				font-size: 1.1rem;
 			}
 		}
 	}
@@ -1398,6 +1398,12 @@ h1 {
 	font-weight: 600;
 	letter-spacing: 0.02em;
 	line-height: 1em;
+
+	/* Portrait phones: Roboto renders w3b.cam ~5% wider than the hook, so the
+	   title overshoots at 2rem. Nudge it down to line the right edges back up. */
+	@media (max-width: 480px) {
+		font-size: 1.9rem;
+	}
 }
 
 h1 > em {
