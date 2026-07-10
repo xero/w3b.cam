@@ -5,7 +5,7 @@
 // than the camera. This mines the full banner (http.title, the `hikvision` block,
 // cpe23, http.server, http.html path fragments, and the RTSP `data` banner) through an
 // ordered cascade, highest-confidence signal first, and records every decision in a
-// `fingerprint_audit` table so a run is reviewable and reversible.
+// `fingerprints` table so a run is reviewable and reversible.
 //
 // The classifiers (fingerprintWebcam / fingerprintTraffic) are pure so ingesters can
 // adopt them later; this file's CLI is the batch backfill.
@@ -348,7 +348,7 @@ function specificity(label: string): number {
 type Action = "fill" | "fix-server" | "upgrade" | "normalize" | "keep" | "unknown";
 
 interface Decision {
-	source: "webcam" | "traffic";
+	kind: "cam" | "feed";
 	ref: string;
 	old: string | null;
 	next: string | null;
@@ -360,9 +360,9 @@ interface Decision {
 }
 
 const AUDIT_SCHEMA = `
-CREATE TABLE IF NOT EXISTS fingerprint_audit (
-	source    TEXT NOT NULL,   -- 'webcam' | 'traffic'
-	ref       TEXT NOT NULL,   -- 'ip:port' for webcams, traffic id for traffic
+CREATE TABLE IF NOT EXISTS fingerprints (
+	kind      TEXT NOT NULL,   -- 'cam' | 'feed'
+	ref       TEXT NOT NULL,   -- cams.id: 'ip:port' for cams, feed id for feeds
 	old_value TEXT,
 	new_value TEXT,
 	tier      TEXT,
@@ -370,7 +370,7 @@ CREATE TABLE IF NOT EXISTS fingerprint_audit (
 	vendor    TEXT,
 	evidence  TEXT,
 	action    TEXT NOT NULL,   -- fill | fix-server | upgrade | normalize | keep | unknown
-	PRIMARY KEY (source, ref)
+	PRIMARY KEY (kind, ref)
 ) STRICT;
 `;
 
@@ -378,7 +378,7 @@ CREATE TABLE IF NOT EXISTS fingerprint_audit (
 function decideWebcam(row: StoredRow, fp: FpResult | null): Decision {
 	const ref = `${row.ip_str}:${row.port}`;
 	const old = row.product;
-	const base = { source: "webcam" as const, ref, old, vendor: fp?.vendor ?? "-", evidence: fp?.evidence ?? "" };
+	const base = { kind: "cam" as const, ref, old, vendor: fp?.vendor ?? "-", evidence: fp?.evidence ?? "" };
 
 	if (isServerOrEmpty(old)) {
 		// Target row: take any tier the cascade produced.
@@ -615,32 +615,32 @@ function main(): void {
 			const fp = fingerprintTraffic(t);
 			const old = (t.product ?? null) as string | null;
 			if (fp) {
-				trafficDecisions.push({ source: "traffic", ref: t.id, old, next: fp.product, tier: fp.tier, method: fp.method, vendor: fp.vendor, evidence: fp.evidence, action: (old ?? "").trim() === "" ? "fill" : "upgrade" });
+				trafficDecisions.push({ kind: "feed", ref: t.id, old, next: fp.product, tier: fp.tier, method: fp.method, vendor: fp.vendor, evidence: fp.evidence, action: (old ?? "").trim() === "" ? "fill" : "upgrade" });
 			}
 		}
 
 		// ── Write audit (always; rebuilt each run) ──
-		db.run("DELETE FROM fingerprint_audit");
+		db.run("DELETE FROM fingerprints");
 		const ins = db.query(
-			`INSERT OR REPLACE INTO fingerprint_audit (source, ref, old_value, new_value, tier, method, vendor, evidence, action)
+			`INSERT OR REPLACE INTO fingerprints (kind, ref, old_value, new_value, tier, method, vendor, evidence, action)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		db.transaction(() => {
 			for (const d of [...decisions, ...trafficDecisions]) {
-				ins.run(d.source, d.ref, d.old, d.next, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null, d.action);
+				ins.run(d.kind, d.ref, d.old, d.next, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null, d.action);
 			}
 		})();
 
 		// ── Apply (optional) ──
+		// Both sources write the same column on the same table now: a Decision's `ref`
+		// IS the cams id ('ip:port' for cams, feed id for feeds), so one UPDATE covers both.
 		if (apply) {
-			const upCam = db.query("UPDATE webcams SET product = ? WHERE ip_str = ? AND port = ?");
-			const upTraffic = db.query("UPDATE traffic SET product = ? WHERE id = ?");
+			const up = db.query("UPDATE cams SET product = ? WHERE id = ?");
 			const changedCam = db.transaction(() => {
 				let n = 0;
 				for (const d of decisions) {
 					if (d.action === "fill" || d.action === "fix-server" || d.action === "upgrade" || d.action === "normalize") {
-						const [ip, port] = splitRef(d.ref);
-						upCam.run(d.next, ip, Number(port));
+						up.run(d.next, d.ref);
 						n++;
 					}
 				}
@@ -649,16 +649,16 @@ function main(): void {
 			const changedTraffic = db.transaction(() => {
 				let n = 0;
 				for (const d of trafficDecisions) {
-					upTraffic.run(d.next, d.ref);
+					up.run(d.next, d.ref);
 					n++;
 				}
 				return n;
 			})();
-			console.log(`Applied: ${changedCam} webcam product update(s), ${changedTraffic} traffic product write(s).`);
+			console.log(`Applied: ${changedCam} cam product update(s), ${changedTraffic} feed product write(s).`);
 		}
 
 		report(db, decisions, trafficDecisions, faviconApplied, traffic.length);
-		if (!apply) console.log(`\nDry run — nothing written to product. Review fingerprint_audit, then re-run with --apply.`);
+		if (!apply) console.log(`\nDry run. Nothing written to product; review the fingerprints table, then re-run with --apply.`);
 	} finally {
 		closeDb(db);
 	}
@@ -707,7 +707,7 @@ function report(db: Database, cam: Decision[], traffic: Decision[], faviconAppli
 
 	console.log(`\nunsolved target sample (title | server | :port):`);
 	for (const d of unknown.slice(0, 20)) {
-		const row = db.query("SELECT json_extract(raw_json,'$.http.title') t, json_extract(raw_json,'$.http.server') s, port FROM webcams WHERE ip_str = ? AND port = ?").get(...splitRef(d.ref).map((v, i) => (i === 1 ? Number(v) : v))) as { t: string | null; s: string | null; port: number } | null;
+		const row = db.query("SELECT json_extract(raw_json,'$.http.title') t, json_extract(raw_json,'$.http.server') s, port FROM cams WHERE id = ?").get(d.ref) as { t: string | null; s: string | null; port: number } | null;
 		if (row) console.log(`  ${(row.t ?? "(no title)").slice(0, 34).padEnd(34)} | ${(row.s ?? "-").slice(0, 22).padEnd(22)} | :${row.port}`);
 	}
 }

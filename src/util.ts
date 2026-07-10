@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import type { CamRow, ShodanScreenshot, WebcamMatch } from "./types.ts";
 
 export const sleep = (ms: number): Promise<void> =>
@@ -179,33 +180,42 @@ function rawWithoutImage(m: WebcamMatch): Record<string, unknown> {
   return copy;
 }
 
-/** Map a match + its screenshot into a DB row. Returns null if it lacks an ip/port. */
+/** Map a match + its screenshot into a unified `cams` row (kind='cam'). Returns null if it lacks an ip/port. */
 export function toRow(m: WebcamMatch, ss: ShodanScreenshot): CamRow | null {
   if (typeof m.ip_str !== "string" || typeof m.port !== "number") return null;
   const loc = m.location ?? {};
+  const hostnames = asStringArray(m.hostnames);
+  const domains = asStringArray(m.domains);
+  // Display name: first real domain/hostname (see displayParts), else the Shodan
+  // product, else the bare IP. Stored so the unified dataset has one name per row.
+  const name = displayParts(hostnames, domains, m.ip_str, []).name ?? m.product ?? m.ip_str;
   return {
+    id: `${m.ip_str}:${m.port}`,
+    kind: "cam",
+    source: "shodan",
+    feed_kind: "screenshot",
+    name,
+    product: m.product ?? null,
     ip_str: m.ip_str,
     port: m.port,
+    lat: typeof loc.latitude === "number" ? loc.latitude : null,
+    lng: typeof loc.longitude === "number" ? loc.longitude : null,
+    city: loc.city ?? null,
+    country_code: loc.country_code ?? null,
+    country_name: loc.country_name ?? null,
+    region_code: loc.region_code ?? null,
+    ss_mime: ss.mime,
+    // sha256 of the screenshot bytes, uniform with the other sources (Shodan's own
+    // numeric perceptual hash stays in raw_json.hash).
+    ss_hash: createHash("sha256").update(Buffer.from(ss.data, "base64")).digest("hex"),
+    ss_base64: ss.data,
     shodan_id: shodanId(m),
-    transport: m.transport ?? null,
-    timestamp: m.timestamp ?? null,
-    hostnames: JSON.stringify(asStringArray(m.hostnames)),
-    domains: JSON.stringify(asStringArray(m.domains)),
+    hostnames: JSON.stringify(hostnames),
+    domains: JSON.stringify(domains),
     org: m.org ?? null,
     isp: m.isp ?? null,
     asn: m.asn ?? null,
-    os: m.os ?? null,
-    product: m.product ?? null,
-    country_name: loc.country_name ?? null,
-    country_code: loc.country_code ?? null,
-    city: loc.city ?? null,
-    region_code: loc.region_code ?? null,
-    latitude: typeof loc.latitude === "number" ? loc.latitude : null,
-    longitude: typeof loc.longitude === "number" ? loc.longitude : null,
-    tags: JSON.stringify(asStringArray(m.tags)),
-    ss_mime: ss.mime,
-    ss_hash: ss.hash,
-    ss_base64: ss.data,
+    observed_at: m.timestamp ?? null,
     raw_json: JSON.stringify(rawWithoutImage(m)),
   };
 }

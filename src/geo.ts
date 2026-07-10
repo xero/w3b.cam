@@ -1,4 +1,4 @@
-// Geo: assign manual coordinates to a YouTube stream, stored in yt_geo. YouTube
+// Geo: assign manual coordinates to a YouTube stream, stored inline on its `cams` row. YouTube
 // publishes no location, so these are our own best-guess lat/lng (from the place
 // named in the stream's title) that place the stream on the map. One coord per
 // video; re-running replaces it. Re-run `bun run bake` afterwards to reflect it on

@@ -29,7 +29,7 @@ const startingRows = countRows(db);
 try {
   console.log(`\n── Blacklist summary ──`);
   if (isIP(arg) !== 0) {
-    const { changes } = db.query("DELETE FROM webcams WHERE ip_str = ?").run(arg);
+    const { changes } = db.query("DELETE FROM cams WHERE kind = 'cam' AND ip_str = ?").run(arg);
     const added = blacklist(db, arg);
     console.log(`IP:         ${arg}`);
     console.log(`Deleted:    ${changes} row(s)`);

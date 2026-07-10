@@ -55,7 +55,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		const q = new URL(req.url).searchParams;
 		const kind = q.get("kind");
 		const ref = q.get("ref");
-		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (!ref) return json({ error: "invalid ref" }, 400);
 		return json(entityTags(db, kind, ref));
 	}
@@ -87,7 +87,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	if (req.method === "POST" && path === "/__dev/blacklist") {
 		const { ip } = await readBody(req);
 		if (typeof ip !== "string" || isIP(ip) === 0) return json({ error: "invalid ip" }, 400);
-		const { changes } = db.query("DELETE FROM webcams WHERE ip_str = ?").run(ip);
+		const { changes } = db.query("DELETE FROM cams WHERE kind = 'cam' AND ip_str = ?").run(ip);
 		const added = blacklist(db, ip);
 		return json({ ip, deleted: changes, blacklisted: added });
 	}
@@ -108,7 +108,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	// Only cams get the isIP shape-check; stream/traffic refs are opaque strings.
 	if (req.method === "POST" && path === "/__dev/tag") {
 		const { kind, ref, tag } = await readBody(req);
-		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
 		if (kind === "cam" && isIP(ref) === 0) return json({ error: "invalid ip" }, 400);
 		if (typeof tag !== "string" || tag.trim() === "") return json({ error: "invalid tag" }, 400);
@@ -119,7 +119,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	// ── POST /__dev/untag {kind, ref, tag}, remove one tag (inverse of /tag) ───────
 	if (req.method === "POST" && path === "/__dev/untag") {
 		const { kind, ref, tag } = await readBody(req);
-		if (kind !== "cam" && kind !== "stream" && kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
 		if (typeof tag !== "string" || tag.trim() === "") return json({ error: "invalid tag" }, 400);
 		const removed = removeTag(db, kind, ref, tag);
@@ -131,10 +131,10 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	// a plain delete; a removed cam returns if you re-ingest its source list.
 	if (req.method === "POST" && path === "/__dev/remove") {
 		const { kind, ref } = await readBody(req);
-		if (kind !== "traffic") return json({ error: "invalid kind" }, 400);
+		if (kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
-		const { changes } = db.query("DELETE FROM traffic WHERE id = ?").run(ref);
-		db.query("DELETE FROM tags WHERE kind = 'traffic' AND ref = ?").run(ref);
+		const { changes } = db.query("DELETE FROM cams WHERE kind = 'feed' AND id = ?").run(ref);
+		db.query("DELETE FROM meta WHERE kind = 'feed' AND ref = ?").run(ref);
 		return changes ? json({ kind, ref, deleted: changes }) : json({ error: "id not stored" }, 404);
 	}
 

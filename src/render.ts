@@ -277,7 +277,7 @@ function isBetterRep(candidate: StoredRow, current: StoredRow): boolean {
 	const cp = candidate.preferred ? 1 : 0;
 	const rp = current.preferred ? 1 : 0;
 	if (cp !== rp) return cp > rp;
-	return (candidate.timestamp ?? "") > (current.timestamp ?? "");
+	return (candidate.observed_at ?? "") > (current.observed_at ?? "");
 }
 
 /**
@@ -327,7 +327,7 @@ export function groupByIp(
 		const shots: Shot[] = group.map((r) => ({
 			port: r.port,
 			product: r.product,
-			timestamp: r.timestamp,
+			timestamp: r.observed_at,
 			imgHref: imgHref(r),
 			imgAlt: `Screenshot from ${r.ip_str}:${r.port}`,
 			liveHref: liveUrl(r.ip_str, r.port),
@@ -349,8 +349,8 @@ export function groupByIp(
 			country_name: rep.country_name,
 			city: rep.city,
 			region_code: rep.region_code,
-			latitude: rep.latitude,
-			longitude: rep.longitude,
+			latitude: rep.lat,
+			longitude: rep.lng,
 			org: rep.org,
 			isp: rep.isp,
 			asn: rep.asn,
@@ -361,7 +361,7 @@ export function groupByIp(
 			httpTitle: extractHttpTitle(rep.raw_json),
 			tags: tagsByIp.get(ip) ?? [],
 		};
-		built.push({ host, ts: rep.timestamp ?? "" });
+		built.push({ host, ts: rep.observed_at ?? "" });
 	}
 
 	// Newest host first. ISO timestamps sort lexically; a missing timestamp ("")
@@ -721,11 +721,11 @@ export interface YtStream {
 
 /** Map a stored youtube row (plus its extracted image URL and tags) into a view model. */
 export function toYtStream(row: StoredYtRow, thumbHref: string, tags: string[] = []): YtStream {
-	const label = (row.label && row.label.trim()) || (row.title && row.title.trim()) || row.video_id;
+	const label = (row.label && row.label.trim()) || (row.title && row.title.trim()) || row.id;
 	return {
-		videoId: row.video_id,
-		slug: ytSlug(row.video_id),
-		url: row.url,
+		videoId: row.id,
+		slug: ytSlug(row.id),
+		url: row.live_url,
 		label,
 		channelId: row.channel_id,
 		channelTitle: row.channel_title,
@@ -913,7 +913,7 @@ export function toTrafficCam(row: StoredTrafficRow, thumbHref: string, tags: str
 		source: row.source,
 		product: row.product ?? null,
 		city: row.city,
-		country: row.country,
+		country: row.country_name,
 		lat: row.lat,
 		lng: row.lng,
 		feedKind: row.feed_kind,
@@ -959,7 +959,7 @@ function feedKindLabel(kind: FeedKind): string {
 export function renderTrafficCard(cam: TrafficCam, opts: RenderOpts = {}): string {
 	const loc = escapeHtml(trafficLoc(cam));
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
-	const devAttrs = opts.dev ? ` data-kind="traffic" data-ref="${escapeHtml(cam.id)}"` : "";
+	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
 	return [
 		`<a class="card" href="${trafficUrl(cam.slug)}" hx-get="${trafficDetailSnippetUrl(cam.slug)}" hx-push-url="${trafficUrl(cam.slug)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">`,
@@ -1024,7 +1024,7 @@ export function renderTrafficDetail(cam: TrafficCam, opts: RenderOpts = {}): str
 	const media = trafficMedia(cam);
 	const liveHref = cam.externalUrl ?? cam.liveUrl;
 	// Dev hook on the figure (a `.shot`, like host pages) so right-click tags this cam.
-	const devAttrs = opts.dev ? ` data-kind="traffic" data-ref="${escapeHtml(cam.id)}"` : "";
+	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
 	const figure = [
 		`${T(1)}<figure class="shot"${devAttrs}>`,
 		media,
@@ -1174,7 +1174,7 @@ export function renderFingerprintsMain(groups: ProductGroup[]): string {
 export type TagItem =
 	| { kind: "cam"; host: Host }
 	| { kind: "stream"; stream: YtStream }
-	| { kind: "traffic"; cam: TrafficCam };
+	| { kind: "feed"; cam: TrafficCam };
 
 /** Render one browse-page card, dispatching on the item's kind. */
 function renderTagCard(item: TagItem, opts: RenderOpts = {}): string {
@@ -1183,7 +1183,7 @@ function renderTagCard(item: TagItem, opts: RenderOpts = {}): string {
 			return renderHostCard(item.host, opts);
 		case "stream":
 			return renderYtCard(item.stream, opts);
-		case "traffic":
+		case "feed":
 			return renderTrafficCard(item.cam, opts);
 	}
 }

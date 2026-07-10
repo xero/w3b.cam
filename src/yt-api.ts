@@ -179,7 +179,7 @@ export async function fetchThumbnail(url: string): Promise<Thumbnail | null> {
   }
 }
 
-/** Map an API item plus its curated label and fetched thumbnail into a youtube-table row. */
+/** Map an API item plus its curated label and fetched thumbnail into a unified `cams` row (kind='stream'). */
 export function buildYtRow(
   videoId: string,
   label: string,
@@ -189,10 +189,15 @@ export function buildYtRow(
 ): YtRow {
   const s = item.snippet ?? {};
   const live = item.liveStreamingDetails ?? {};
+  const curated = label || null;
   return {
-    video_id: videoId,
-    url: watchUrl(videoId),
-    label: label || null,
+    id: videoId,
+    kind: "stream",
+    source: "youtube",
+    feed_kind: "youtube",
+    name: curated ?? s.title ?? null,
+    live_url: watchUrl(videoId),
+    label: curated,
     title: s.title ?? null,
     description: s.description ?? null,
     channel_id: s.channelId ?? null,

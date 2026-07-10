@@ -297,17 +297,18 @@ export async function snapshot(c: Classified): Promise<Snapshot | null> {
   }
 }
 
-/** Map a raw camera + its classification + captured still into a traffic-table row. */
+/** Map a raw camera + its classification + captured still into a unified `cams` row (kind='feed'). */
 export function buildTrafficRow(cam: OsirisCamera, c: Classified, ss: Snapshot | null): TrafficRow {
   return {
     id: cam.id,
+    kind: "feed",
     source: cam.source ?? null,
+    feed_kind: c.feed_kind,
     name: cam.name ?? null,
     city: cam.city ?? null,
-    country: cam.country ?? null,
+    country_name: cam.country ?? null,
     lat: typeof cam.lat === "number" ? cam.lat : null,
     lng: typeof cam.lng === "number" ? cam.lng : null,
-    feed_kind: c.feed_kind,
     live_url: c.live_url,
     external_url: c.external_url,
     ss_mime: ss?.mime ?? null,

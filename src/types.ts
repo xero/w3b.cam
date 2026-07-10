@@ -48,37 +48,47 @@ export interface WebcamMatch {
   _shodan?: unknown;
 }
 
+// ── Unified `cams` table ──────────────────────────────────────────────────────
+// All three sources live in one `cams` table now, discriminated by `kind`
+// ('cam' = Shodan device, 'feed' = live-pointer feed [ex-"traffic"], 'stream' =
+// YouTube). `id` is the universal key: 'ip:port' for a cam, the slug for a feed,
+// the video_id for a stream. Each source's builder fills its own column subset
+// (see CAM_COLUMNS / FEED_COLUMNS / STREAM_COLUMNS in db.ts); columns it doesn't
+// own read back NULL. `ss_hash` is a sha256 hex string across all three now.
+
 /**
- * A row to INSERT into the `webcams` table. Keys map 1:1 to the insert columns
+ * A cam-source (Shodan) row to INSERT into `cams`. Keys map 1:1 to CAM_COLUMNS
  * (an index signature is included so it binds to Bun's named-parameter API).
  */
 export type CamRow = {
+  id: string; // `${ip_str}:${port}`
+  kind: string; // 'cam'
+  source: string | null; // 'shodan'
+  feed_kind: string; // 'screenshot'
+  name: string | null; // first hostname/domain -> product -> ip (see util.ts)
+  product: string | null;
   ip_str: string;
   port: number;
+  lat: number | null;
+  lng: number | null;
+  city: string | null;
+  country_code: string | null;
+  country_name: string | null;
+  region_code: string | null;
+  ss_mime: string | null;
+  ss_hash: string | null; // sha256 hex of the screenshot bytes
+  ss_base64: string | null;
   shodan_id: string | null;
-  transport: string | null;
-  timestamp: string | null;
   hostnames: string; // JSON array
   domains: string; // JSON array
   org: string | null;
   isp: string | null;
   asn: string | null;
-  os: string | null;
-  product: string | null;
-  country_name: string | null;
-  country_code: string | null;
-  city: string | null;
-  region_code: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  tags: string; // JSON array
-  ss_mime: string;
-  ss_hash: number | null;
-  ss_base64: string;
+  observed_at: string | null; // Shodan observation time (was `timestamp`)
   raw_json: string;
 } & Record<string, string | number | null>;
 
-/** A row as read back from the DB (adds the generated + app-managed columns). */
+/** A `cams` row (kind='cam') as read back, with the generated + app-managed columns. */
 export type StoredRow = CamRow & { first_seen: string; last_seen: string; preferred: number };
 
 // ── YouTube ──────────────────────────────────────────────────────────────────
@@ -126,13 +136,18 @@ export interface YtVideoListResponse {
 }
 
 /**
- * A row to INSERT into the `youtube` table. Keys map 1:1 to the insert columns
- * (an index signature is included so it binds to Bun's named-parameter API).
- * `ss_hash` is a sha256 hex string (TEXT), unlike the numeric Shodan hash.
+ * A stream-source (YouTube) row to INSERT into `cams`. Keys map 1:1 to
+ * STREAM_COLUMNS. `id` is the video id; `live_url` is the canonical watch URL.
+ * `lat`/`lng` are NOT written here (hand-assigned via `bun run geo`, so they
+ * survive re-ingest), hence absent from this insert shape.
  */
 export type YtRow = {
-  video_id: string;
-  url: string;
+  id: string; // video_id
+  kind: string; // 'stream'
+  source: string | null; // 'youtube'
+  feed_kind: string; // 'youtube'
+  name: string | null; // curated label, else API title
+  live_url: string; // canonical watch URL
   label: string | null; // curated title from youtube.md
   title: string | null; // snippet.title
   description: string | null;
@@ -149,8 +164,8 @@ export type YtRow = {
   raw_json: string;
 } & Record<string, string | number | null>;
 
-/** A youtube row as read back from the DB (adds the generated columns). */
-export type StoredYtRow = YtRow & { first_seen: string; last_seen: string };
+/** A `cams` row (kind='stream') as read back (adds the generated columns). */
+export type StoredYtRow = YtRow & { first_seen: string; last_seen: string; lat: number | null; lng: number | null };
 
 // ── Traffic (Osiris) ───────────────────────────────────────────────────────────
 // A third source: public/OSINT cameras consolidated from the Osiris project, kept
@@ -190,25 +205,22 @@ export interface OsirisCamera {
 }
 
 /**
- * A row to INSERT into the `traffic` table. Keys map 1:1 to the insert columns
- * (an index signature is included so it binds to Bun's named-parameter API).
- * `ss_hash` is a sha256 hex string (TEXT), like YouTube. `ss_*` hold the baked
- * card thumbnail (may be null: a snapshot fetch/ffmpeg grab can fail, and `link`
- * cams have none). `live_url` is the URL the detail page embeds or links.
+ * A feed-source (ex-"traffic": live JPEG/MJPEG/MP4/HLS/link pointers) row to
+ * INSERT into `cams`. Keys map 1:1 to FEED_COLUMNS. `product` is NOT written here
+ * (it's the fingerprint-backfill target, so it survives re-ingest), hence absent
+ * from this insert shape. `live_url` is the URL the detail page embeds or links.
  */
 export type TrafficRow = {
   id: string;
+  kind: string; // 'feed'
   source: string | null;
-  /** Device fingerprint derived from `live_url` (see fingerprint.ts). Optional: written
-   * by the fingerprint backfill, not the ingest path, and NULL for operator networks. */
-  product?: string | null;
+  feed_kind: FeedKind;
   name: string | null;
   city: string | null;
-  country: string | null;
+  country_name: string | null; // the feed's country (was `country`)
   lat: number | null;
   lng: number | null;
-  feed_kind: FeedKind;
-  live_url: string; // embed URL (jpg/mp4/hls) or primary link (link kind)
+  live_url: string; // embed URL (jpg/mjpeg/mp4/hls) or primary link (link kind)
   external_url: string | null; // optional human-facing page (view-live link)
   ss_mime: string | null;
   ss_hash: string | null; // sha256 hex of the fetched bytes, for change detection
@@ -216,8 +228,9 @@ export type TrafficRow = {
   raw_json: string;
 } & Record<string, string | number | null>;
 
-/** A traffic row as read back from the DB (adds the generated columns). */
-export type StoredTrafficRow = TrafficRow & { first_seen: string; last_seen: string };
+/** A `cams` row (kind='feed') as read back. Adds the generated columns plus
+ * `product` (the fingerprint-backfill target, read but never written by ingest). */
+export type StoredTrafficRow = TrafficRow & { first_seen: string; last_seen: string; product: string | null };
 
 /**
  * One make's slice of the camera device breakdown shown on the tags page. Built by

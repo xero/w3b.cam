@@ -5,7 +5,7 @@
 // the tag cloud and browse pages. Tags are normalized (trimmed + lowercased) so
 // casing/whitespace never dupes one. Re-run `bun run bake` afterwards. No API, no query credits.
 //
-// Usage:  bun run tag <cam|stream|traffic> <ref> <tag>
+// Usage:  bun run tag <cam|stream|feed> <ref> <tag>
 
 import { isIP } from "node:net";
 import { addTag, closeDb, hasHost, hasStream, hasTraffic, openDb } from "./db.ts";
@@ -14,8 +14,8 @@ const kind = Bun.argv[2]?.trim();
 const ref = Bun.argv[3]?.trim();
 const tag = Bun.argv[4]?.trim();
 
-if ((kind !== "cam" && kind !== "stream" && kind !== "traffic") || !ref || !tag) {
-  console.error("Usage: bun run tag <cam|stream|traffic> <ref> <tag>");
+if ((kind !== "cam" && kind !== "stream" && kind !== "feed") || !ref || !tag) {
+  console.error("Usage: bun run tag <cam|stream|feed> <ref> <tag>");
   process.exit(1);
 }
 
@@ -37,7 +37,7 @@ try {
   console.log(`Tag:        ${tag.toLowerCase()}`);
   console.log(`Applied:    ${added ? "added" : "already tagged"}`);
   if (!stored) {
-    const what = kind === "cam" ? "cameras" : kind === "stream" ? "stream" : "traffic cam";
+    const what = kind === "cam" ? "cameras" : kind === "stream" ? "stream" : "feed cam";
     console.warn(`⚠ ${ref} has no stored ${what}. Check for a typo. Recorded anyway; it applies once that ${kind} is ingested.`);
   }
   console.log(`Next:       run \`bun run bake\` to regenerate the site.`);

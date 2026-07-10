@@ -213,7 +213,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	let tagsByVideo: Map<string, string[]>;
 	let tagsByTraffic: Map<string, string[]>;
 	let tagCounts: { tag: string; count: number }[];
-	let tagIndex: Map<string, { kind: "cam" | "stream" | "traffic"; ref: string }[]>;
+	let tagIndex: Map<string, { kind: "cam" | "stream" | "feed"; ref: string }[]>;
 	let ytRows: StoredYtRow[];
 	let ytGeo: Map<string, { lat: number; lng: number }>;
 	let trafficRows: StoredTrafficRow[];
@@ -224,7 +224,7 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
 		tagsByIp = loadTags(db, "cam");
 		tagsByVideo = loadTags(db, "stream");
-		tagsByTraffic = loadTags(db, "traffic");
+		tagsByTraffic = loadTags(db, "feed");
 		tagCounts = loadTagCounts(db);
 		tagIndex = loadTagIndex(db);
 		ytRows = allYtRows(db);
@@ -323,12 +323,12 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	const ytImgById = await extractImages(
 		ytRows,
-		(r) => r.video_id,
+		(r) => r.id,
 		(r) => r.ss_base64,
 		(r) => r.ss_mime,
 		written,
 	);
-	const streams: YtStream[] = ytRows.map((r) => toYtStream(r, ytImgById.get(r.video_id) ?? "", tagsByVideo.get(r.video_id) ?? []));
+	const streams: YtStream[] = ytRows.map((r) => toYtStream(r, ytImgById.get(r.id) ?? "", tagsByVideo.get(r.id) ?? []));
 
 	// Group by channel so each detail page can link its "More from this channel" siblings.
 	const streamsByChannel = new Map<string, YtStream[]>();
@@ -363,9 +363,9 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 			const ap = a.published_at ?? "";
 			const bp = b.published_at ?? "";
 			if (ap !== bp) return ap < bp ? 1 : -1;
-			return a.video_id < b.video_id ? -1 : 1;
+			return a.id < b.id ? -1 : 1;
 		})
-		.map((r) => streamByVideo.get(r.video_id))
+		.map((r) => streamByVideo.get(r.id))
 		.filter((s): s is YtStream => s !== undefined);
 
 	// Traffic has no featured pins yet (deferred), so the homepage shows its newest.
@@ -463,11 +463,11 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		const entries = tagIndex.get(tag) ?? [];
 		const camRefs = new Set(entries.filter((e) => e.kind === "cam").map((e) => e.ref));
 		const streamRefs = new Set(entries.filter((e) => e.kind === "stream").map((e) => e.ref));
-		const trafficRefs = new Set(entries.filter((e) => e.kind === "traffic").map((e) => e.ref));
+		const trafficRefs = new Set(entries.filter((e) => e.kind === "feed").map((e) => e.ref));
 		const items: TagItem[] = [
 			...hosts.filter((h) => camRefs.has(h.ip)).map((h): TagItem => ({ kind: "cam", host: h })),
 			...streams.filter((s) => streamRefs.has(s.videoId)).map((s): TagItem => ({ kind: "stream", stream: s })),
-			...trafficCams.filter((c) => trafficRefs.has(c.id)).map((c): TagItem => ({ kind: "traffic", cam: c })),
+			...trafficCams.filter((c) => trafficRefs.has(c.id)).map((c): TagItem => ({ kind: "feed", cam: c })),
 		];
 		const tagTotalPages = Math.max(1, Math.ceil(items.length / TAG_PAGE_SIZE));
 		for (let p = 1; p <= tagTotalPages; p++) {
@@ -479,9 +479,9 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	}
 
 	// ── World map: a dot per geolocated camera across all three sources ──────────────
-	// Shodan hosts carry coarse geo-IP coords, traffic cams precise ones, and YouTube
-	// streams only whatever we hand-assigned in yt_geo; a source lacking a coord is
-	// simply skipped. Each dot links to that cam's existing detail page.
+	// Shodan hosts carry coarse geo-IP coords, feed cams precise ones, and YouTube
+	// streams only whatever we hand-assigned inline (see loadYtGeo); a source lacking a
+	// coord is simply skipped. Each dot links to that cam's existing detail page.
 	const loc = (...parts: (string | null)[]): string =>
 		parts.filter((v): v is string => !!v && v.trim() !== "").join(", ");
 	const mapPoints: MapPoint[] = [];

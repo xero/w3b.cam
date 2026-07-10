@@ -133,8 +133,8 @@
 		if (ctx.kind === "cam") {
 			menu.appendChild(itemButton("Blacklist", "danger", () => showBlacklist(ctx)));
 		}
-		// Remove drops a single traffic cam (Osiris, mjpeg camhunt, ...) from the DB.
-		if (ctx.kind === "traffic") {
+		// Remove drops a single feed cam (Osiris, mjpeg camhunt, ...) from the DB.
+		if (ctx.kind === "feed") {
 			menu.appendChild(itemButton("Remove", "danger", () => showRemove(ctx)));
 		}
 	}
@@ -459,8 +459,8 @@
 
 	function removeTrafficCam(ctx) {
 		if (ctx.role === "card") {
-			// Gallery: drop the matching traffic card(s) from the grid.
-			document.querySelectorAll('.card[data-kind="traffic"]').forEach((el) => {
+			// Gallery: drop the matching feed card(s) from the grid.
+			document.querySelectorAll('.card[data-kind="feed"]').forEach((el) => {
 				if (el.dataset.ref === ctx.ref) fadeRemove(el);
 			});
 			return;

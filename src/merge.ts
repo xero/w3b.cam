@@ -34,15 +34,15 @@ interface KeyRow {
 /** Composite primary key as a string. ip_str never contains a space, so this can't collide. */
 const keyOf = (r: { ip_str: string; port: number }): string => `${r.ip_str} ${r.port}`;
 
-/** The `webcams` column names, in declared order. Empty if the table doesn't exist. */
-function webcamColumns(db: Database): string[] {
-  return (db.query("PRAGMA table_info(webcams)").all() as { name: string }[]).map((c) => c.name);
+/** The `cams` column names, in declared order. Empty if the table doesn't exist. */
+function camsColumns(db: Database): string[] {
+  return (db.query("PRAGMA table_info(cams)").all() as { name: string }[]).map((c) => c.name);
 }
 
 /** Columns present in BOTH tables (source order), so a schema drift can't break the copy. */
 function commonColumns(source: Database, target: Database): string[] {
-  const inTarget = new Set(webcamColumns(target));
-  return webcamColumns(source).filter((c) => inTarget.has(c));
+  const inTarget = new Set(camsColumns(target));
+  return camsColumns(source).filter((c) => inTarget.has(c));
 }
 
 /**
@@ -86,8 +86,8 @@ export function mergeDbs(
   const { dryRun = false, yes = false } = opts;
   const source = openReadonly(sourcePath);
   try {
-    if (webcamColumns(source).length === 0) {
-      throw new Error(`source ${sourcePath} has no 'webcams' table`);
+    if (camsColumns(source).length === 0) {
+      throw new Error(`source ${sourcePath} has no 'cams' table`);
     }
 
     // Compute the delta against a READ-ONLY target handle. The target is only reopened
@@ -99,14 +99,14 @@ export function mergeDbs(
     let srcCount: number;
     let cols: string[];
     try {
-      if (webcamColumns(targetRO).length === 0) {
-        throw new Error(`target ${targetPath} has no 'webcams' table`);
+      if (camsColumns(targetRO).length === 0) {
+        throw new Error(`target ${targetPath} has no 'cams' table`);
       }
       const tgtKeys = new Set(
-        (targetRO.query("SELECT ip_str, port FROM webcams").all() as KeyRow[]).map(keyOf),
+        (targetRO.query("SELECT ip_str, port FROM cams WHERE kind = 'cam'").all() as KeyRow[]).map(keyOf),
       );
       const srcRows = source
-        .query("SELECT ip_str, port, country_name FROM webcams")
+        .query("SELECT ip_str, port, country_name FROM cams WHERE kind = 'cam'")
         .all() as KeyRow[];
       toAdd = srcRows.filter((r) => !tgtKeys.has(keyOf(r)));
       srcCount = srcRows.length;
@@ -166,10 +166,10 @@ export function mergeDbs(
     try {
       target.run("PRAGMA busy_timeout = 5000;");
       const sel = source.query(
-        `SELECT ${cols.join(", ")} FROM webcams WHERE ip_str = ? AND port = ?`,
+        `SELECT ${cols.join(", ")} FROM cams WHERE kind = 'cam' AND ip_str = ? AND port = ?`,
       );
       const ins = target.query(
-        `INSERT INTO webcams (${cols.join(", ")}) VALUES (${cols.map((c) => `$${c}`).join(", ")})`,
+        `INSERT INTO cams (${cols.join(", ")}) VALUES (${cols.map((c) => `$${c}`).join(", ")})`,
       );
       const insertMissing = target.transaction((keys: KeyRow[]): number => {
         let n = 0;
