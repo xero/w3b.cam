@@ -1,6 +1,6 @@
 // Dev mode: build the site with in-browser editing hooks, serve it, and expose
 // mutation endpoints that emulate the blacklist / reorder / tag workflows, plus a
-// traffic-cam remove, against the LOCAL camhunting.sqlite (never the GitHub Actions
+// feed-cam remove, against the LOCAL camhunting.sqlite (never the GitHub Actions
 // db-store). Right-clicking a card or screenshot in the browser drives those
 // endpoints (see src/dev-client/).
 //
@@ -61,8 +61,8 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	}
 
 	// ── GET /__dev/featured?kind=&ref= → { featured } (labels the toggle menu item) ─
-	// cam|stream ONLY: traffic has no featured pins (the homepage slices newest traffic
-	// directly, see build.ts), so a traffic ref can never be featured.
+	// cam|stream ONLY: feed has no featured pins (the homepage slices newest feed
+	// directly, see build.ts), so a feed ref can never be featured.
 	if (req.method === "GET" && path === "/__dev/featured") {
 		const q = new URL(req.url).searchParams;
 		const kind = q.get("kind");
@@ -105,7 +105,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 
 	// ── POST /__dev/tag {kind, ref, tag}, unified tagging (INSERT OR IGNORE) ───────
 	// `kind` picks the source; `ref` is that source's key (ip_str / video_id / id).
-	// Only cams get the isIP shape-check; stream/traffic refs are opaque strings.
+	// Only cams get the isIP shape-check; stream/feed refs are opaque strings.
 	if (req.method === "POST" && path === "/__dev/tag") {
 		const { kind, ref, tag } = await readBody(req);
 		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
@@ -126,8 +126,8 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		return json({ kind, ref, tag: tag.trim().toLowerCase(), removed });
 	}
 
-	// ── POST /__dev/remove {kind, ref}, delete a traffic cam and its tags ──────────
-	// Traffic cams (Osiris, mjpeg camhunt, ...) have no re-scrape blacklist, so this is
+	// ── POST /__dev/remove {kind, ref}, delete a feed cam and its tags ──────────
+	// Feed cams (Osiris, mjpeg camhunt, ...) have no re-scrape blacklist, so this is
 	// a plain delete; a removed cam returns if you re-ingest its source list.
 	if (req.method === "POST" && path === "/__dev/remove") {
 		const { kind, ref } = await readBody(req);

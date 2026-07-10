@@ -1,8 +1,8 @@
 // Internal Osiris re-ingest command (deliberately NOT part of `bun import`). Re-reads
-// the Osiris camera dump into the traffic table, refreshing each cam's baked card
+// the Osiris camera dump into the `cams` table, refreshing each cam's baked card
 // thumbnail (and last_seen), and routes any YouTube cams to the youtube table. The
 // dump is large and lives under in/ (gitignored), so this is a rare, hand-run
-// maintenance command; CI's traffic workflow invokes it when the dump is committed.
+// maintenance command; CI's feed workflow invokes it when the dump is committed.
 //
 // Usage:
 //   bun run osiris [file]                  (default file: in/new/osiris-cameras.json)

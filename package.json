@@ -1,7 +1,7 @@
 {
   "name": "w3b.cam",
-  "version": "1.0.0",
-  "description": "internet voyeurism, cam hunters anonymous, shodan camera scraper",
+  "version": "2.0.0",
+  "description": "internet voyeurism, cam hunters anonymous, shodan camera scraper, safari zone, cam gallery",
   "type": "module",
   "private": true,
   "module": "src/scraper.ts",

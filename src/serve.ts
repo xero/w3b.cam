@@ -7,9 +7,16 @@
 import { OUT_DIR } from "./config.ts";
 
 /**
- * Serve one request out of out/: `..` traversal guard, `/` → index.html, 404 on a
- * miss. Exported so `bun dev` (src/dev.ts) can reuse the exact static logic and only
- * layer its /__dev/* API on top; the static behavior lives in one place.
+ * Serve one request out of out/: `..` traversal guard, `/` → index.html, then clean
+ * folder-URL resolution (`/gallery/1` → out/gallery/1/index.html), 404 on a miss.
+ * Exported so `bun dev` (src/dev.ts) can reuse the exact static logic and only layer
+ * its /__dev/* API on top; the static behavior lives in one place.
+ *
+ * The clean URLs the build emits carry no trailing slash and no extension. We try the
+ * literal path first (real assets: /img/x.jpg, /htmx.min.js, an .snippet.html), then
+ * fall back to `<path>/index.html`. A "does it have an extension" check can't gate this,
+ * since a detail path like /hosts/194.94.76.131 has dots in the IP; the try-then-fallback
+ * sidesteps that. GitHub Pages does the same folder resolution in production.
  */
 export async function serveStatic(req: Request): Promise<Response> {
 	let path = decodeURIComponent(new URL(req.url).pathname);
@@ -17,7 +24,11 @@ export async function serveStatic(req: Request): Promise<Response> {
 	if (path.includes("..")) return new Response("Forbidden", { status: 403 });
 	if (path.endsWith("/")) path += "index.html";
 
-	const file = Bun.file(OUT_DIR + path);
+	let file = Bun.file(OUT_DIR + path);
+	if (!(await file.exists())) {
+		const alt = Bun.file(`${OUT_DIR + path}/index.html`);
+		if (await alt.exists()) file = alt;
+	}
 	return (await file.exists())
 		? new Response(file) // Bun sets Content-Type from the extension
 		: new Response("Not found", { status: 404 });

@@ -3,9 +3,38 @@
 // is HTML-escaped before interpolation, exactly as the original single-page build did.
 
 import { displayParts, escapeHtml, pickDisplayName } from "./util.ts";
-import type { FeedKind, ProductGroup, StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
+import type { FeedKind, ProductGroup, StoredRow, StoredFeedRow, StoredYtRow } from "./types.ts";
 import { TIPS_HTML } from "./tips.ts";
 import { WORLD_PATHS } from "./worldmap.ts";
+import {
+	FEEDS,
+	FINGERPRINTS,
+	GALLERY,
+	HOME,
+	HOSTS,
+	IMPORT,
+	MAP,
+	STREAMS,
+	TAGS,
+	TIPS,
+	feedRoute,
+	feedSlug,
+	feedsPage,
+	galleryPage,
+	hostRoute,
+	hostSlug,
+	hostsPage,
+	importFormSnippetUrl,
+	snipUrlOf,
+	streamRoute,
+	streamsPage,
+	tagPage,
+	tagRoute,
+	urlOf,
+	vendorPage,
+	vendorRoute,
+	ytSlug,
+} from "./urls.ts";
 
 export const TITLE = "w3b.cam";
 export const THEME_COLOR = "#0f1117";
@@ -56,132 +85,8 @@ export function extFromMime(mime: string): string {
 	return SAFE_MIME.test(mime) ? (MIME_EXT[mime] ?? "jpg") : "jpg";
 }
 
-/**
- * Filename-safe slug for a host, keyed on its IP. Whitelist, don't blacklist:
- * collapse every run of non-hex-digit chars to a single hyphen. Dots and IPv6
- * colons become hyphens, and anything hostile (`/`, `..`) collapses too, so the
- * result is always traversal-safe. `190.94.18.107` -> `190-94-18-107`.
- */
-export function hostSlug(ip: string): string {
-	return ip.toLowerCase().replace(/[^0-9a-f]+/g, "-").replace(/^-|-$/g, "");
-}
-
-// ── Page / snippet URL helpers ───────────────────────────────────────────────
-// Root-relative (served at the domain root by src/serve.ts). index.html is the
-// curated homepage (see renderHomeMain), so the cams gallery is uniformly
-// paginated: page 1 is page001.html, matching every other page and its snippet.
-
-const pad = (p: number): string => String(p).padStart(3, "0");
-
-/** The homepage lives at index.html; "/" and its snippet reference it. */
-export const homeUrl = "/";
-export const homeSnippetUrl = "/snips/index.html";
-
-/** Disk filename of full cams gallery page p (uniform: page001.html, page002.html, …). */
-export const pageFileName = (p: number): string => `page${pad(p)}.html`;
-/** Pretty URL pushed into history for cams gallery page p. */
-export const pageUrl = (p: number): string => `/page${pad(p)}.html`;
-/** Disk filename of the snippet for cams gallery page p (uniform, includes page 1). */
-export const snippetFileName = (p: number): string => `page${pad(p)}.html`;
-/** hx-get URL of the snippet for cams gallery page p. */
-export const snippetUrl = (p: number): string => `/snips/page${pad(p)}.html`;
-
-export const hostUrl = (slug: string): string => `/${slug}.html`;
-export const hostSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
-
-// YouTube streams live on their own paginated gallery (streams.html, then
-// streams002.html …) with one detail page per video (yt-<id>.html). Same
-// conventions as the index: page 1 is the pretty streams.html, snippets are
-// uniformly numbered.
-
-/** Disk filename of full streams page p (page 1 is streams.html). */
-export const streamsPageFileName = (p: number): string => (p === 1 ? "streams.html" : `streams${pad(p)}.html`);
-/** Pretty URL pushed into history for streams page p. */
-export const streamsPageUrl = (p: number): string => `/${p === 1 ? "streams.html" : `streams${pad(p)}.html`}`;
-/** Disk filename of the snippet for streams page p (uniform, includes page 1). */
-export const streamsSnippetFileName = (p: number): string => `streams${pad(p)}.html`;
-/** hx-get URL of the snippet for streams page p. */
-export const streamsSnippetUrl = (p: number): string => `/snips/streams${pad(p)}.html`;
-
-/** Filename-safe slug for a video's detail page. Ids are already [A-Za-z0-9_-]; this is defensive. */
-export const ytSlug = (id: string): string => `yt-${id.replace(/[^A-Za-z0-9_-]+/g, "")}`;
-
-export const ytUrl = (slug: string): string => `/${slug}.html`;
-export const ytSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
-
-// Traffic (Osiris) cams have their own paginated gallery (traffic.html, then
-// traffic002.html …) with one detail page per cam (t-<id>.html). Same conventions
-// as the streams gallery: page 1 is the pretty traffic.html, snippets are uniformly
-// numbered.
-
-/** Disk filename of full traffic page p (page 1 is traffic.html). */
-export const trafficPageFileName = (p: number): string => (p === 1 ? "traffic.html" : `traffic${pad(p)}.html`);
-/** Pretty URL pushed into history for traffic page p. */
-export const trafficPageUrl = (p: number): string => `/${p === 1 ? "traffic.html" : `traffic${pad(p)}.html`}`;
-/** Disk filename of the snippet for traffic page p (uniform, includes page 1). */
-export const trafficSnippetFileName = (p: number): string => `traffic${pad(p)}.html`;
-/** hx-get URL of the snippet for traffic page p. */
-export const trafficSnippetUrl = (p: number): string => `/snips/traffic${pad(p)}.html`;
-
-/** Filename-safe slug for a cam's detail page. Ids are namespaced but ad-hoc; whitelist to [A-Za-z0-9_-]. */
-export const trafficSlug = (id: string): string =>
-  `t-${id.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-|-$/g, "")}`;
-export const trafficUrl = (slug: string): string => `/${slug}.html`;
-export const trafficDetailSnippetUrl = (slug: string): string => `/snips/${slug}.html`;
-
-// The tag cloud is a single, unpaginated page linked from the nav; each tag links to
-// its browse page (below). It surfaces how tagging is going across all three sources.
-export const tagsPageFileName = "tags.html";
-export const tagsSnippetFileName = "tags.html";
-export const tagsUrl = "/tags.html";
-export const tagsSnippetUrl = "/snips/tags.html";
-
-// Browse-by-tag pages: one paginated, blended gallery per tag (cams + streams +
-// traffic). `tagSlug` is filename-safe and `tag-`-prefixed so it can't collide with
-// host slugs (hex only), the `t-`/`yt-` pages, or the reserved page names; build.ts
-// dedupes two tags that slug identically. Page 1 is `tag-<slug>.html`; later pages
-// append `-NNN`. Snippet files share the basename (they live under /snips/).
-export const tagSlug = (tag: string): string =>
-  tag.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "untagged";
-export const tagBrowsePageFileName = (slug: string, p: number): string =>
-  p === 1 ? `tag-${slug}.html` : `tag-${slug}-${pad(p)}.html`;
-export const tagBrowseSnippetFileName = tagBrowsePageFileName;
-export const tagBrowseUrl = (slug: string, p = 1): string => `/${tagBrowsePageFileName(slug, p)}`;
-export const tagBrowseSnippetUrl = (slug: string, p = 1): string => `/snips/${tagBrowsePageFileName(slug, p)}`;
-
-// The map is a single, unpaginated page (map.html) reachable from the nav: every
-// geolocated camera across all three sources is a dot linking to its detail page.
-export const mapPageFileName = "map.html";
-export const mapSnippetFileName = "map.html";
-export const mapUrl = "/map.html";
-export const mapSnippetUrl = "/snips/map.html";
-
-// Tips is a single, static standalone page linked from the nav. Its body is baked
-// from tips.md once (see src/tips.ts); the build just emits it like tags/map.
-export const tipsPageFileName = "tips.html";
-export const tipsSnippetFileName = "tips.html";
-export const tipsUrl = "/tips.html";
-export const tipsSnippetUrl = "/snips/tips.html";
-
-// Fingerprints is a single, unpaginated standalone page linked from the nav: a
-// make/model/count breakdown of every fingerprinted camera (see fingerprint.ts),
-// emitted like tags/map/tips.
-export const fingerprintsPageFileName = "fingerprints.html";
-export const fingerprintsSnippetFileName = "fingerprints.html";
-export const fingerprintsUrl = "/fingerprints.html";
-export const fingerprintsSnippetUrl = "/snips/fingerprints.html";
-
-// Import is a DEV-ONLY view. `bun dev` bakes it (build.ts) and adds an "import"
-// nav button (renderShell, gated on `dev`); a production `bun bake` emits none of
-// it. The nav button hx-gets import.html into <main>, where the type buttons swap
-// per-type form fragments (import-<type>.html) into #import-form.
-export const importPageFileName = "import.html";
-export const importSnippetFileName = "import.html";
-export const importUrl = "/import.html";
-export const importSnippetUrl = "/snips/import.html";
-/** Disk filename / hx-get URL of a per-type import form fragment (dev-only snippet). */
-export const importFormSnippetFileName = (type: string): string => `import-${type}.html`;
-export const importFormSnippetUrl = (type: string): string => `/snips/import-${type}.html`;
+// The page/snippet URL + slug helpers now live in src/urls.ts (imported above): the
+// route model (urlOf/snipUrlOf), the per-section route builders, and the slug functions.
 
 /**
  * Live-view URL for a host:port (external link, opened in a new tab). IPv6 literals
@@ -454,20 +359,25 @@ function renderPagerWith(
 	return [`<nav class="pager" aria-label="Pagination">`, items, `</nav>`].join("\n");
 }
 
-/** Numbered pager for the index gallery. */
-export function renderPager(cur: number, total: number): string {
-	return renderPagerWith(cur, total, pageUrl, snippetUrl);
-}
+/** Build a pager whose links are the numbered pages of one section (page 1 included). */
+const sectionPager = (route: (p: number) => string) => (cur: number, total: number): string =>
+	renderPagerWith(cur, total, (p) => urlOf(route(p)), (p) => snipUrlOf(route(p)));
+
+/** Numbered pager for the hosts (cams) gallery. */
+export const renderPager = sectionPager(hostsPage);
+
+/** Numbered pager for the all-kinds gallery. */
+export const renderGalleryPager = sectionPager(galleryPage);
 
 /** Numbered pager for the YouTube streams gallery. */
-export function renderStreamsPager(cur: number, total: number): string {
-	return renderPagerWith(cur, total, streamsPageUrl, streamsSnippetUrl);
-}
+export const renderStreamsPager = sectionPager(streamsPage);
 
-/** Numbered pager for the traffic gallery. */
-export function renderTrafficPager(cur: number, total: number): string {
-	return renderPagerWith(cur, total, trafficPageUrl, trafficSnippetUrl);
-}
+/** Numbered pager for the feeds gallery. */
+export const renderFeedPager = sectionPager(feedsPage);
+
+/** Numbered pager for a per-vendor fingerprint gallery. */
+export const renderVendorPager = (cur: number, total: number, vendor: string): string =>
+	sectionPager((p) => vendorPage(vendor, p))(cur, total);
 
 // ── Index cards ──────────────────────────────────────────────────────────────
 
@@ -537,8 +447,9 @@ export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 	// Dev hook: blacklist/tag act on the IP (ref); reorder is per-screenshot, not per-card.
 	const devAttrs = opts.dev ? ` data-kind="cam" data-ref="${escapeHtml(host.ip)}"` : "";
 
+	const route = hostRoute(host.slug);
 	return [
-		`<a class="card" href="${hostUrl(host.slug)}" hx-get="${hostSnippetUrl(host.slug)}" hx-push-url="${hostUrl(host.slug)}"${devAttrs}>`,
+		`<a class="card" href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(host.thumbAlt)}" style="background-image:url('${escapeHtml(host.thumbHref)}')">${badge}`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
@@ -573,7 +484,7 @@ export function renderIndexMain(hosts: Host[], page: number, totalPages: number,
  * cards verbatim; a "more" link jumps to the full paginated gallery. An empty
  * section is dropped, and if both are empty the galleries' "nothing yet" note shows.
  */
-export function renderHomeMain(cams: Host[], streams: YtStream[], traffic: TrafficCam[], opts: RenderOpts = {}): string {
+export function renderHomeMain(cams: Host[], streams: YtStream[], feeds: FeedCam[], opts: RenderOpts = {}): string {
 	const section = (title: string, cards: string, moreHref: string, moreSnip: string, moreLabel: string): string =>
 		[
 			`<section class="home">`,
@@ -588,18 +499,18 @@ export function renderHomeMain(cams: Host[], streams: YtStream[], traffic: Traff
 	const parts: string[] = [];
 	if (cams.length) {
 		const cards = cams.map((h) => indentBlock(renderHostCard(h, opts), 1)).join("\n");
-		parts.push(section("cams", cards, pageUrl(1), snippetUrl(1), "all cams"));
+		parts.push(section("cams", cards, urlOf(HOSTS), snipUrlOf(HOSTS), "all cams"));
 	}
 	if (streams.length) {
 		const cards = streams.map((s) => indentBlock(renderYtCard(s, opts), 1)).join("\n");
-		parts.push(section("streams", cards, streamsPageUrl(1), streamsSnippetUrl(1), "all streams"));
+		parts.push(section("streams", cards, urlOf(STREAMS), snipUrlOf(STREAMS), "all streams"));
 	}
-	if (traffic.length) {
-		const cards = traffic.map((c) => indentBlock(renderTrafficCard(c, opts), 1)).join("\n");
-		parts.push(section("traffic", cards, trafficPageUrl(1), trafficSnippetUrl(1), "all traffic"));
+	if (feeds.length) {
+		const cards = feeds.map((c) => indentBlock(renderFeedCard(c, opts), 1)).join("\n");
+		parts.push(section("feeds", cards, urlOf(FEEDS), snipUrlOf(FEEDS), "all feeds"));
 	}
 	if (parts.length === 0) {
-		return `<p class="empty">Nothing to feature yet. Run <code>bun run scrape</code>, <code>bun run youtube</code>, or <code>bun run traffic</code> first.</p>`;
+		return `<p class="empty">Nothing to feature yet. Run <code>bun run scrape</code>, <code>bun run youtube</code>, or <code>bun run osiris</code> first.</p>`;
 	}
 	return parts.join("\n");
 }
@@ -625,8 +536,8 @@ function renderTagLinks(tags: string[], slugForTag?: (tag: string) => string): s
 	if (!slugForTag) return escapeHtml(tags.join(", "));
 	return tags
 		.map((t) => {
-			const slug = slugForTag(t);
-			return `<a href="${tagBrowseUrl(slug)}" hx-get="${tagBrowseSnippetUrl(slug)}" hx-push-url="${tagBrowseUrl(slug)}">${escapeHtml(t)}</a>`;
+			const route = tagRoute(slugForTag(t));
+			return `<a href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}">${escapeHtml(t)}</a>`;
 		})
 		.join(", ");
 }
@@ -687,7 +598,7 @@ export function renderHostMain(host: Host, opts: RenderOpts = {}): string {
 		indentBlock(rows.join("\n"), 3),
 		`${T(2)}</tbody>`,
 		`${T(1)}</table>`,
-		`${T(1)}<a class="back" href="${pageUrl(1)}" hx-get="${snippetUrl(1)}" hx-push-url="${pageUrl(1)}">&larr; Back to gallery</a>`,
+		`${T(1)}<a class="back" href="${urlOf(HOSTS)}" hx-get="${snipUrlOf(HOSTS)}" hx-push-url="${urlOf(HOSTS)}">&larr; Back to hosts</a>`,
 		`</article>`,
 	].join("\n");
 }
@@ -765,8 +676,9 @@ export function renderYtCard(stream: YtStream, opts: RenderOpts = {}): string {
 		? `\n${T(1)}<p class="loc">${escapeHtml(stream.channelTitle)}</p>`
 		: "";
 	const devAttrs = opts.dev ? ` data-kind="stream" data-ref="${escapeHtml(stream.videoId)}"` : "";
+	const route = streamRoute(stream.slug);
 	return [
-		`<a class="card" href="${ytUrl(stream.slug)}" hx-get="${ytSnippetUrl(stream.slug)}" hx-push-url="${ytUrl(stream.slug)}"${devAttrs}>`,
+		`<a class="card" href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(stream.thumbAlt)}" style="background-image:url('${escapeHtml(stream.thumbHref)}')">`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
@@ -851,14 +763,14 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[], opts: Ren
 		`${T(2)}</tbody>`,
 		`${T(1)}</table>`,
 		...(siblingSection ? [indentBlock(siblingSection, 1)] : []),
-		`${T(1)}<a class="back" href="/streams.html" hx-get="${streamsSnippetUrl(1)}" hx-push-url="/streams.html">&larr; Back to streams</a>`,
+		`${T(1)}<a class="back" href="${urlOf(STREAMS)}" hx-get="${snipUrlOf(STREAMS)}" hx-push-url="${urlOf(STREAMS)}">&larr; Back to streams</a>`,
 		`</article>`,
 	].join("\n");
 }
 
 /**
  * Click-to-load YouTube facade for a stream detail page: the thumbnail with a play
- * overlay, rendered as an <a> to the watch URL so it works with no JS. assets/traffic.js
+ * overlay, rendered as an <a> to the watch URL so it works with no JS. assets/feeds.js
  * intercepts the click and swaps in a youtube-nocookie iframe — no third-party DOM loads
  * until the user opts in. The "Watch on YouTube" button beneath it stays as the fallback.
  */
@@ -871,7 +783,7 @@ function ytFacade(stream: YtStream): string {
 	].join("\n");
 }
 
-// ── Traffic (Osiris) cams ────────────────────────────────────────────────────────
+// ── Feed (Osiris) cams ────────────────────────────────────────────────────────
 // A third source with its own flat gallery (one card per cam, like the streams
 // gallery). Hybrid rendering: the gallery card shows a baked, same-origin thumbnail
 // exactly like the other sources, but the detail page embeds the LIVE feed — an
@@ -879,7 +791,7 @@ function ytFacade(stream: YtStream): string {
 // for iframe/external-only cams, just a "view live" link (we never load third-party
 // DOM). Every live element degrades to that link on error.
 
-export interface TrafficCam {
+export interface FeedCam {
 	id: string;
 	slug: string;
 	/** Display title: the cam's name, else its id. */
@@ -903,12 +815,12 @@ export interface TrafficCam {
 	tags: string[];
 }
 
-/** Map a stored traffic row (plus its extracted image URL and tags) into a view model. */
-export function toTrafficCam(row: StoredTrafficRow, thumbHref: string, tags: string[] = []): TrafficCam {
+/** Map a stored feed row (plus its extracted image URL and tags) into a view model. */
+export function toFeedCam(row: StoredFeedRow, thumbHref: string, tags: string[] = [], slug: string = feedSlug(row.id)): FeedCam {
 	const name = (row.name && row.name.trim()) || row.id;
 	return {
 		id: row.id,
-		slug: trafficSlug(row.id),
+		slug,
 		name,
 		source: row.source,
 		product: row.product ?? null,
@@ -926,7 +838,7 @@ export function toTrafficCam(row: StoredTrafficRow, thumbHref: string, tags: str
 }
 
 /** Plain-text "city, country", de-duped when a source uses the country as a placeholder city. Callers escape. */
-function trafficLoc(cam: TrafficCam): string {
+function feedLoc(cam: FeedCam): string {
 	const city = cam.city?.trim() ?? "";
 	const country = cam.country?.trim() ?? "";
 	const parts = city && country && city.toLowerCase() === country.toLowerCase() ? [country] : [city, country];
@@ -950,18 +862,19 @@ function feedKindLabel(kind: FeedKind): string {
 }
 
 /**
- * One traffic card for the gallery. Same shape as a host/stream card (a CSS-background
+ * One feed card for the gallery. Same shape as a host/stream card (a CSS-background
  * thumbnail figure with a corner badge, a one-line title, a location subtitle) so all
  * three galleries render identically; here the title is the cam name and the subtitle
  * is its location. A cam with no captured thumbnail (link cams, dead feeds) shows the
  * plain black figure.
  */
-export function renderTrafficCard(cam: TrafficCam, opts: RenderOpts = {}): string {
-	const loc = escapeHtml(trafficLoc(cam));
+export function renderFeedCard(cam: FeedCam, opts: RenderOpts = {}): string {
+	const loc = escapeHtml(feedLoc(cam));
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
 	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
+	const route = feedRoute(cam.slug);
 	return [
-		`<a class="card" href="${trafficUrl(cam.slug)}" hx-get="${trafficDetailSnippetUrl(cam.slug)}" hx-push-url="${trafficUrl(cam.slug)}"${devAttrs}>`,
+		`<a class="card" href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}"${devAttrs}>`,
 		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
@@ -971,24 +884,24 @@ export function renderTrafficCard(cam: TrafficCam, opts: RenderOpts = {}): strin
 	].join("\n");
 }
 
-/** Inner-<main> content for a traffic gallery page: the card grid plus the pager. */
-export function renderTrafficMain(cams: TrafficCam[], page: number, totalPages: number, opts: RenderOpts = {}): string {
+/** Inner-<main> content for a feeds gallery page: the card grid plus the pager. */
+export function renderFeedMain(cams: FeedCam[], page: number, totalPages: number, opts: RenderOpts = {}): string {
 	if (cams.length === 0) {
-		return `<p class="empty">No traffic cams stored yet. Run <code>bun run traffic</code> first.</p>`;
+		return `<p class="empty">No feed cams stored yet. Run <code>bun run osiris</code> first.</p>`;
 	}
-	const cards = cams.map((c) => indentBlock(renderTrafficCard(c, opts), 1)).join("\n");
-	const pager = renderTrafficPager(page, totalPages);
+	const cards = cams.map((c) => indentBlock(renderFeedCard(c, opts), 1)).join("\n");
+	const pager = renderFeedPager(page, totalPages);
 	return [`<section class="gallery">`, cards, `</section>`, ...(pager ? [pager] : [])].join("\n");
 }
 
 /**
  * The live media element for a detail page, chosen by feed kind. The `poster` /
  * initial `src` / background is the baked same-origin thumbnail so there's an instant
- * frame and no broken-image flash; the client (traffic.js) then drives the live feed
+ * frame and no broken-image flash; the client (feeds.js) then drives the live feed
  * (cache-busting the jpg <img>, streaming the mjpeg <img>, attaching hls.js to the
  * <video>). `link` cams show just the still; the "View live" button is the way through.
  */
-function trafficMedia(cam: TrafficCam): string {
+function feedMedia(cam: FeedCam): string {
 	const alt = escapeHtml(cam.thumbAlt);
 	const poster = cam.thumbHref ? ` poster="${escapeHtml(cam.thumbHref)}"` : "";
 	switch (cam.feedKind) {
@@ -999,7 +912,7 @@ function trafficMedia(cam: TrafficCam): string {
 		case "mjpeg": {
 			// A multipart <img> plays a Motion JPEG stream natively, no JS needed. The baked
 			// still rides as the background (instant frame, and the fallback if the stream is
-			// blocked/dead); traffic.js also swaps src to it on error.
+			// blocked/dead); feeds.js also swaps src to it on error.
 			const bg = cam.thumbHref ? ` style="background-image:url('${escapeHtml(cam.thumbHref)}')"` : "";
 			const still = cam.thumbHref ? ` data-still="${escapeHtml(cam.thumbHref)}"` : "";
 			return `${T(2)}<img class="live-img" data-mjpeg src="${escapeHtml(cam.liveUrl)}"${still}${bg} alt="${alt}" referrerpolicy="no-referrer" />`;
@@ -1016,12 +929,12 @@ function trafficMedia(cam: TrafficCam): string {
 }
 
 /**
- * Inner-<main> content for a traffic cam's detail page: the live media (or a
+ * Inner-<main> content for a feed cam's detail page: the live media (or a
  * placeholder) with a "View live" button, then a lean metadata table. The button
  * targets the human-facing page when there is one, else the raw feed URL.
  */
-export function renderTrafficDetail(cam: TrafficCam, opts: RenderOpts = {}): string {
-	const media = trafficMedia(cam);
+export function renderFeedDetail(cam: FeedCam, opts: RenderOpts = {}): string {
+	const media = feedMedia(cam);
 	const liveHref = cam.externalUrl ?? cam.liveUrl;
 	// Dev hook on the figure (a `.shot`, like host pages) so right-click tags this cam.
 	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
@@ -1040,7 +953,7 @@ export function renderTrafficDetail(cam: TrafficCam, opts: RenderOpts = {}): str
 	};
 	push("Source", cam.source);
 	push("Fingerprint", cam.product);
-	push("Location", trafficLoc(cam));
+	push("Location", feedLoc(cam));
 	if (cam.lat != null && cam.lng != null) push("Coordinates", `${cam.lat}, ${cam.lng}`);
 	push("Type", feedKindLabel(cam.feedKind));
 	if (cam.tags.length) rows.push(metaRow("Tags", renderTagLinks(cam.tags, opts.slugForTag)));
@@ -1056,7 +969,7 @@ export function renderTrafficDetail(cam: TrafficCam, opts: RenderOpts = {}): str
 		indentBlock(rows.join("\n"), 3),
 		`${T(2)}</tbody>`,
 		`${T(1)}</table>`,
-		`${T(1)}<a class="back" href="/traffic.html" hx-get="${trafficSnippetUrl(1)}" hx-push-url="/traffic.html">&larr; Back to traffic</a>`,
+		`${T(1)}<a class="back" href="${urlOf(FEEDS)}" hx-get="${snipUrlOf(FEEDS)}" hx-push-url="${urlOf(FEEDS)}">&larr; Back to feeds</a>`,
 		`</article>`,
 	].join("\n");
 }
@@ -1088,7 +1001,7 @@ const TAG_MAX_SIZE = 320;
  */
 export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => string): string {
 	if (tags.length === 0) {
-		return `<p class="empty">No tags yet. Tag something with <code>bun run tag &lt;cam|stream|traffic&gt; &lt;ref&gt; &lt;tag&gt;</code>, then re-bake.</p>`;
+		return `<p class="empty">No tags yet. Tag something with <code>bun run tag &lt;cam|stream|feed&gt; &lt;ref&gt; &lt;tag&gt;</code>, then re-bake.</p>`;
 	}
 	const logs = tags.map((t) => Math.log(t.count));
 	const minLog = Math.min(...logs);
@@ -1099,9 +1012,9 @@ export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => st
 		.map((t) => {
 			const size = Math.round(TAG_MIN_SIZE + (Math.log(t.count) - minLog) * step);
 			const name = escapeHtml(t.tag);
-			const slug = slugForTag(t.tag);
+			const route = tagRoute(slugForTag(t.tag));
 			const title = `${t.count} ${t.count === 1 ? "entry" : "entries"} tagged ${name}`;
-			return `<li><a style="font-size: ${size}%" title="${title}" href="${tagBrowseUrl(slug)}" hx-get="${tagBrowseSnippetUrl(slug)}" hx-push-url="${tagBrowseUrl(slug)}">${name}</a></li>`;
+			return `<li><a style="font-size: ${size}%" title="${title}" href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}">${name}</a></li>`;
 		})
 		.join("\n");
 
@@ -1115,23 +1028,39 @@ export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => st
 }
 
 // ── Device fingerprints page ─────────────────────────────────────────────────────
-// A standalone page (fingerprints.html) with a make → model → count breakdown of every
-// fingerprinted camera, built from the `product` field (see fingerprint.ts). Read-only:
-// no links, no per-product pages, just a tally that visualizes fingerprinting coverage.
+// A standalone page with a make → model → count breakdown of every fingerprinted camera,
+// built from the `product` field (see fingerprint.ts). A trailing "filter" column links
+// each make to its per-vendor gallery (/fingerprints/<vendor>) when that vendor has one.
 // Makes group via a rowspan cell; the catch-all "Unidentified"/"Other" makes sink last.
 
 /**
  * Inner-<main> content for the fingerprints page: the make/model/count table, or an
  * empty-state note when nothing is fingerprinted. `groups` come pre-sorted from
- * productBreakdown. Every make and model is escaped (models can echo attacker-influenced
- * banner text).
+ * productBreakdown, each carrying a dominant `vendor`. `vendorsWithGallery` is the set of
+ * vendors that actually got a gallery this build; a make is linked (a `.btn` in the
+ * "filter" column) only when its vendor is in that set. Every make and model is escaped
+ * (models can echo attacker-influenced banner text).
  */
-export function renderFingerprintsMain(groups: ProductGroup[]): string {
+export function renderFingerprintsMain(groups: ProductGroup[], vendorsWithGallery: Set<string> = new Set()): string {
 	if (groups.length === 0) {
 		return `<p class="empty">No camera fingerprints yet. Run <code>bun run fingerprint --apply</code>, then re-bake.</p>`;
 	}
 	const totalCams = groups.reduce((n, g) => n + g.total, 0);
 	const fmt = (n: number) => n.toLocaleString();
+
+	// The "filter" cell: a `.btn` link to the make's vendor gallery, or empty when that
+	// vendor has no gallery (a floor make, or an unfingerprinted DB).
+	const filterCell = (g: ProductGroup): string => {
+		const v = g.vendor && vendorsWithGallery.has(g.vendor) ? g.vendor : "";
+		if (!v) return `${T(2)}<td class="bd-filter" rowspan="${g.models.length}"></td>`;
+		const route = vendorRoute(v);
+		const btn = [
+			`<a class="btn" href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}" aria-label="Filter to ${escapeHtml(v)} cameras">`,
+			btnLayers("filter"),
+			`</a>`,
+		].join("\n");
+		return `${T(2)}<td class="bd-filter" rowspan="${g.models.length}">\n${indentBlock(btn, 3)}\n${T(2)}</td>`;
+	};
 
 	const body = groups
 		.map((g) => {
@@ -1139,12 +1068,13 @@ export function renderFingerprintsMain(groups: ProductGroup[]): string {
 				.map((m, i) => {
 					const model = m.model === "—" ? `<span class="bd-none">—</span>` : escapeHtml(m.model);
 					const cells = [`${T(2)}<td class="bd-model">${model}</td>`, `${T(2)}<td class="bd-count">${fmt(m.count)}</td>`];
-					// The make cell spans all of its models and carries the make subtotal.
+					// The make cell and the filter cell both span all of the make's models.
 					const makeCell =
 						i === 0
 							? `${T(2)}<th scope="rowgroup" rowspan="${g.models.length}" class="bd-make">${escapeHtml(g.make)}<span class="bd-total">${fmt(g.total)}</span></th>\n`
 							: "";
-					return `${T(1)}<tr>\n${makeCell}${cells.join("\n")}\n${T(1)}</tr>`;
+					const filter = i === 0 ? `\n${filterCell(g)}` : "";
+					return `${T(1)}<tr>\n${makeCell}${cells.join("\n")}${filter}\n${T(1)}</tr>`;
 				})
 				.join("\n");
 		})
@@ -1155,7 +1085,7 @@ export function renderFingerprintsMain(groups: ProductGroup[]): string {
 		`${T(1)}<h2>Device fingerprints</h2>`,
 		`${T(1)}<p class="bd-sub">${fmt(totalCams)} cameras across ${groups.length} makes, identified from Shodan banners and feed URLs.</p>`,
 		`${T(1)}<table class="bd-table">`,
-		`${T(2)}<thead><tr><th scope="col">Make</th><th scope="col">Model</th><th scope="col" class="bd-count">Cameras</th></tr></thead>`,
+		`${T(2)}<thead><tr><th scope="col">Make</th><th scope="col">Model</th><th scope="col" class="bd-count">Cameras</th><th scope="col" class="bd-filter">filter</th></tr></thead>`,
 		`${T(2)}<tbody>`,
 		indentBlock(body, 2),
 		`${T(2)}</tbody>`,
@@ -1166,7 +1096,7 @@ export function renderFingerprintsMain(groups: ProductGroup[]): string {
 
 // ── Tag browse pages ─────────────────────────────────────────────────────────────
 // One paginated page per tag, a blended gallery of every entity carrying it: cams,
-// then streams, then traffic (each kind newest-first, from build.ts). Reuses the same
+// then streams, then feed (each kind newest-first, from build.ts). Reuses the same
 // card renderers as the galleries, so a tag page looks like any other gallery. Real
 // <a>/hx-get links throughout, so browsing works with no JS (only tagging is JS-only).
 
@@ -1174,7 +1104,7 @@ export function renderFingerprintsMain(groups: ProductGroup[]): string {
 export type TagItem =
 	| { kind: "cam"; host: Host }
 	| { kind: "stream"; stream: YtStream }
-	| { kind: "feed"; cam: TrafficCam };
+	| { kind: "feed"; cam: FeedCam };
 
 /** Render one browse-page card, dispatching on the item's kind. */
 function renderTagCard(item: TagItem, opts: RenderOpts = {}): string {
@@ -1184,18 +1114,13 @@ function renderTagCard(item: TagItem, opts: RenderOpts = {}): string {
 		case "stream":
 			return renderYtCard(item.stream, opts);
 		case "feed":
-			return renderTrafficCard(item.cam, opts);
+			return renderFeedCard(item.cam, opts);
 	}
 }
 
 /** Numbered pager for a tag browse page (URL builders closed over the tag's slug). */
 export function renderTagPager(cur: number, total: number, slug: string): string {
-	return renderPagerWith(
-		cur,
-		total,
-		(p) => tagBrowseUrl(slug, p),
-		(p) => tagBrowseSnippetUrl(slug, p),
-	);
+	return renderPagerWith(cur, total, (p) => urlOf(tagPage(slug, p)), (p) => snipUrlOf(tagPage(slug, p)));
 }
 
 /** Inner-<main> content for a tag browse page: the blended card grid plus the pager. */
@@ -1217,7 +1142,42 @@ export function renderTagBrowseMain(
 		cards,
 		`</section>`,
 		...(pager ? [pager] : []),
-		`<a class="back" href="${tagsUrl}" hx-get="${tagsSnippetUrl}" hx-push-url="${tagsUrl}">&larr; All tags</a>`,
+		`<a class="back" href="${urlOf(TAGS)}" hx-get="${snipUrlOf(TAGS)}" hx-push-url="${urlOf(TAGS)}">&larr; All tags</a>`,
+	].join("\n");
+}
+
+// ── All-kinds gallery + per-vendor galleries ──────────────────────────────────
+// Both reuse the blended TagItem cards (renderTagCard dispatches cam/stream/feed) and a
+// numbered pager, so they look like any other gallery. The all-kinds gallery is every
+// cams row, newest-discovered first (build.ts orders by first_seen). A vendor gallery is
+// the subset whose fingerprint vendor matches, with a heading and a back link to the
+// fingerprints breakdown. Cards link to normal detail URLs (the card renderers emit them).
+
+/** Inner-<main> for an all-kinds gallery page: blended cards plus the gallery pager. */
+export function renderGalleryMain(items: TagItem[], page: number, totalPages: number, opts: RenderOpts = {}): string {
+	if (items.length === 0) {
+		return `<p class="empty">Nothing stored yet. Run <code>bun run scrape</code>, <code>bun run youtube</code>, or <code>bun run osiris</code> first.</p>`;
+	}
+	const cards = items.map((it) => indentBlock(renderTagCard(it, opts), 1)).join("\n");
+	const pager = renderGalleryPager(page, totalPages);
+	return [`<section class="gallery">`, cards, `</section>`, ...(pager ? [pager] : [])].join("\n");
+}
+
+/** Inner-<main> for a per-vendor fingerprint gallery: a heading, blended cards, the vendor pager, and a back link. */
+export function renderVendorMain(vendor: string, items: TagItem[], page: number, totalPages: number, opts: RenderOpts = {}): string {
+	const back = `<a class="back" href="${urlOf(FINGERPRINTS)}" hx-get="${snipUrlOf(FINGERPRINTS)}" hx-push-url="${urlOf(FINGERPRINTS)}">&larr; All fingerprints</a>`;
+	if (items.length === 0) {
+		return [`<p class="empty">No <strong>${escapeHtml(vendor)}</strong> cameras are visible right now.</p>`, back].join("\n");
+	}
+	const cards = items.map((it) => indentBlock(renderTagCard(it, opts), 1)).join("\n");
+	const pager = renderVendorPager(page, totalPages, vendor);
+	return [
+		`<h2 class="vendor-title">${escapeHtml(vendor)} cameras</h2>`,
+		`<section class="gallery">`,
+		cards,
+		`</section>`,
+		...(pager ? [pager] : []),
+		back,
 	].join("\n");
 }
 
@@ -1255,7 +1215,7 @@ const mapRound = (n: number): string => {
  */
 export function renderMapMain(points: MapPoint[], total: number): string {
 	if (points.length === 0) {
-		return `<p class="empty">No geolocated cameras yet. Scrape cams, add traffic, or assign stream coordinates with <code>bun run geo</code>, then re-bake.</p>`;
+		return `<p class="empty">No geolocated cameras yet. Scrape cams, add feed, or assign stream coordinates with <code>bun run geo</code>, then re-bake.</p>`;
 	}
 	const land = WORLD_PATHS.map((d) => `${T(3)}<path d="${d}" />`).join("\n");
 	const dots = points
@@ -1394,11 +1354,20 @@ const CSS = `:root {
 	}
 }
 #favicon {
-	fill: var(--depths);
+	fill: #000000;
 }
 @media (prefers-color-scheme: dark) {
 	#favicon {
-		fill: var(--sand);
+		fill: #ffffff;
+	}
+}
+
+svg #favicon {
+	fill: #ff00ff;
+}
+@media (prefers-color-scheme: dark) {
+	svg #favicon {
+		fill: #00ff00;
 	}
 }
 
@@ -1433,7 +1402,6 @@ a {
 	}
 }
 
-
 body > header {
 	display: flex;
 	flex-flow: row wrap;
@@ -1441,35 +1409,39 @@ body > header {
 	gap: 0.75rem 1.5rem;
 	padding: var(--gap);
 
-	a {
-		color: inherit;
-		text-decoration: none;
-	}
-
-	.nav {
+	nav {
 		display: flex;
 		flex-flow: row wrap;
 		gap: 1rem;
 		align-items: center;
 
-		a {
-			color: var(--ice);
-			&:hover {
-				color: var(--sand);
-			}
-			& .front {
-				padding: 8px;
-			}
-		}
-
 		@media (max-width: 480px) {
 			flex-basis: 100%;
 			justify-content: space-between;
 			gap: unset;
+		}
 
-			a .front {
-				padding: 6px 10px;
-				font-size: 1.1rem;
+		a,
+		a:visited {
+			&:focus,
+			&:hover {
+				background: transparent !important;
+				* {
+					fill: var(--ice);
+				}
+			}
+			svg {
+				display: block;
+				width: 50px;
+				height: 50px;
+				* {
+					fill: var(--mist);
+				}
+
+				@media (max-width: 480px) {
+					width: 40px;
+					height: 40px;
+				}
 			}
 		}
 	}
@@ -2137,6 +2109,34 @@ body > footer {
 	& .bd-none {
 		color: var(--border);
 	}
+
+	& .bd-filter {
+		/* Top-aligned so the button sits beside the make label, not centered down a
+		   many-model rowspan; left padding separates it from the right-aligned count. */
+		vertical-align: top;
+		white-space: nowrap;
+		padding-left: 1.5rem;
+	}
+
+	& .bd-filter .btn {
+		align-self: flex-start;
+	}
+
+	& .bd-filter .btn .front {
+		padding: 0.3rem 0.7rem;
+		font-size: 0.9rem;
+	}
+}
+
+/* Heading atop a per-vendor fingerprint gallery (reuses the section-title look, but not
+   scoped to .home, and with its own spacing above the card grid that follows). */
+.vendor-title {
+	font-size: clamp(1.1rem, 3vw, 1.5rem);
+	font-weight: 600;
+	color: var(--accent);
+	border-bottom: 1px solid var(--border);
+	padding-bottom: 0.35rem;
+	margin-bottom: var(--gap);
 }
 
 .home {
@@ -2212,7 +2212,7 @@ body > footer {
 
 /** Site-wide stat block under the h1, identical on every page. */
 export interface SiteStats {
-	/** Combined cams+streams+traffic total, pre-formatted (toLocaleString). */
+	/** Combined cams+streams+feed total, pre-formatted (toLocaleString). */
 	discovered: string;
 	/** Build time, e.g. "2026-07-09 @ 10:59" (UTC, no tz label). */
 	updated: string;
@@ -2246,19 +2246,15 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 	const statLink = (label: string, value: string, href: string, snip: string): string =>
 		`<span>${escapeHtml(label)} <strong><a href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">${escapeHtml(value)}</a></strong></span>`;
 	const counts = [
-		statLink("cameras discovered", stats.discovered, fingerprintsUrl, fingerprintsSnippetUrl),
+		statLink("cameras discovered", stats.discovered, urlOf(FINGERPRINTS), snipUrlOf(FINGERPRINTS)),
 		ghStat("updated", stats.updated, "https://github.com/xero/w3b.cam/deployments"),
-		stat("fresh scrapes every", stats.interval),
+		ghStat("fresh scrapes every", stats.interval, "https://github.com/xero/w3b.cam/blob/main/.github/workflows/scrape.yml#L9"),
 	].join("");
-	// Nav links are real .btn links — larger siblings of the pager buttons: the same
-	// three stacked layers (shadow / edge / labelled front), plus the header-only
-	// hx-target/hx-swap so they swap <main> like the in-main links.
-	const navLink = (href: string, snip: string, label: string, classes:string = ''): string =>
-		[
-			`<a class="btn ${classes}" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
-			btnLayers(label),
-			`</a>`,
-		].join("\n");
+	const navLink = (href: string, snip: string, label: string, classes:string = ''): string => [
+		`<a class="${classes}" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
+		`<svg alt="${label}" aria-label="${label}"><use href=icons.svg#${label}></use></svg>`,
+		`</a>`,
+	].join("");
 	return [
 		"<!DOCTYPE html>",
 		'<html lang="en">',
@@ -2281,18 +2277,21 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(1)}<body>`,
 		`${T(2)}<header>`,
 		`${T(3)}<div class="brand">`,
-		`${T(4)}<h1><a href="${homeUrl}" hx-get="${homeSnippetUrl}" ${navAttrs} hx-push-url="${homeUrl}">${escapeHtml(TITLE)}</a></h1>`,
+		`${T(4)}<h1><a href="${urlOf(HOME)}" hx-get="${snipUrlOf(HOME)}" ${navAttrs} hx-push-url="${urlOf(HOME)}">${escapeHtml(TITLE)}</a></h1>`,
 		`${T(4)}<em>internet voyeurism</em>`,
 		`${T(3)}</div>`,
 		`${T(3)}<nav class="nav">`,
-		indentBlock(navLink(pageUrl(1), snippetUrl(1), "cams"), 4),
-		indentBlock(navLink("/streams.html", streamsSnippetUrl(1), "streams"), 4),
-		indentBlock(navLink("/traffic.html", trafficSnippetUrl(1), "traffic"), 4),
-		indentBlock(navLink(tagsUrl, tagsSnippetUrl, "tags"), 4),
-		indentBlock(navLink(mapUrl, mapSnippetUrl, "map"), 4),
-		indentBlock(navLink(tipsUrl, tipsSnippetUrl, "tips"), 4),
+
+		indentBlock(navLink(urlOf(GALLERY), snipUrlOf(GALLERY), "gallery"), 4),
+		indentBlock(navLink(urlOf(HOSTS), snipUrlOf(HOSTS), "hosts"), 4),
+		indentBlock(navLink(urlOf(FEEDS), snipUrlOf(FEEDS), "feeds"), 4),
+		indentBlock(navLink(urlOf(STREAMS), snipUrlOf(STREAMS), "streams"), 4),
+		indentBlock(navLink(urlOf(FINGERPRINTS), snipUrlOf(FINGERPRINTS), "fingerprints"), 4),
+		indentBlock(navLink(urlOf(TAGS), snipUrlOf(TAGS), "tags"), 4),
+		indentBlock(navLink(urlOf(MAP), snipUrlOf(MAP), "map"), 4),
+		indentBlock(navLink(urlOf(TIPS), snipUrlOf(TIPS), "tips"), 4),
 		// Dev-only: a nav entry that hx-gets the import view into <main> (see renderImportMain).
-		...(dev ? [indentBlock(navLink(importUrl, importSnippetUrl, "import", "dev"), 4)] : []),
+		...(dev ? [indentBlock(navLink(urlOf(IMPORT), snipUrlOf(IMPORT), "import", "dev"), 4)] : []),
 		`${T(3)}</nav>`,
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</header>`,
@@ -2303,12 +2302,12 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</footer>`,
 		`${T(2)}<script src="/htmx.min.js"></script>`,
-		// Live-feed client on every page (tiny): drives traffic detail feeds and must be
+		// Live-feed client on every page (tiny): drives feed detail feeds and must be
 		// present however you arrive, including htmx swaps whose snippets carry no script.
 		// It loads hls.min.js on demand only when an HLS cam is actually viewed.
-		`${T(2)}<script src="/traffic.js" defer></script>`,
+		`${T(2)}<script src="/feeds.js" defer></script>`,
 		// Map client (tiny): drag-to-pan / wheel-to-zoom for the SVG world map. Like
-		// traffic.js it loads on every page and no-ops when no map is present.
+		// feeds.js it loads on every page and no-ops when no map is present.
 		`${T(2)}<script src="/map.js" defer></script>`,
 		...(dev ? [`${T(2)}<script src="/__dev/dev.js"></script>`] : []),
 		`${T(1)}</body>`,

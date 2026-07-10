@@ -1,5 +1,5 @@
 // MJPEG "camhunt" source: classify a hand-curated camera URL (the kind in
-// in/new/mjpeg.md) into how we render it in the shared `traffic` table, and derive
+// in/new/mjpeg.md) into how we render it in the shared `cams` table, and derive
 // the URL we grab a thumbnail from. Vendor path fingerprints come from tips.md.
 //
 // The site is served over https, so an embedded http feed is mixed-content-blocked
@@ -78,7 +78,7 @@ const RULES: Rule[] = [
 ];
 
 /** A stable, idempotent id: host, non-default port, and the camera/channel selector
- *  when present (so a multi-cam host yields one row per camera). Survives trafficSlug. */
+ *  when present (so a multi-cam host yields one row per camera). Survives feedSlug. */
 function mjpegId(u: URL): string {
   const defaultPort = u.protocol === "https:" ? "443" : "80";
   const port = u.port && u.port !== defaultPort ? `-${u.port}` : "";
@@ -176,7 +176,7 @@ export function parseMjpegList(text: string): MjpegEntry[] {
   return out;
 }
 
-/** Synthesize an OsirisCamera so buildTrafficRow is reused verbatim (and raw_json stays
+/** Synthesize an OsirisCamera so buildFeedRow is reused verbatim (and raw_json stays
  *  self-documenting: the original curated URL lives in stream_url/external_url). */
 export function toOsirisCam(c: MjpegClassified, label: string): OsirisCamera {
   return {

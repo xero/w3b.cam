@@ -50,7 +50,7 @@ export interface WebcamMatch {
 
 // ── Unified `cams` table ──────────────────────────────────────────────────────
 // All three sources live in one `cams` table now, discriminated by `kind`
-// ('cam' = Shodan device, 'feed' = live-pointer feed [ex-"traffic"], 'stream' =
+// ('cam' = Shodan device, 'feed' = live-pointer feed [ex-"feed"], 'stream' =
 // YouTube). `id` is the universal key: 'ip:port' for a cam, the slug for a feed,
 // the video_id for a stream. Each source's builder fills its own column subset
 // (see CAM_COLUMNS / FEED_COLUMNS / STREAM_COLUMNS in db.ts); columns it doesn't
@@ -167,19 +167,19 @@ export type YtRow = {
 /** A `cams` row (kind='stream') as read back (adds the generated columns). */
 export type StoredYtRow = YtRow & { first_seen: string; last_seen: string; lat: number | null; lng: number | null };
 
-// ── Traffic (Osiris) ───────────────────────────────────────────────────────────
+// ── Feed (Osiris) ───────────────────────────────────────────────────────────
 // A third source: public/OSINT cameras consolidated from the Osiris project, kept
-// in their own `traffic` table. Unlike the other two sources these are LIVE
+// in their own `feed` table. Unlike the other two sources these are LIVE
 // pointers (auto-updating JPEG snapshots, MP4/HLS streams, third-party embeds)
 // rather than stored image bytes. Hybrid rendering: a still is snapshotted at
 // ingest for the gallery card (ss_* columns, exactly like the other sources), and
 // the live feed itself is embedded only on the detail page via `live_url`/`feed_kind`.
 
 /**
- * How a traffic cam is rendered, derived once at ingest. `jpg` auto-refreshes an
+ * How a feed cam is rendered, derived once at ingest. `jpg` auto-refreshes an
  * <img>; `mjpeg` streams a multipart <img> live; `mp4`/`hls` embed a <video>; `link`
  * shows a baked still plus a "View live" link-out only (no embed). The Osiris
- * ingester (classify in traffic-source.ts) emits only jpg/mp4/hls; the MJPEG
+ * ingester (classify in osiris-source.ts) emits only jpg/mp4/hls; the MJPEG
  * ingester (mjpeg-source.ts) emits mjpeg/jpg/link. `link` covers http-only cams
  * (mixed-content-blocked on our https site) and viewer pages we cannot embed.
  */
@@ -205,12 +205,12 @@ export interface OsirisCamera {
 }
 
 /**
- * A feed-source (ex-"traffic": live JPEG/MJPEG/MP4/HLS/link pointers) row to
+ * A feed-source (ex-"feed": live JPEG/MJPEG/MP4/HLS/link pointers) row to
  * INSERT into `cams`. Keys map 1:1 to FEED_COLUMNS. `product` is NOT written here
  * (it's the fingerprint-backfill target, so it survives re-ingest), hence absent
  * from this insert shape. `live_url` is the URL the detail page embeds or links.
  */
-export type TrafficRow = {
+export type FeedRow = {
   id: string;
   kind: string; // 'feed'
   source: string | null;
@@ -230,7 +230,7 @@ export type TrafficRow = {
 
 /** A `cams` row (kind='feed') as read back. Adds the generated columns plus
  * `product` (the fingerprint-backfill target, read but never written by ingest). */
-export type StoredTrafficRow = TrafficRow & { first_seen: string; last_seen: string; product: string | null };
+export type StoredFeedRow = FeedRow & { first_seen: string; last_seen: string; product: string | null };
 
 /**
  * One make's slice of the camera device breakdown shown on the tags page. Built by
@@ -243,9 +243,15 @@ export interface ProductGroup {
   total: number;
   /** Models under this make, count-descending. `model` is "—" when only the make is known. */
   models: { model: string; count: number }[];
+  /**
+   * Dominant fingerprint `vendor` slug across this make's products, or null when unknown
+   * (no fingerprints table, or a floor make like Unidentified/Other). Drives the "filter"
+   * link to the per-vendor gallery on the fingerprints page (see productBreakdown).
+   */
+  vendor?: string | null;
 }
 
-/** The output of classifying a raw Osiris cam (see traffic-source.ts): how to render it, and the URLs involved. */
+/** The output of classifying a raw Osiris cam (see osiris-source.ts): how to render it, and the URLs involved. */
 export interface Classified {
   feed_kind: FeedKind;
   /** URL the detail page embeds (jpg/mp4/hls) or links (link kind). */

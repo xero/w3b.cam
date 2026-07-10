@@ -1,11 +1,11 @@
-name: traffic
+name: feeds
 
-# Re-ingest the Osiris "traffic" cams (refreshing each cam's baked card thumbnail),
+# Re-ingest the Osiris feed cams (refreshing each cam's baked card thumbnail),
 # persist the updated DB to the db-store release, then rebuild & deploy the site.
 #
 # The Osiris dump is large and lives under in/ (gitignored by default), so CI can
 # only ingest when the dump is present in the checkout — commit it to a tracked
-# path and pass that path, or (simpler) run `bun run traffic` locally and push the
+# path and pass that path, or (simpler) run `bun run osiris` locally and push the
 # DB with `bun run sync --push`. Either way the site's live detail feeds are always
 # current; only the gallery thumbnails go stale between refreshes.
 on:
@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  traffic:
+  feeds:
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release upload/create (persist the DB)
@@ -56,7 +56,7 @@ jobs:
         run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
 
       # Inputs passed via env (not inline ${{ }}) to avoid shell injection.
-      - name: Ingest traffic cams
+      - name: Ingest feed cams
         env:
           FILE: ${{ inputs.file }}
           LIMIT: ${{ inputs.limit }}
@@ -79,9 +79,9 @@ jobs:
             || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
           gh release upload db-store camhunting.sqlite --clobber
 
-  # New/refreshed traffic cams change the gallery, so rebuild & deploy.
+  # New/refreshed feed cams change the gallery, so rebuild & deploy.
   call-build:
-    needs: traffic
+    needs: feeds
     permissions:
       contents: read
       pages: write

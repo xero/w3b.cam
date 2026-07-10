@@ -30,14 +30,12 @@ export const MJPEG_MD = `${IN_DIR}/mjpeg.md`;
 
 /** Generated static site: root dir, wiped and recreated on every build. */
 export const OUT_DIR = "out";
-/** htmx snippets: the inner-<main> fragment of every full page, for hx-get swaps. */
-export const SNIPS_DIR = `${OUT_DIR}/snips`;
 /** Extracted screenshot files, one per unique image, referenced by <img src>. */
 export const IMG_DIR = `${OUT_DIR}/img`;
 /** Vendored htmx library (installed via bun) and its build-time destination. */
 export const HTMX_VENDOR_SRC = "node_modules/htmx.org/dist/htmx.min.js";
 export const HTMX_OUT = `${OUT_DIR}/htmx.min.js`;
-/** Vendored hls.js (installed via bun), copied to out/ and fetched on demand by the traffic client when an HLS cam is viewed. */
+/** Vendored hls.js (installed via bun), copied to out/ and fetched on demand by the feed client when an HLS cam is viewed. */
 export const HLS_VENDOR_SRC = "node_modules/hls.js/dist/hls.min.js";
 export const HLS_OUT = `${OUT_DIR}/hls.min.js`;
 /** Static assets (favicons, web manifest) copied verbatim into out/ root on build. */
@@ -49,10 +47,10 @@ export const PAGE_SIZE = 8;
 /** YouTube streams shown per gallery page (one card per stream, never grouped). */
 export const YT_PAGE_SIZE = 8;
 
-/** Traffic (Osiris) cams shown per gallery page (one card per cam; the curated set is large). */
-export const TRAFFIC_PAGE_SIZE = 8;
+/** Feed (Osiris) cams shown per gallery page (one card per cam; the curated set is large). */
+export const FEED_PAGE_SIZE = 8;
 
-/** Entities shown per tag-browse page (a blended grid of cams, streams, and traffic cards). */
+/** Entities shown per tag-browse page (a blended grid of cams, streams, and feed cards). */
 export const TAG_PAGE_SIZE = 8;
 
 /** Shodan returns 100 results per search page. */

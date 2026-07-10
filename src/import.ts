@@ -4,7 +4,7 @@
 //
 //   bun import --shodan [dir]                                       raw Shodan JSON → webcams   (default dir: in/)
 //   bun import --youtube [--url <url> [--label "Title"] | file] [--limit N]   YouTube live streams → youtube
-//   bun import --mjpeg [file] [--limit N] [--concurrency N]         curated MJPEG URLs → traffic (default: in/mjpeg.md)
+//   bun import --mjpeg [file] [--limit N] [--concurrency N]         curated MJPEG URLs → feed (default: in/mjpeg.md)
 //
 // Shodan reads no API and spends no credits (screenshots are embedded in the JSON).
 // YouTube needs YOUTUBE_API_KEY. The one-off Osiris dump is ingested by the separate

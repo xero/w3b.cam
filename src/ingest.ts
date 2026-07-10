@@ -13,16 +13,16 @@ import { basename } from "node:path";
 import type { Database } from "bun:sqlite";
 import {
   countRows,
-  countTrafficRows,
+  countFeedRows,
   countYtRows,
   loadBlacklist,
   makeInserter,
-  makeTrafficInserter,
+  makeFeedInserter,
   makeYtInserter,
 } from "./db.ts";
 import { scanBanners, toBanners } from "./shodan-source.ts";
 import {
-  buildTrafficRow,
+  buildFeedRow,
   classifyOrReason,
   fetchImage,
   grabFrame,
@@ -30,11 +30,11 @@ import {
   snapshot,
   toCameras,
   youtubeIdOf,
-} from "./traffic-source.ts";
+} from "./osiris-source.ts";
 import { classifyMjpeg, feedRank, parseMjpegList, toOsirisCam } from "./mjpeg-source.ts";
 import { buildYtRow, extractVideoId, fetchThumbnail, fetchVideos, parseYoutubeList, thumbnailUrls } from "./yt-api.ts";
 import { mapLimit } from "./util.ts";
-import type { Classified, OsirisCamera, TrafficRow, YtRow } from "./types.ts";
+import type { Classified, OsirisCamera, FeedRow, YtRow } from "./types.ts";
 import type { MjpegClassified } from "./mjpeg-source.ts";
 import type { YtListEntry } from "./yt-api.ts";
 
@@ -264,7 +264,7 @@ export interface MjpegOneReport {
 }
 
 /**
- * Ingest a curated MJPEG URL list into the shared traffic table. Classifies each URL,
+ * Ingest a curated MJPEG URL list into the shared feed table. Classifies each URL,
  * dedups to the richest rendering per physical cam, grabs a still, and upserts. Prints
  * progress + summary. Throws when the list file is missing.
  */
@@ -319,17 +319,17 @@ export async function ingestMjpegFile(db: Database, file: string, opts: { limit?
   // ── Snapshot (bounded fan-out) + build rows ──────────────────────────────────
   let done = 0;
   let noThumb = 0;
-  const rows = await mapLimit(work, concurrency, async ({ cam, label }): Promise<TrafficRow> => {
+  const rows = await mapLimit(work, concurrency, async ({ cam, label }): Promise<FeedRow> => {
     const ss = (await fetchImage(cam.grabUrl)) ?? (await grabFrame(cam.grabUrl));
     if (!ss) noThumb++;
     done++;
     if (done % 50 === 0) console.log(`  …${done}/${work.length}`);
-    return buildTrafficRow(toOsirisCam(cam, label), cam, ss);
+    return buildFeedRow(toOsirisCam(cam, label), cam, ss);
   });
 
   // ── Upsert ────────────────────────────────────────────────────────────────────
-  const insertMany = makeTrafficInserter(db);
-  const startingRows = countTrafficRows(db);
+  const insertMany = makeFeedInserter(db);
+  const startingRows = countFeedRows(db);
   let added = 0;
   let updated = 0;
   let changed = 0;
@@ -344,14 +344,14 @@ export async function ingestMjpegFile(db: Database, file: string, opts: { limit?
   } finally {
     let endingRows = startingRows;
     try {
-      endingRows = countTrafficRows(db);
+      endingRows = countFeedRows(db);
     } catch {}
     console.log(`\n── MJPEG ingest summary ──`);
     console.log(`Cams ingested:   ${work.length}`);
     console.log(`New cams added:  ${added}`);
     console.log(`Refreshed:       ${updated} existing (${changed} with a changed thumbnail)`);
     console.log(`No thumbnail:    ${noThumb} (dead/blocked feed; placeholder card)`);
-    console.log(`Traffic DB rows: ${startingRows} → ${endingRows}`);
+    console.log(`Feed DB rows: ${startingRows} → ${endingRows}`);
   }
 }
 
@@ -360,15 +360,15 @@ export async function ingestMjpegOne(db: Database, input: { url: string; label?:
   const cam = classifyMjpeg(input.url);
   if (!cam) throw new Error("unrecognized MJPEG URL (no vendor rule matched)");
   const ss = (await fetchImage(cam.grabUrl)) ?? (await grabFrame(cam.grabUrl));
-  const row = buildTrafficRow(toOsirisCam(cam, (input.label ?? "").trim()), cam, ss);
-  const { added, updated, changed } = makeTrafficInserter(db)([row]);
+  const row = buildFeedRow(toOsirisCam(cam, (input.label ?? "").trim()), cam, ss);
+  const { added, updated, changed } = makeFeedInserter(db)([row]);
   return { added, updated, changed, noThumb: ss ? 0 : 1 };
 }
 
 // ── Osiris (internal; `bun run osiris`) ──────────────────────────────────────────
 
 /**
- * Ingest the Osiris camera dump into the traffic table (refreshing baked thumbnails),
+ * Ingest the Osiris camera dump into the feed table (refreshing baked thumbnails),
  * routing any YouTube cams out to the youtube table. `ytKey` is optional: without it,
  * YouTube cams are counted and skipped (never fatal). Prints progress + summary.
  * Throws on a missing/unparseable file.
@@ -446,22 +446,22 @@ export async function ingestOsirisFile(
   );
   if (limit && ingestable.length < work.length) console.log(`--limit ${limit}: ingesting ${ingestable.length} of ${work.length}`);
   if (!(await hasFfmpeg())) console.warn("ffmpeg not found: MP4/HLS cams will get placeholder cards (no thumbnail).");
-  console.log(`Snapshotting ${ingestable.length.toLocaleString()} traffic cam(s) with concurrency ${concurrency}…`);
+  console.log(`Snapshotting ${ingestable.length.toLocaleString()} feed cam(s) with concurrency ${concurrency}…`);
 
   // ── Snapshot (bounded fan-out) + build rows ──────────────────────────────────
   let done = 0;
   let noThumb = 0;
-  const rows = await mapLimit(ingestable, concurrency, async ({ cam, c }): Promise<TrafficRow> => {
+  const rows = await mapLimit(ingestable, concurrency, async ({ cam, c }): Promise<FeedRow> => {
     const ss = await snapshot(c);
     if (!ss) noThumb++;
     done++;
     if (done % 250 === 0) console.log(`  …${done}/${ingestable.length}`);
-    return buildTrafficRow(cam, c, ss);
+    return buildFeedRow(cam, c, ss);
   });
 
-  // ── Upsert traffic + route YouTube cams to the youtube table ─────────────────
-  const insertMany = makeTrafficInserter(db);
-  const startingRows = countTrafficRows(db);
+  // ── Upsert feed + route YouTube cams to the youtube table ─────────────────
+  const insertMany = makeFeedInserter(db);
+  const startingRows = countFeedRows(db);
   const startingYt = countYtRows(db);
   let added = 0;
   let updated = 0;
@@ -510,22 +510,22 @@ export async function ingestOsirisFile(
       }
     }
   } catch (err) {
-    console.error(`\nTraffic ingest failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`\nFeeds ingest failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
   } finally {
     let endingRows = startingRows;
     let endingYt = startingYt;
     try {
-      endingRows = countTrafficRows(db);
+      endingRows = countFeedRows(db);
       endingYt = countYtRows(db);
     } catch {}
 
-    console.log(`\n── Traffic ingest summary ──`);
-    console.log(`Ingestable traffic cams: ${ingestable.length}`);
+    console.log(`\n── Feed ingest summary ──`);
+    console.log(`Ingestable feed cams: ${ingestable.length}`);
     console.log(`New cams added:          ${added}`);
     console.log(`Refreshed:               ${updated} existing (${changed} with a changed thumbnail)`);
     console.log(`No thumbnail:            ${noThumb} (dead feed / grab failed; placeholder card)`);
-    console.log(`Traffic DB rows:         ${startingRows} → ${endingRows}`);
+    console.log(`Feed DB rows:         ${startingRows} → ${endingRows}`);
     if (ytEntries.length) {
       console.log(`\n── YouTube cams (→ streams) ──`);
       if (ytSkippedNoKey) {

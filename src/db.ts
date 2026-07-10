@@ -1,6 +1,6 @@
 import { Database, constants } from "bun:sqlite";
 import { DB_PATH } from "./config.ts";
-import type { CamRow, StoredRow, StoredTrafficRow, StoredYtRow, TrafficRow, WebcamMatch, YtRow } from "./types.ts";
+import type { CamRow, StoredRow, StoredFeedRow, StoredYtRow, FeedRow, WebcamMatch, YtRow } from "./types.ts";
 import { BLOCKED_PRODUCTS } from "./util.ts";
 
 // ── Unified `cams` table ──────────────────────────────────────────────────────
@@ -273,7 +273,7 @@ export function makeYtInserter(db: Database): (rows: YtRow[]) => InsertResult {
 }
 
 /** Bulk upserter for feed rows (kind='feed'). Mirrors makeInserter. */
-export function makeTrafficInserter(db: Database): (rows: TrafficRow[]) => InsertResult {
+export function makeFeedInserter(db: Database): (rows: FeedRow[]) => InsertResult {
 	return makeUpserter(db, FEED_COLUMNS);
 }
 
@@ -291,7 +291,7 @@ export function countYtRows(db: Database): number {
 	return countKind(db, "stream");
 }
 
-export function countTrafficRows(db: Database): number {
+export function countFeedRows(db: Database): number {
 	return countKind(db, "feed");
 }
 
@@ -327,10 +327,10 @@ export function allYtRows(db: Database): StoredYtRow[] {
  * a stable, browsable order. The gallery never groups rows (one card per cam), so
  * this order is exactly the card order.
  */
-export function allTrafficRows(db: Database): StoredTrafficRow[] {
+export function allFeedRows(db: Database): StoredFeedRow[] {
 	return db
 		.query("SELECT * FROM cams WHERE kind = 'feed' ORDER BY (ss_base64 IS NULL), country_name, source, name, id")
-		.all() as StoredTrafficRow[];
+		.all() as StoredFeedRow[];
 }
 
 /** True when any stored cam has this exact IP (any port). */
@@ -344,7 +344,7 @@ export function hasStream(db: Database, videoId: string): boolean {
 }
 
 /** True when a feed cam with this exact id is stored. Companion to hasHost / hasStream. */
-export function hasTraffic(db: Database, id: string): boolean {
+export function hasFeed(db: Database, id: string): boolean {
 	return db.query("SELECT 1 FROM cams WHERE kind = 'feed' AND id = ? LIMIT 1").get(id) != null;
 }
 
@@ -553,6 +553,47 @@ export function loadYtGeo(db: Database): Map<string, { lat: number; lng: number 
 /** Set (or replace) a stream's coordinates inline on its `cams` row. No-op if the stream isn't stored. */
 export function setYtGeo(db: Database, videoId: string, lat: number, lng: number): void {
 	db.query("UPDATE cams SET lat = ?, lng = ? WHERE kind = 'stream' AND id = ?").run(lat, lng, videoId);
+}
+
+// ── Fingerprint vendor index (per-vendor galleries) ────────────────────────────
+
+/**
+ * Per-vendor camera refs from the fingerprints audit table, feeding the vendor galleries
+ * and the fingerprints breakdown's per-make "filter" links. Returns two views of the same
+ * rows: `byVendor` (vendor -> { hosts, feeds }, cam refs deduped to host `ip_str` since
+ * cards are per-host, feed refs the `cams.id` directly) and `byRef` (cams.id -> vendor,
+ * for tagging each product occurrence in the breakdown with its vendor). NULL-vendor rows
+ * are skipped; streams carry no fingerprints.
+ *
+ * Both are empty when the `fingerprints` table is absent. That table is created by
+ * `bun run fingerprint --apply`, NEVER by openDb(), so a DB that was never fingerprinted
+ * (or the empty CI bake) simply yields no vendor galleries. Guarding here keeps the build
+ * from throwing on a fresh DB.
+ */
+export function loadVendorRefs(db: Database): {
+	byVendor: Map<string, { hosts: Set<string>; feeds: Set<string> }>;
+	byRef: Map<string, string>;
+} {
+	const byVendor = new Map<string, { hosts: Set<string>; feeds: Set<string> }>();
+	const byRef = new Map<string, string>();
+	const exists = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fingerprints' LIMIT 1").get();
+	if (!exists) return { byVendor, byRef };
+	const rows = db
+		.query("SELECT kind, ref, vendor FROM fingerprints WHERE vendor IS NOT NULL")
+		.all() as { kind: string; ref: string; vendor: string }[];
+	for (const r of rows) {
+		byRef.set(r.ref, r.vendor);
+		const g = byVendor.get(r.vendor) ?? { hosts: new Set<string>(), feeds: new Set<string>() };
+		if (r.kind === "cam") {
+			// ref is 'ip:port'; dedupe to the host ip_str (port is after the last colon).
+			const i = r.ref.lastIndexOf(":");
+			g.hosts.add(i === -1 ? r.ref : r.ref.slice(0, i));
+		} else if (r.kind === "feed") {
+			g.feeds.add(r.ref);
+		}
+		byVendor.set(r.vendor, g);
+	}
+	return { byVendor, byRef };
 }
 
 // ── Blacklist ─────────────────────────────────────────────────────────────────

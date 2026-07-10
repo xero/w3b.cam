@@ -1,6 +1,6 @@
 name: untag
 
-# Removes a tag from a cam, stream, or traffic entry in the unified `tags` table,
+# Removes a tag from a cam, stream, or feed entry in the unified `tags` table,
 # persists the updated DB to the db-store release, then rebuilds & deploys the site.
 on:
   workflow_dispatch:
@@ -12,9 +12,9 @@ on:
         options:
           - cam
           - stream
-          - traffic
+          - feed
       ref:
-        description: IP address (cam), YouTube video id (stream), or cam id (traffic)
+        description: IP address (cam), YouTube video id (stream), or cam id (feed)
         required: true
         type: string
       tag:

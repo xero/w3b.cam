@@ -1,4 +1,4 @@
-// Live-feed client for traffic detail pages. Kept tiny and framework-free, and
+// Live-feed client for feed detail pages. Kept tiny and framework-free, and
 // loaded on every page (the shell includes it) so it works however you arrive at a
 // detail page — a full load or an htmx <main> swap whose snippet carries no script.
 //

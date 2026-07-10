@@ -182,7 +182,7 @@
 		init(document);
 	}
 
-	// htmx swaps <main> for SPA-like navigation. Mirror traffic.js: watch the DOM and
+	// htmx swaps <main> for SPA-like navigation. Mirror feeds.js: watch the DOM and
 	// (re-)init a map in newly inserted content, tearing down a removed one so its
 	// listeners don't leak between page swaps.
 	if (typeof MutationObserver !== "undefined" && document.body) {

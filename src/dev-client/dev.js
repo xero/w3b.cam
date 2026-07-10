@@ -125,7 +125,7 @@
 		}
 		// Tag applies to every kind.
 		menu.appendChild(itemButton("Tag", "", () => showTag(ctx)));
-		// Feature toggles homepage-showcase membership: cam + stream only (traffic has no pins).
+		// Feature toggles homepage-showcase membership: cam + stream only (feed has no pins).
 		if (ctx.kind === "cam" || ctx.kind === "stream") {
 			menu.appendChild(featureItem(ctx));
 		}
@@ -226,7 +226,7 @@
 		clampMenu();
 	}
 
-	// ── Remove (traffic cam, confirm sub-form) ─────────────────────────────────────
+	// ── Remove (feed cam, confirm sub-form) ─────────────────────────────────────
 
 	function showRemove(ctx) {
 		menu.replaceChildren(menuHeader(ctx));
@@ -243,7 +243,7 @@
 				try {
 					await api("/remove", "POST", { kind: ctx.kind, ref: ctx.ref });
 					closeMenu();
-					removeTrafficCam(ctx);
+					removeFeedCam(ctx);
 					toast(`removed ${ctx.ref}. run \`bun run bake\``);
 				} catch (e) {
 					toast(`remove failed: ${e.message}`, "error");
@@ -448,16 +448,16 @@
 		const nav = document.createElement("p");
 		const back = document.createElement("a");
 		back.className = "back";
-		back.href = "/";
-		back.setAttribute("hx-get", "/snips/page001.html");
-		back.setAttribute("hx-push-url", "/");
-		back.innerHTML = "&larr; Back to gallery";
+		back.href = "/hosts";
+		back.setAttribute("hx-get", "/hosts/index.snippet.html");
+		back.setAttribute("hx-push-url", "/hosts");
+		back.innerHTML = "&larr; Back to hosts";
 		nav.appendChild(back);
 		main.replaceChildren(p, nav);
 		if (window.htmx) window.htmx.process(main);
 	}
 
-	function removeTrafficCam(ctx) {
+	function removeFeedCam(ctx) {
 		if (ctx.role === "card") {
 			// Gallery: drop the matching feed card(s) from the grid.
 			document.querySelectorAll('.card[data-kind="feed"]').forEach((el) => {
@@ -476,17 +476,17 @@
 		const nav = document.createElement("p");
 		const back = document.createElement("a");
 		back.className = "back";
-		back.href = "/traffic.html";
-		back.setAttribute("hx-get", "/snips/traffic001.html");
-		back.setAttribute("hx-push-url", "/traffic.html");
-		back.innerHTML = "&larr; Back to traffic";
+		back.href = "/feeds";
+		back.setAttribute("hx-get", "/feeds/index.snippet.html");
+		back.setAttribute("hx-push-url", "/feeds");
+		back.innerHTML = "&larr; Back to feeds";
 		nav.appendChild(back);
 		main.replaceChildren(p, nav);
 		if (window.htmx) window.htmx.process(main);
 	}
 
 	function addTagToMeta(ctx, tag) {
-		if (ctx.role !== "shot") return; // only detail pages (host/stream/traffic) render a Tags row
+		if (ctx.role !== "shot") return; // only detail pages (host/stream/feed) render a Tags row
 		for (const th of document.querySelectorAll(".meta th")) {
 			if (th.textContent.trim() === "Tags") {
 				const td = th.nextElementSibling;
@@ -535,7 +535,7 @@
 		}
 		// One hook system: any card or detail figure carrying data-kind/data-ref is
 		// taggable. `role` (shot vs card) drives which actions show and whether the
-		// optimistic Tags-row update runs; `kind` (cam/stream/traffic) is the entity.
+		// optimistic Tags-row update runs; `kind` (cam/stream/feed) is the entity.
 		const shot = e.target.closest(".shot[data-kind]");
 		const card = e.target.closest(".card[data-kind]");
 		const el = shot || card;

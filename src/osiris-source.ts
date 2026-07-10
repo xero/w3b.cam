@@ -1,4 +1,4 @@
-// Osiris "traffic" source: classify each raw camera into how we render it, and
+// Osiris "feed" source: classify each raw camera into how we render it, and
 // snapshot a still for its gallery card. Native fetch for JPEG feeds; ffmpeg for a
 // single frame off MP4/HLS streams. No new runtime dependency (ffmpeg is a system
 // binary, probed once and treated as optional — a missing/failed grab just yields
@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extractVideoId } from "./yt-api.ts";
-import type { Classified, OsirisCamera, TrafficRow } from "./types.ts";
+import type { Classified, OsirisCamera, FeedRow } from "./types.ts";
 
 /** A captured still: base64 bytes, mime, and a sha256 hex of the bytes (change detection). */
 export interface Snapshot {
@@ -25,7 +25,7 @@ export interface Snapshot {
 
 /**
  * A browser-like User-Agent. Several public/government cam endpoints (e.g. NSW Live
- * Traffic) serve a block/redirect HTML page to header-less clients but the real
+ * Feed) serve a block/redirect HTML page to header-less clients but the real
  * image to a browser, so we present one when snapshotting. A real browser sends its
  * own UA for the live <img>, so this only matters for the server-side ingest.
  */
@@ -48,7 +48,7 @@ function isImageUrl(u: string): boolean {
 }
 
 /**
- * Decide how a camera renders in the traffic gallery, or return null to skip it.
+ * Decide how a camera renders in the feeds gallery, or return null to skip it.
  * Only embeddable live feeds are kept (direct-image JPEGs and MP4/HLS video);
  * auth-gated, viewer-page, and third-party-embed cams are skipped. YouTube cams
  * are handled separately by the ingester (routed to the youtube table), so they
@@ -266,7 +266,7 @@ export async function grabFrame(url: string): Promise<Snapshot | null> {
   // moov atom is at the end can't be decoded from a non-seekable HTTP stream).
   const bytes = await downloadBytes(url);
   if (bytes) {
-    const tmp = `${tmpdir()}/traffic-frame-${Date.now()}-${Math.round(Math.random() * 1e9)}.bin`;
+    const tmp = `${tmpdir()}/feed-frame-${Date.now()}-${Math.round(Math.random() * 1e9)}.bin`;
     try {
       await Bun.write(tmp, bytes);
       snap = await ffmpegFrame(["-i", tmp]);
@@ -298,7 +298,7 @@ export async function snapshot(c: Classified): Promise<Snapshot | null> {
 }
 
 /** Map a raw camera + its classification + captured still into a unified `cams` row (kind='feed'). */
-export function buildTrafficRow(cam: OsirisCamera, c: Classified, ss: Snapshot | null): TrafficRow {
+export function buildFeedRow(cam: OsirisCamera, c: Classified, ss: Snapshot | null): FeedRow {
   return {
     id: cam.id,
     kind: "feed",

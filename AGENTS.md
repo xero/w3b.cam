@@ -6,7 +6,7 @@ Development contract for AI-assisted work on this repo. Read in full before star
 
 ## What This Project Is
 
-A handful of Bun scripts around a local SQLite database. Scrapes webcam screenshots from the Shodan REST API, catalogs YouTube live cams, and other traffic cam sources, then bakes a paginated static site from it all; the rest import, curate, and publish the data.
+A handful of Bun scripts around a local SQLite database. Scrapes webcam screenshots from the Shodan REST API, catalogs YouTube live cams, and other feed cam sources, then bakes a paginated static site from it all; the rest import, curate, and publish the data.
 
 ---
 

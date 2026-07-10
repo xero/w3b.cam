@@ -1,5 +1,5 @@
 // Fingerprint: derive the real camera device (vendor + model where possible) from a
-// stored Shodan banner or a traffic feed URL, and write it to the `product` field the
+// stored Shodan banner or a feed feed URL, and write it to the `product` field the
 // site renders as "Fingerprint" (see render.ts). Shodan's own `product` is a mixed
 // bag — often empty, often just the web server (`Apache httpd`, `nginx`, `Boa`) rather
 // than the camera. This mines the full banner (http.title, the `hikvision` block,
@@ -7,16 +7,16 @@
 // ordered cascade, highest-confidence signal first, and records every decision in a
 // `fingerprints` table so a run is reviewable and reversible.
 //
-// The classifiers (fingerprintWebcam / fingerprintTraffic) are pure so ingesters can
+// The classifiers (fingerprintWebcam / fingerprintFeed) are pure so ingesters can
 // adopt them later; this file's CLI is the batch backfill.
 //
 // Usage:
 //   DB_PATH=camhunting.fp.sqlite bun run fingerprint            # dry run: audit + report only
-//   DB_PATH=camhunting.fp.sqlite bun run fingerprint --apply    # write product + traffic column
+//   DB_PATH=camhunting.fp.sqlite bun run fingerprint --apply    # write product + feed column
 
 import { Database } from "bun:sqlite";
 import { DB_PATH } from "./config.ts";
-import { allRows, allTrafficRows, closeDb, openDb } from "./db.ts";
+import { allRows, allFeedRows, closeDb, openDb } from "./db.ts";
 import type { ProductGroup, StoredRow } from "./types.ts";
 
 // ── Result shape ────────────────────────────────────────────────────────────────
@@ -270,9 +270,9 @@ export function fingerprintWebcam(rawJson: string | Record<string, unknown>): Fp
 	return null;
 }
 
-// ── Traffic feed-URL fingerprints ───────────────────────────────────────────────
+// ── Feed feed-URL fingerprints ───────────────────────────────────────────────
 
-const TRAFFIC_RULES: { re: RegExp; product: string; vendor: string; tier: Tier }[] = [
+const FEED_RULES: { re: RegExp; product: string; vendor: string; tier: Tier }[] = [
 	{ re: /axis-cgi\//i, product: "Axis", vendor: "axis", tier: "high" },
 	{ re: /\/control\/(?:user|guest)image\.html|faststream\.jpg/i, product: "Mobotix", vendor: "mobotix", tier: "high" },
 	{ re: /nphmotionjpeg|cgistart/i, product: "Panasonic/i-PRO", vendor: "panasonic", tier: "high" },
@@ -284,15 +284,15 @@ const TRAFFIC_RULES: { re: RegExp; product: string; vendor: string; tier: Tier }
 ];
 
 /**
- * Derive a device fingerprint for a traffic (Osiris) cam from its live URL, or null when
+ * Derive a device fingerprint for a feed (Osiris) cam from its live URL, or null when
  * the URL exposes no device (operator networks like TfL/Caltrans serve from cloud
  * storage or managed endpoints — their `source` already names the network).
  */
-export function fingerprintTraffic(row: { live_url?: string | null; source?: string | null }): FpResult | null {
+export function fingerprintFeed(row: { live_url?: string | null; source?: string | null }): FpResult | null {
 	const url = (row.live_url ?? "").trim();
 	if (!url) return null;
-	for (const r of TRAFFIC_RULES) {
-		if (r.re.test(url)) return { product: r.product, vendor: r.vendor, method: "traffic-url", tier: r.tier, evidence: r.re.source };
+	for (const r of FEED_RULES) {
+		if (r.re.test(url)) return { product: r.product, vendor: r.vendor, method: "feed-url", tier: r.tier, evidence: r.re.source };
 	}
 	return null;
 }
@@ -519,30 +519,55 @@ export function splitProduct(product: string): { make: string; model: string | n
 /** Non-camera products the site filters from display; excluded from the breakdown too. */
 const NON_CAMERA = new Set(["remote desktop protocol", "vnc"]);
 
+/** One product occurrence for the breakdown: its label, plus the fingerprint vendor when known. */
+export interface BreakdownEntry {
+	product: string | null | undefined;
+	/** Fingerprint `vendor` slug for this row (from the fingerprints table), or null. */
+	vendor?: string | null;
+}
+
 /**
- * Aggregate a list of product fingerprints into a make → model → count breakdown, makes
- * ordered by total (descending) with the catch-all "Unidentified"/"Other" makes sunk to
- * the bottom. Empty and non-camera products are skipped.
+ * Aggregate product fingerprints into a make → model → count breakdown, makes ordered by
+ * total (descending) with the catch-all "Unidentified"/"Other" makes sunk to the bottom.
+ * Empty and non-camera products are skipped. Each group also gets its dominant `vendor`
+ * slug (the most common non-null vendor among its products) so the fingerprints page can
+ * link the make to its per-vendor gallery; floor makes get no vendor (they span several).
  */
-export function productBreakdown(products: (string | null | undefined)[]): ProductGroup[] {
+export function productBreakdown(entries: BreakdownEntry[]): ProductGroup[] {
 	const makes = new Map<string, Map<string, number>>();
-	for (const raw of products) {
-		const p = (raw ?? "").trim();
+	const vendorTally = new Map<string, Map<string, number>>(); // make -> vendor -> count
+	for (const e of entries) {
+		const p = (e.product ?? "").trim();
 		if (!p || NON_CAMERA.has(p.toLowerCase())) continue;
 		const { make, model } = splitProduct(p);
 		const label = model ?? "—";
 		const inner = makes.get(make) ?? new Map<string, number>();
 		inner.set(label, (inner.get(label) ?? 0) + 1);
 		makes.set(make, inner);
+		const v = (e.vendor ?? "").trim();
+		if (v) {
+			const vt = vendorTally.get(make) ?? new Map<string, number>();
+			vt.set(v, (vt.get(v) ?? 0) + 1);
+			vendorTally.set(make, vt);
+		}
 	}
+	const isFloor = (m: string) => m === "Unidentified" || m === "Other";
+	const dominantVendor = (make: string): string | null => {
+		if (isFloor(make)) return null; // a floor make blends several vendors; no single link
+		const vt = vendorTally.get(make);
+		if (!vt) return null;
+		let best: string | null = null;
+		let bestN = 0;
+		for (const [v, n] of vt) if (n > bestN) { bestN = n; best = v; }
+		return best;
+	};
 	const groups: ProductGroup[] = [];
 	for (const [make, inner] of makes) {
 		const models = [...inner.entries()]
 			.map(([model, count]) => ({ model, count }))
 			.sort((a, b) => b.count - a.count || a.model.localeCompare(b.model));
-		groups.push({ make, total: models.reduce((n, m) => n + m.count, 0), models });
+		groups.push({ make, total: models.reduce((n, m) => n + m.count, 0), models, vendor: dominantVendor(make) });
 	}
-	const isFloor = (m: string) => m === "Unidentified" || m === "Other";
 	groups.sort((a, b) => {
 		const af = isFloor(a.make);
 		const bf = isFloor(b.make);
@@ -608,14 +633,14 @@ function main(): void {
 		}
 		if (floored) console.log(`Floored ${floored} unidentified target(s) to "Generic IP camera" (low).`);
 
-		// ── Traffic ──
-		const traffic = allTrafficRows(db);
-		const trafficDecisions: Decision[] = [];
-		for (const t of traffic) {
-			const fp = fingerprintTraffic(t);
+		// ── Feed ──
+		const feed = allFeedRows(db);
+		const feedDecisions: Decision[] = [];
+		for (const t of feed) {
+			const fp = fingerprintFeed(t);
 			const old = (t.product ?? null) as string | null;
 			if (fp) {
-				trafficDecisions.push({ kind: "feed", ref: t.id, old, next: fp.product, tier: fp.tier, method: fp.method, vendor: fp.vendor, evidence: fp.evidence, action: (old ?? "").trim() === "" ? "fill" : "upgrade" });
+				feedDecisions.push({ kind: "feed", ref: t.id, old, next: fp.product, tier: fp.tier, method: fp.method, vendor: fp.vendor, evidence: fp.evidence, action: (old ?? "").trim() === "" ? "fill" : "upgrade" });
 			}
 		}
 
@@ -626,7 +651,7 @@ function main(): void {
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		db.transaction(() => {
-			for (const d of [...decisions, ...trafficDecisions]) {
+			for (const d of [...decisions, ...feedDecisions]) {
 				ins.run(d.kind, d.ref, d.old, d.next, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null, d.action);
 			}
 		})();
@@ -646,18 +671,18 @@ function main(): void {
 				}
 				return n;
 			})();
-			const changedTraffic = db.transaction(() => {
+			const changedFeeds = db.transaction(() => {
 				let n = 0;
-				for (const d of trafficDecisions) {
+				for (const d of feedDecisions) {
 					up.run(d.next, d.ref);
 					n++;
 				}
 				return n;
 			})();
-			console.log(`Applied: ${changedCam} cam product update(s), ${changedTraffic} feed product write(s).`);
+			console.log(`Applied: ${changedCam} cam product update(s), ${changedFeeds} feed product write(s).`);
 		}
 
-		report(db, decisions, trafficDecisions, faviconApplied, traffic.length);
+		report(db, decisions, feedDecisions, faviconApplied, feed.length);
 		if (!apply) console.log(`\nDry run. Nothing written to product; review the fingerprints table, then re-run with --apply.`);
 	} finally {
 		closeDb(db);
@@ -672,7 +697,7 @@ function splitRef(ref: string): [string, string] {
 
 // ── Reporting ─────────────────────────────────────────────────────────────────
 
-function report(db: Database, cam: Decision[], traffic: Decision[], faviconApplied: number, trafficTotal: number): void {
+function report(db: Database, cam: Decision[], feed: Decision[], faviconApplied: number, feedTotal: number): void {
 	const targets = cam.filter((d) => isServerOrEmpty(d.old));
 	const solvedTargets = targets.filter((d) => d.action !== "unknown");
 	const unknown = targets.filter((d) => d.action === "unknown");
@@ -696,9 +721,9 @@ function report(db: Database, cam: Decision[], traffic: Decision[], faviconAppli
 	console.log(`\ntop IPs by fingerprinted ports (watch for single-host inflation):`);
 	for (const [ip, n] of topIps) console.log(`  ${String(n).padStart(4)}  ${ip}`);
 
-	console.log(`\n=== TRAFFIC (${trafficTotal} rows) ===`);
-	console.log(`  fingerprinted from live_url: ${traffic.length}   (left NULL: ${trafficTotal - traffic.length}, operator networks)`);
-	console.log(topKey(traffic, (d) => d.next as string, 15, "\ntraffic products:"));
+	console.log(`\n=== FEEDS (${feedTotal} rows) ===`);
+	console.log(`  fingerprinted from live_url: ${feed.length}   (left NULL: ${feedTotal - feed.length}, operator networks)`);
+	console.log(topKey(feed, (d) => d.next as string, 15, "\nfeeds products:"));
 
 	// Regression guard: any existing good product that got a strictly less specific label.
 	const downgrades = cam.filter((d) => !isServerOrEmpty(d.old) && d.next && d.action === "upgrade" && specificity(d.next) < specificity(canonicalizeExisting(d.old as string)));
