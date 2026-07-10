@@ -6,6 +6,7 @@ camhunting.sqlite.bak
 camhunting.sqlite-*.bak
 camhunting-local.sqlite*
 camhunting-prod.sqlite*
+camhunting.fp.sqlite*
 out/
 in/
 .env

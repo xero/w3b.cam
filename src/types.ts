@@ -199,6 +199,9 @@ export interface OsirisCamera {
 export type TrafficRow = {
   id: string;
   source: string | null;
+  /** Device fingerprint derived from `live_url` (see fingerprint.ts). Optional: written
+   * by the fingerprint backfill, not the ingest path, and NULL for operator networks. */
+  product?: string | null;
   name: string | null;
   city: string | null;
   country: string | null;
@@ -215,6 +218,19 @@ export type TrafficRow = {
 
 /** A traffic row as read back from the DB (adds the generated columns). */
 export type StoredTrafficRow = TrafficRow & { first_seen: string; last_seen: string };
+
+/**
+ * One make's slice of the camera device breakdown shown on the tags page. Built by
+ * fingerprint.ts `productBreakdown` from the `product` fingerprints and rendered as a
+ * make → model → count table (see render.ts `renderProductBreakdown`).
+ */
+export interface ProductGroup {
+  make: string;
+  /** Total cameras across this make's models. */
+  total: number;
+  /** Models under this make, count-descending. `model` is "—" when only the make is known. */
+  models: { model: string; count: number }[];
+}
 
 /** The output of classifying a raw Osiris cam (see traffic-source.ts): how to render it, and the URLs involved. */
 export interface Classified {

@@ -3,7 +3,7 @@
 // is HTML-escaped before interpolation, exactly as the original single-page build did.
 
 import { displayParts, escapeHtml, pickDisplayName } from "./util.ts";
-import type { FeedKind, StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
+import type { FeedKind, ProductGroup, StoredRow, StoredTrafficRow, StoredYtRow } from "./types.ts";
 import { TIPS_HTML } from "./tips.ts";
 import { WORLD_PATHS } from "./worldmap.ts";
 
@@ -162,6 +162,14 @@ export const tipsPageFileName = "tips.html";
 export const tipsSnippetFileName = "tips.html";
 export const tipsUrl = "/tips.html";
 export const tipsSnippetUrl = "/snips/tips.html";
+
+// Fingerprints is a single, unpaginated standalone page linked from the nav: a
+// make/model/count breakdown of every fingerprinted camera (see fingerprint.ts),
+// emitted like tags/map/tips.
+export const fingerprintsPageFileName = "fingerprints.html";
+export const fingerprintsSnippetFileName = "fingerprints.html";
+export const fingerprintsUrl = "/fingerprints.html";
+export const fingerprintsSnippetUrl = "/snips/fingerprints.html";
 
 // Import is a DEV-ONLY view. `bun dev` bakes it (build.ts) and adds an "import"
 // nav button (renderShell, gated on `dev`); a production `bun bake` emits none of
@@ -877,6 +885,8 @@ export interface TrafficCam {
 	/** Display title: the cam's name, else its id. */
 	name: string;
 	source: string | null;
+	/** Device fingerprint derived from the feed URL (see fingerprint.ts), or null. */
+	product: string | null;
 	city: string | null;
 	country: string | null;
 	lat: number | null;
@@ -901,6 +911,7 @@ export function toTrafficCam(row: StoredTrafficRow, thumbHref: string, tags: str
 		slug: trafficSlug(row.id),
 		name,
 		source: row.source,
+		product: row.product ?? null,
 		city: row.city,
 		country: row.country,
 		lat: row.lat,
@@ -1028,6 +1039,7 @@ export function renderTrafficDetail(cam: TrafficCam, opts: RenderOpts = {}): str
 		if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
 	};
 	push("Source", cam.source);
+	push("Fingerprint", cam.product);
 	push("Location", trafficLoc(cam));
 	if (cam.lat != null && cam.lng != null) push("Coordinates", `${cam.lat}, ${cam.lng}`);
 	push("Type", feedKindLabel(cam.feedKind));
@@ -1098,6 +1110,56 @@ export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => st
 		`${T(1)}<ul class="tags">`,
 		indentBlock(items, 2),
 		`${T(1)}</ul>`,
+		`</section>`,
+	].join("\n");
+}
+
+// ── Device fingerprints page ─────────────────────────────────────────────────────
+// A standalone page (fingerprints.html) with a make → model → count breakdown of every
+// fingerprinted camera, built from the `product` field (see fingerprint.ts). Read-only:
+// no links, no per-product pages, just a tally that visualizes fingerprinting coverage.
+// Makes group via a rowspan cell; the catch-all "Unidentified"/"Other" makes sink last.
+
+/**
+ * Inner-<main> content for the fingerprints page: the make/model/count table, or an
+ * empty-state note when nothing is fingerprinted. `groups` come pre-sorted from
+ * productBreakdown. Every make and model is escaped (models can echo attacker-influenced
+ * banner text).
+ */
+export function renderFingerprintsMain(groups: ProductGroup[]): string {
+	if (groups.length === 0) {
+		return `<p class="empty">No camera fingerprints yet. Run <code>bun run fingerprint --apply</code>, then re-bake.</p>`;
+	}
+	const totalCams = groups.reduce((n, g) => n + g.total, 0);
+	const fmt = (n: number) => n.toLocaleString();
+
+	const body = groups
+		.map((g) => {
+			return g.models
+				.map((m, i) => {
+					const model = m.model === "—" ? `<span class="bd-none">—</span>` : escapeHtml(m.model);
+					const cells = [`${T(2)}<td class="bd-model">${model}</td>`, `${T(2)}<td class="bd-count">${fmt(m.count)}</td>`];
+					// The make cell spans all of its models and carries the make subtotal.
+					const makeCell =
+						i === 0
+							? `${T(2)}<th scope="rowgroup" rowspan="${g.models.length}" class="bd-make">${escapeHtml(g.make)}<span class="bd-total">${fmt(g.total)}</span></th>\n`
+							: "";
+					return `${T(1)}<tr>\n${makeCell}${cells.join("\n")}\n${T(1)}</tr>`;
+				})
+				.join("\n");
+		})
+		.join("\n");
+
+	return [
+		`<section class="breakdown">`,
+		`${T(1)}<h2>Device fingerprints</h2>`,
+		`${T(1)}<p class="bd-sub">${fmt(totalCams)} cameras across ${groups.length} makes, identified from Shodan banners and feed URLs.</p>`,
+		`${T(1)}<table class="bd-table">`,
+		`${T(2)}<thead><tr><th scope="col">Make</th><th scope="col">Model</th><th scope="col" class="bd-count">Cameras</th></tr></thead>`,
+		`${T(2)}<tbody>`,
+		indentBlock(body, 2),
+		`${T(2)}</tbody>`,
+		`${T(1)}</table>`,
 		`</section>`,
 	].join("\n");
 }
@@ -1358,6 +1420,20 @@ body {
 	}
 }
 
+a {
+	color: var(--accent);
+	text-decoration: none;
+
+	&:hover,
+	&:focus-visible {
+		background: var(--accent);
+		color: var(--ice);
+		text-decoration: none;
+		outline: none;
+	}
+}
+
+
 body > header {
 	display: flex;
 	flex-flow: row wrap;
@@ -1477,6 +1553,7 @@ main {
 	&:hover,
 	&:focus-visible {
 		border-color: var(--accent);
+		background: var(--surface);
 		transform: translateY(-2px);
 		outline: none;
 	}
@@ -1766,23 +1843,12 @@ main {
 		margin: 0.3rem 0;
 	}
 
-	& a {
-		color: var(--accent);
-		text-decoration: none;
-
-		&:hover,
-		&:focus-visible {
-			text-decoration: underline;
-		}
-	}
-
 	& code {
 		padding: 0.1em 0.35em;
 		font-family: var(--font-mono);
 		font-size: 0.9em;
-		color: var(--accent);
+		color: var(--fog);
 		background: var(--surface);
-		border: 1px solid var(--border);
 		border-radius: 4px;
 		overflow-wrap: anywhere;
 	}
@@ -2005,6 +2071,74 @@ body > footer {
 	}
 }
 
+.breakdown {
+	border-top: 1px solid var(--accent);
+	padding-top: 10px;
+
+	& h2 {
+		margin-bottom: 0.2rem;
+		font-size: clamp(1.1rem, 3vw, 1.5rem);
+		font-weight: 600;
+		color: var(--accent);
+	}
+
+	& .bd-sub {
+		margin-bottom: 1.1rem;
+		color: var(--muted);
+		font-size: 0.9rem;
+	}
+}
+
+.bd-table {
+	width: 100%;
+	max-width: 40rem;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+
+	& th,
+	& td {
+		text-align: left;
+		vertical-align: top;
+		padding: 0.3rem 0.9rem 0.3rem 0;
+		border-bottom: 1px solid var(--border);
+	}
+
+	& thead th {
+		color: var(--accent);
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	& .bd-count {
+		text-align: right;
+		padding-right: 0;
+		white-space: nowrap;
+	}
+
+	& .bd-make {
+		white-space: nowrap;
+		color: var(--text);
+		font-weight: 600;
+		border-bottom: 2px solid var(--accent);
+	}
+
+	& .bd-total {
+		display: block;
+		color: var(--muted);
+		font-weight: 400;
+		font-size: 0.8rem;
+	}
+
+	& .bd-model {
+		color: var(--muted);
+		overflow-wrap: anywhere;
+	}
+
+	& .bd-none {
+		color: var(--border);
+	}
+}
+
 .home {
 	display: flex;
 	flex-flow: column nowrap;
@@ -2099,19 +2233,23 @@ export interface ShellOpts {
 
 /** Wrap inner-<main> content in the full HTML document. */
 export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts): string {
+	// Header links (brand + nav + the discovered-count link) live outside <main>, so they
+	// can't inherit its hx-target:inherited / hx-swap:inherited. Without a resolvable
+	// target htmx falls back to a full-page navigation on the href, which loads the whole
+	// document (its own <main> included) and appends it. Set both explicitly so these
+	// links swap the snippet into <main>, exactly like the in-main links.
+	const navAttrs = 'hx-target="main" hx-swap="innerHTML show:top"';
 	const stat = (label: string, value: string): string =>
 		`<span>${escapeHtml(label)} <strong>${escapeHtml(value)}</strong></span>`;
+	const ghStat= (label: string, value: string, href: string): string =>
+		`<span>${escapeHtml(label)} <strong><a href="${href}" target="_blank">${escapeHtml(value)}</a></strong></span>`;
+	const statLink = (label: string, value: string, href: string, snip: string): string =>
+		`<span>${escapeHtml(label)} <strong><a href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">${escapeHtml(value)}</a></strong></span>`;
 	const counts = [
-		stat("cameras discovered", stats.discovered),
-		stat("updated", stats.updated),
+		statLink("cameras discovered", stats.discovered, fingerprintsUrl, fingerprintsSnippetUrl),
+		ghStat("updated", stats.updated, "https://github.com/xero/w3b.cam/deployments"),
 		stat("fresh scrapes every", stats.interval),
 	].join("");
-	// Header links (brand + nav) live outside <main>, so they can't inherit its
-	// hx-target:inherited / hx-swap:inherited. Without a resolvable target htmx
-	// falls back to a full-page navigation on the href, which loads the whole
-	// document (its own <main> included) and appends it. Set both explicitly so
-	// these links swap the snippet into <main>, exactly like the in-main links.
-	const navAttrs = 'hx-target="main" hx-swap="innerHTML show:top"';
 	// Nav links are real .btn links — larger siblings of the pager buttons: the same
 	// three stacked layers (shadow / edge / labelled front), plus the header-only
 	// hx-target/hx-swap so they swap <main> like the in-main links.

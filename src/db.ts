@@ -259,6 +259,7 @@ const TRAFFIC_SCHEMA = `
 CREATE TABLE IF NOT EXISTS traffic (
 	id            TEXT    NOT NULL PRIMARY KEY,
 	source        TEXT,
+	product       TEXT,               -- device fingerprint derived from live_url (see fingerprint.ts); NULL for operator networks
 	name          TEXT,
 	city          TEXT,
 	country       TEXT,
@@ -413,6 +414,7 @@ export function openDb(path = DB_PATH): Database {
 	db.run(YOUTUBE_SCHEMA);
 	db.run(YT_GEO_SCHEMA);
 	db.run(TRAFFIC_SCHEMA);
+	migrateTraffic(db);
 	db.run(BLACKLIST_SCHEMA);
 	db.run(HOST_BLACKLIST_SCHEMA);
 	db.run(TAGS_SCHEMA);
@@ -442,6 +444,20 @@ function migrate(db: Database): void {
 	// never rewrites existing rows, so this is instant; old rows read back as 0.
 	if (!cols.some((c) => c.name === "preferred")) {
 		db.run("ALTER TABLE webcams ADD COLUMN preferred INTEGER NOT NULL DEFAULT 0");
+	}
+}
+
+/**
+ * Add the `product` column to an existing `traffic` table. Like migrate(), ADD COLUMN
+ * never rewrites existing rows and old rows read back as NULL, which is exactly the
+ * "not yet fingerprinted" state. The fingerprint backfill (fingerprint.ts) populates it;
+ * the ingest path leaves it alone (product is absent from TRAFFIC_COLUMNS), so a
+ * re-ingest never clobbers a derived fingerprint.
+ */
+function migrateTraffic(db: Database): void {
+	const cols = db.query("PRAGMA table_info(traffic)").all() as { name: string }[];
+	if (!cols.some((c) => c.name === "product")) {
+		db.run("ALTER TABLE traffic ADD COLUMN product TEXT");
 	}
 }
 

@@ -24,6 +24,7 @@ import {
 	YT_PAGE_SIZE,
 } from "./config.ts";
 import { allRows, allTrafficRows, allYtRows, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadYtGeo, openDb } from "./db.ts";
+import { productBreakdown } from "./fingerprint.ts";
 import { isBlockedProduct, pickRandom } from "./util.ts";
 import {
 	extFromMime,
@@ -38,6 +39,7 @@ import {
 	renderHostMain,
 	renderIndexMain,
 	renderMapMain,
+	renderFingerprintsMain,
 	renderShell,
 	renderImportMain,
 	renderImportForm,
@@ -59,6 +61,8 @@ import {
 	tagSlug,
 	tagsPageFileName,
 	tagsSnippetFileName,
+	fingerprintsPageFileName,
+	fingerprintsSnippetFileName,
 	tipsPageFileName,
 	tipsSnippetFileName,
 	TITLE,
@@ -424,6 +428,12 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────
 
 	await writePage(tagsPageFileName, tagsSnippetFileName, renderTagsMain(tagCounts, slugForTag), `tags | ${TITLE}`, stats, { dev });
+
+	// ── Fingerprints: a standalone make/model/count breakdown of every fingerprinted
+	// camera across both device sources (Shodan cams + traffic feeds) ────────────────
+
+	const breakdown = productBreakdown([...rows.map((r) => r.product), ...trafficRows.map((t) => t.product)]);
+	await writePage(fingerprintsPageFileName, fingerprintsSnippetFileName, renderFingerprintsMain(breakdown), `fingerprints | ${TITLE}`, stats, { dev });
 
 	// ── Tips: a single static standalone page (content baked from tips.md) ────────────
 	await writePage(tipsPageFileName, tipsSnippetFileName, renderTipsMain(), `tips | ${TITLE}`, stats, { dev });
