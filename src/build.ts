@@ -18,6 +18,7 @@ import {
 	HTMX_OUT,
 	HTMX_VENDOR_SRC,
 	IMG_DIR,
+	MANIFEST,
 	OUT_DIR,
 	PAGE_SIZE,
 	SYNDICATION_LIMIT,
@@ -25,7 +26,7 @@ import {
 	FEED_PAGE_SIZE,
 	YT_PAGE_SIZE,
 } from "./config.ts";
-import { allRows, allFeedRows, allYtRows, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb } from "./db.ts";
+import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb } from "./db.ts";
 import { productBreakdown } from "./fingerprint.ts";
 import { isBlockedProduct, pickRandom } from "./util.ts";
 import {
@@ -147,6 +148,31 @@ async function readScrapeInterval(): Promise<string> {
  * so the webcam and YouTube passes dedupe against each other and the final image
  * count is accurate.
  */
+/** The three id→url image maps a build resolves, serialized for `--index-only` reuse. */
+type ImgManifest = { cams: Map<string, string>; streams: Map<string, string>; feeds: Map<string, string> };
+
+/** Persist the resolved image URLs so a later `--index-only` build reuses the on-disk
+ *  screenshots without re-decoding and re-hashing every row. Written on every full bake. */
+async function writeManifest(m: ImgManifest): Promise<void> {
+	const obj = { cams: Object.fromEntries(m.cams), streams: Object.fromEntries(m.streams), feeds: Object.fromEntries(m.feeds) };
+	await Bun.write(MANIFEST, JSON.stringify(obj));
+}
+
+/** Load the image manifest a prior full bake wrote, or null if it is missing or unreadable
+ *  (which sends `--index-only` down a one-time full build instead of failing). */
+async function loadManifest(): Promise<ImgManifest | null> {
+	try {
+		const raw = await Bun.file(MANIFEST).json();
+		return {
+			cams: new Map(Object.entries(raw.cams ?? {}) as [string, string][]),
+			streams: new Map(Object.entries(raw.streams ?? {}) as [string, string][]),
+			feeds: new Map(Object.entries(raw.feeds ?? {}) as [string, string][]),
+		};
+	} catch {
+		return null;
+	}
+}
+
 async function extractImages<T>(
 	rows: T[],
 	key: (row: T) => string,
@@ -219,8 +245,21 @@ const byNewest = (a: { ts: string }, b: { ts: string }): number => (a.ts < b.ts 
  * into every page; off (the default) yields the byte-identical production site.
  * `bun bake` calls this with no options; `bun dev` (src/dev.ts) passes `{ dev: true }`.
  */
-export async function build(opts: { dev?: boolean } = {}): Promise<void> {
+export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): Promise<void> {
 	const dev = opts.dev ?? false;
+
+	// --index-only regenerates just index.html against the last full bake's out/ (images
+	// + all other pages reused as-is), for a fast `bun dev` restart. It needs the image
+	// manifest a full bake writes; without it, fall back to a normal full build once.
+	let indexOnly = opts.indexOnly ?? false;
+	let manifest: ImgManifest | null = null;
+	if (indexOnly) {
+		manifest = await loadManifest();
+		if (!manifest) {
+			console.warn(`--index-only: no ${MANIFEST} (run a full \`bun bake\`/\`bun dev\` first); doing a full build this once.`);
+			indexOnly = false;
+		}
+	}
 
 	// ── Load ──────────────────────────────────────────────────────────────────────
 
@@ -234,20 +273,22 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	let ytRows: StoredYtRow[];
 	let ytGeo: Map<string, { lat: number; lng: number }>;
 	let feedRows: StoredFeedRow[];
-	let featured: { cams: string[]; streams: string[] };
+	let featured: { cams: string[]; streams: string[]; feeds: string[] };
 	let vendorRefs: { byVendor: Map<string, { hosts: Set<string>; feeds: Set<string> }>; byRef: Map<string, string> };
 	try {
 		// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
 		// that guard can still be in the DB. Never render them, whatever the DB holds.
-		rows = allRows(db).filter((r) => !isBlockedProduct(r.product));
+		// --index-only skips the screenshot payload (~99% of the DB); images come from the
+		// manifest, not these rows. The metadata readers keep every other column.
+		rows = (indexOnly ? allRowsMeta(db) : allRows(db)).filter((r) => !isBlockedProduct(r.product));
 		tagsByIp = loadTags(db, "cam");
 		tagsByVideo = loadTags(db, "stream");
 		tagsByFeed = loadTags(db, "feed");
 		tagCounts = loadTagCounts(db);
 		tagIndex = loadTagIndex(db);
-		ytRows = allYtRows(db);
+		ytRows = indexOnly ? allYtRowsMeta(db) : allYtRows(db);
 		ytGeo = loadYtGeo(db);
-		feedRows = allFeedRows(db);
+		feedRows = indexOnly ? allFeedRowsMeta(db) : allFeedRows(db);
 		featured = loadFeatured(db);
 		vendorRefs = loadVendorRefs(db);
 	} finally {
@@ -255,45 +296,47 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	}
 
 	// ── Wipe and recreate out/ from scratch ─────────────────────────────────────────
+	// Skipped for --index-only: it reuses the last full bake's out/ (images + every page
+	// but the homepage), so wiping and re-copying vendored assets would defeat the point.
 
-	await rm(OUT_DIR, { recursive: true, force: true });
+	if (!indexOnly) {
+		await rm(OUT_DIR, { recursive: true, force: true });
 
-	if (!(await Bun.file(HTMX_VENDOR_SRC).exists())) {
-		console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
-		process.exit(1);
-	}
-	await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
-
-	// Vendor hls.js too (fetched on demand by assets/feeds.js when an HLS cam is
-	// viewed). A missing copy only breaks HLS playback, so warn rather than abort.
-	if (await Bun.file(HLS_VENDOR_SRC).exists()) {
-		await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
-	} else {
-		console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
-	}
-
-	// Copy static assets (favicons, web manifest) verbatim into out/ root, the
-	// same flat copy the htmx write above does. Guard on the dir so a missing
-	// assets/ warns instead of aborting the bake (mirrors the htmx guard).
-	// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
-	if (existsSync(ASSETS_DIR)) {
-		for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
-			if (ent.isFile()) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
+		if (!(await Bun.file(HTMX_VENDOR_SRC).exists())) {
+			console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
+			process.exit(1);
 		}
-	} else {
-		console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);
+		await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
+
+		// Vendor hls.js too (fetched on demand by assets/feeds.js when an HLS cam is
+		// viewed). A missing copy only breaks HLS playback, so warn rather than abort.
+		if (await Bun.file(HLS_VENDOR_SRC).exists()) {
+			await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
+		} else {
+			console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
+		}
+
+		// Copy static assets (favicons, web manifest) verbatim into out/ root, the
+		// same flat copy the htmx write above does. Guard on the dir so a missing
+		// assets/ warns instead of aborting the bake (mirrors the htmx guard).
+		// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
+		if (existsSync(ASSETS_DIR)) {
+			for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
+				if (ent.isFile()) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
+			}
+		} else {
+			console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);
+		}
 	}
 
 	// ── Build the grouped model ──────────────────────────────────────────────────
 
+	// --index-only takes the image URLs straight from the manifest (already on disk); a
+	// full bake extracts them from the screenshot bytes and writes the manifest below.
 	const written = new Set<string>();
-	const imgByKey = await extractImages(
-		rows,
-		(r) => `${r.ip_str}:${r.port}`,
-		(r) => r.ss_base64,
-		(r) => r.ss_mime,
-		written,
-	);
+	const imgByKey = indexOnly
+		? manifest!.cams
+		: await extractImages(rows, (r) => `${r.ip_str}:${r.port}`, (r) => r.ss_base64, (r) => r.ss_mime, written);
 	const imgHref = (row: StoredRow): string => imgByKey.get(`${row.ip_str}:${row.port}`) ?? "";
 	const hosts: Host[] = groupByIp(rows, imgHref, tagsByIp);
 
@@ -324,13 +367,9 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 
 	// ── YouTube streams: view models + channel grouping ──────────────────────────────
 
-	const ytImgById = await extractImages(
-		ytRows,
-		(r) => r.id,
-		(r) => r.ss_base64,
-		(r) => r.ss_mime,
-		written,
-	);
+	const ytImgById = indexOnly
+		? manifest!.streams
+		: await extractImages(ytRows, (r) => r.id, (r) => r.ss_base64, (r) => r.ss_mime, written);
 	const streams: YtStream[] = ytRows.map((r) => toYtStream(r, ytImgById.get(r.id) ?? "", tagsByVideo.get(r.id) ?? []));
 
 	// Group by channel so each detail page can link its "More from this channel" siblings.
@@ -345,13 +384,12 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 	// ── Feeds (ex-"feed"): baked thumbnails + view models ─────────────────────────
 	// Same hybrid pipeline as the other sources for the card image (a baked, deduped
 	// thumbnail); the live feed itself is embedded client-side on the detail page.
-	const feedImgById = await extractImages(
-		feedRows,
-		(r) => r.id,
-		(r) => r.ss_base64,
-		(r) => r.ss_mime,
-		written,
-	);
+	const feedImgById = indexOnly
+		? manifest!.feeds
+		: await extractImages(feedRows, (r) => r.id, (r) => r.ss_base64, (r) => r.ss_mime, written);
+
+	// Persist the resolved URLs so the next --index-only build can reuse the on-disk images.
+	if (!indexOnly) await writeManifest({ cams: imgByKey, streams: ytImgById, feeds: feedImgById });
 	// Deduped feed folder slugs. feedSlug strips the `mjpeg-` prefix so those read like an
 	// IP; ids are the PK (unique), so a collision can only arise from that strip. A suffix
 	// loop guards it anyway, mirroring the host/tag dedup, so a page can never overwrite another.
@@ -365,6 +403,60 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		feedSlugs.set(r.id, slug);
 	}
 	const feedCams: FeedCam[] = feedRows.map((r) => toFeedCam(r, feedImgById.get(r.id) ?? "", tagsByFeed.get(r.id) ?? [], feedSlugs.get(r.id)));
+
+	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
+	// Rendered before the galleries so --index-only can write just this page and return,
+	// reusing the rest of out/ from the last full bake.
+
+	// `hosts` is already newest-first (groupByIp). Streams sort newest-first by
+	// first_seen (then published_at, then video_id) for a stable "newest" order.
+	const camByIp = new Map(hosts.map((h) => [h.ip, h]));
+	const streamByVideo = new Map(streams.map((s) => [s.videoId, s]));
+	const newestStreams = [...ytRows]
+		.sort((a, b) => {
+			if (a.first_seen !== b.first_seen) return a.first_seen < b.first_seen ? 1 : -1;
+			const ap = a.published_at ?? "";
+			const bp = b.published_at ?? "";
+			if (ap !== bp) return ap < bp ? 1 : -1;
+			return a.id < b.id ? -1 : 1;
+		})
+		.map((r) => streamByVideo.get(r.id))
+		.filter((s): s is YtStream => s !== undefined);
+
+	const feedById = new Map(feedCams.map((c) => [c.id, c]));
+	const newestFeeds = [...feedRows]
+		.sort((a, b) => {
+			// Cams with a baked thumbnail first, so the homepage never leads with black tiles.
+			const at = a.ss_base64 ? 0 : 1;
+			const bt = b.ss_base64 ? 0 : 1;
+			if (at !== bt) return at - bt;
+			if (a.first_seen !== b.first_seen) return a.first_seen < b.first_seen ? 1 : -1;
+			return a.id < b.id ? -1 : 1;
+		})
+		.map((r) => feedById.get(r.id))
+		.filter((c): c is FeedCam => c !== undefined);
+
+	// Resolve featured refs to live rows, then drop the newest that will fill the rest of
+	// the row: a random featured pick must never land on a card that's about to show as
+	// "newest" anyway, which would waste a featured slot on something already visible.
+	const fillCount = HOME_PER_KIND - HOME_FEATURED_PER_KIND;
+	const topCamIps = new Set(hosts.slice(0, fillCount).map((h) => h.ip));
+	const topStreamIds = new Set(newestStreams.slice(0, fillCount).map((s) => s.videoId));
+	const topFeedIds = new Set(newestFeeds.slice(0, fillCount).map((c) => c.id));
+	const liveCamRefs = featured.cams.filter((ip) => camByIp.has(ip) && !topCamIps.has(ip));
+	const liveStreamRefs = featured.streams.filter((id) => streamByVideo.has(id) && !topStreamIds.has(id));
+	const liveFeedRefs = featured.feeds.filter((id) => feedById.has(id) && !topFeedIds.has(id));
+	const homeCams = pickHome(pickRandom(liveCamRefs, HOME_FEATURED_PER_KIND), camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
+	const homeStreams = pickHome(pickRandom(liveStreamRefs, HOME_FEATURED_PER_KIND), streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
+	const homeFeeds = pickHome(pickRandom(liveFeedRefs, HOME_FEATURED_PER_KIND), feedById, newestFeeds, (c) => c.id, HOME_PER_KIND);
+	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, { dev }), TITLE, stats, { dev });
+
+	// --index-only stops here: index.html is fresh, and every other page + image is reused
+	// from the last full bake's out/.
+	if (indexOnly) {
+		console.log(`Wrote out/index.html (--index-only): homepage rebuilt, ${hosts.length} host(s) / ${streams.length} stream(s) / ${feedCams.length} feed(s) reused from the last full bake.`);
+		return;
+	}
 
 	// ── Hosts (cams) gallery: page 1 also mirrored to the bare /hosts landing ─────────
 
@@ -424,50 +516,6 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		const mainInner = renderFeedDetail(cam, { dev, slugForTag });
 		await writePage(feedRoute(cam.slug), mainInner, `${cam.name} | ${TITLE}`, stats, { dev });
 	}
-
-	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
-
-	// `hosts` is already newest-first (groupByIp). Streams sort newest-first by
-	// first_seen (then published_at, then video_id) for a stable "newest" order.
-	const camByIp = new Map(hosts.map((h) => [h.ip, h]));
-	const streamByVideo = new Map(streams.map((s) => [s.videoId, s]));
-	const newestStreams = [...ytRows]
-		.sort((a, b) => {
-			if (a.first_seen !== b.first_seen) return a.first_seen < b.first_seen ? 1 : -1;
-			const ap = a.published_at ?? "";
-			const bp = b.published_at ?? "";
-			if (ap !== bp) return ap < bp ? 1 : -1;
-			return a.id < b.id ? -1 : 1;
-		})
-		.map((r) => streamByVideo.get(r.id))
-		.filter((s): s is YtStream => s !== undefined);
-
-	// Feed has no featured pins yet (deferred), so the homepage shows its newest.
-	const feedById = new Map(feedCams.map((c) => [c.id, c]));
-	const newestFeeds = [...feedRows]
-		.sort((a, b) => {
-			// Cams with a baked thumbnail first, so the homepage never leads with black tiles.
-			const at = a.ss_base64 ? 0 : 1;
-			const bt = b.ss_base64 ? 0 : 1;
-			if (at !== bt) return at - bt;
-			if (a.first_seen !== b.first_seen) return a.first_seen < b.first_seen ? 1 : -1;
-			return a.id < b.id ? -1 : 1;
-		})
-		.map((r) => feedById.get(r.id))
-		.filter((c): c is FeedCam => c !== undefined);
-
-	// Resolve featured refs to live rows, then drop the newest that will fill the rest of
-	// the row: a random featured pick must never land on a card that's about to show as
-	// "newest" anyway, which would waste a featured slot on something already visible.
-	const fillCount = HOME_PER_KIND - HOME_FEATURED_PER_KIND;
-	const topCamIps = new Set(hosts.slice(0, fillCount).map((h) => h.ip));
-	const topStreamIds = new Set(newestStreams.slice(0, fillCount).map((s) => s.videoId));
-	const liveCamRefs = featured.cams.filter((ip) => camByIp.has(ip) && !topCamIps.has(ip));
-	const liveStreamRefs = featured.streams.filter((id) => streamByVideo.has(id) && !topStreamIds.has(id));
-	const homeCams = pickHome(pickRandom(liveCamRefs, HOME_FEATURED_PER_KIND), camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
-	const homeStreams = pickHome(pickRandom(liveStreamRefs, HOME_FEATURED_PER_KIND), streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
-	const homeFeeds = newestFeeds.slice(0, HOME_PER_KIND);
-	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, { dev }), TITLE, stats, { dev });
 
 	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────
 

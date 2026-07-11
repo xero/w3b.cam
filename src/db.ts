@@ -139,8 +139,8 @@ CREATE TABLE IF NOT EXISTS meta (
 /** Which source a tag/featured `ref` points at. Matches the cam's `kind`. */
 export type TagKind = "cam" | "stream" | "feed";
 
-/** Which source a featured pin points at (no 'feed': the homepage has no feed pins yet). */
-export type FeaturedKind = "cam" | "stream";
+/** Which source a featured pin points at. Matches the cam's `kind`. */
+export type FeaturedKind = "cam" | "stream" | "feed";
 
 /**
  * Tag -> IPs used to seed the `meta` table (as kind='cam', type='tag') on a fresh
@@ -343,6 +343,52 @@ export function allFeedRows(db: Database): StoredFeedRow[] {
 		.all() as StoredFeedRow[];
 }
 
+// ── Metadata-only readers (for `bun dev --index-only`) ─────────────────────────
+// These mirror the readers above but never transfer the screenshot payload, which is
+// ~99% of the DB. `bun dev --index-only` only re-renders the homepage and pulls the ~12
+// shown cards' images from the on-disk manifest, so it needs row metadata (timestamps,
+// ids, labels) but not ss_base64. The `ss_base64` column is replaced by a truthy '1'
+// sentinel when non-null so the thumbnail-first sorts keep working unchanged.
+
+/** Column list for the `cams` table minus `ss_base64`, plus the presence sentinel. Built
+ *  once from the live schema so a column added to CAMS_SCHEMA is picked up automatically. */
+function metaSelect(db: Database): string {
+	const cols = (db.query("PRAGMA table_info(cams)").all() as { name: string }[])
+		.map((c) => c.name)
+		.filter((c) => c !== "ss_base64")
+		.map((c) => `"${c}"`);
+	cols.push("CASE WHEN ss_base64 IS NOT NULL THEN '1' END AS ss_base64");
+	return cols.join(", ");
+}
+
+/** `allRows` without the screenshot bytes. */
+export function allRowsMeta(db: Database): StoredRow[] {
+	return db
+		.query(`SELECT ${metaSelect(db)} FROM cams WHERE kind = 'cam' ORDER BY country_name, ip_str, port`)
+		.all() as StoredRow[];
+}
+
+/** `allYtRows` without the screenshot bytes. */
+export function allYtRowsMeta(db: Database): StoredYtRow[] {
+	return db
+		.query(
+			`SELECT ${metaSelect(db)} FROM cams WHERE kind = 'stream'
+			 ORDER BY
+				 CASE live_content WHEN 'live' THEN 0 WHEN 'upcoming' THEN 1 ELSE 2 END,
+				 channel_title,
+				 published_at DESC,
+				 id`,
+		)
+		.all() as StoredYtRow[];
+}
+
+/** `allFeedRows` without the screenshot bytes (the sentinel keeps the thumbnail-first sort). */
+export function allFeedRowsMeta(db: Database): StoredFeedRow[] {
+	return db
+		.query(`SELECT ${metaSelect(db)} FROM cams WHERE kind = 'feed' ORDER BY (ss_base64 IS NULL), country_name, source, name, id`)
+		.all() as StoredFeedRow[];
+}
+
 /** True when any stored cam has this exact IP (any port). */
 export function hasHost(db: Database, ip: string): boolean {
 	return db.query("SELECT 1 FROM cams WHERE kind = 'cam' AND ip_str = ? LIMIT 1").get(ip) != null;
@@ -533,20 +579,23 @@ export function seedFeatured(db: Database): void {
 
 /**
  * The homepage's candidate featured refs, split by kind: `cams` holds ip_strs,
- * `streams` holds video_ids. Order is not meaningful (the build samples at random);
- * the build resolves each ref against the current rows and skips any whose row is gone.
+ * `streams` holds video_ids, `feeds` holds feed ids. Order is not meaningful (the build
+ * samples at random); the build resolves each ref against the current rows and skips any
+ * whose row is gone.
  */
-export function loadFeatured(db: Database): { cams: string[]; streams: string[] } {
+export function loadFeatured(db: Database): { cams: string[]; streams: string[]; feeds: string[] } {
 	const rows = db
 		.query("SELECT kind, ref FROM meta WHERE type = 'featured' ORDER BY kind, added_at, ref")
 		.all() as { kind: string; ref: string }[];
 	const cams: string[] = [];
 	const streams: string[] = [];
+	const feeds: string[] = [];
 	for (const r of rows) {
 		if (r.kind === "cam") cams.push(r.ref);
 		else if (r.kind === "stream") streams.push(r.ref);
+		else if (r.kind === "feed") feeds.push(r.ref);
 	}
-	return { cams, streams };
+	return { cams, streams, feeds };
 }
 
 /** Mark (kind, ref) as featured. Idempotent (INSERT OR IGNORE); true if newly added. */

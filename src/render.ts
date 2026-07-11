@@ -510,7 +510,7 @@ export function renderHomeMain(cams: Host[], streams: YtStream[], feeds: FeedCam
 		parts.push(section("feeds", cards, urlOf(FEEDS), snipUrlOf(FEEDS), "all feeds"));
 	}
 	if (parts.length === 0) {
-		return `<p class="empty">Nothing to feature yet. Run <code>bun run scrape</code>, <code>bun run youtube</code>, or <code>bun run osiris</code> first.</p>`;
+		return `<p class="empty">Nothing to feature yet. Run <code>bun scrape</code>, <code>bun import --youtube</code>, <code>bun import --mjpeg</code>, <code>bun import --hls</code>, or <code>bun run osiris</code> first.</p>`;
 	}
 	return parts.join("\n");
 }

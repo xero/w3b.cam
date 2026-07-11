@@ -42,6 +42,9 @@ export const SYNDICATION_LIMIT = 50;
 export const OUT_DIR = "out";
 /** Extracted screenshot files, one per unique image, referenced by <img src>. */
 export const IMG_DIR = `${OUT_DIR}/img`;
+/** Image-URL manifest a full bake writes so `bun dev --index-only` can reuse the
+ *  already-extracted screenshots without re-hashing every row. */
+export const MANIFEST = `${OUT_DIR}/.img-manifest.json`;
 /** Vendored htmx library (installed via bun) and its build-time destination. */
 export const HTMX_VENDOR_SRC = "node_modules/htmx.org/dist/htmx.min.js";
 export const HTMX_OUT = `${OUT_DIR}/htmx.min.js`;

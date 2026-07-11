@@ -10,7 +10,12 @@
 // the static site once you're done. Local-only; this never runs in CI.
 //
 // Usage:  bun dev   (or `bun run dev`; override the port with PORT=3000 bun dev)
+//   bun dev --index-only   rebuild only index.html and reuse the rest of out/ from the
+//                          last full bake, for a much faster start. Other pages and the
+//                          homepage's newest cards reflect that last bake, not any DB
+//                          changes since; run a plain `bun dev` when you need them fresh.
 
+import { parseArgs } from "node:util";
 import { isIP } from "node:net";
 import { OUT_DIR } from "./config.ts";
 import { addFeatured, addTag, blacklist, closeDb, distinctTags, entityTags, isFeatured, openDb, removeFeatured, removeTag, setPreferred } from "./db.ts";
@@ -18,12 +23,14 @@ import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "./ingest.ts"
 import { build } from "./build.ts";
 import { serveStatic } from "./serve.ts";
 
+const { values } = parseArgs({ args: Bun.argv.slice(2), options: { "index-only": { type: "boolean" } }, allowPositionals: true });
+
 /** Dev-client assets, served from source so they never get copied into out/. */
 const DEV_CLIENT = `${import.meta.dir}/dev-client`;
 const port = Number(process.env.PORT ?? 1337);
 
 // 1. Bake the dev-flavored site into out/ (data-* hooks + /__dev/* asset refs).
-await build({ dev: true });
+await build({ dev: true, indexOnly: values["index-only"] });
 
 // 2. One long-lived handle for the server's lifetime. bun:sqlite calls are
 //    synchronous and Bun is single-threaded, so mutation endpoints can't race each
@@ -61,13 +68,12 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	}
 
 	// ── GET /__dev/featured?kind=&ref= → { featured } (labels the toggle menu item) ─
-	// cam|stream ONLY: feed has no featured pins (the homepage slices newest feed
-	// directly, see build.ts), so a feed ref can never be featured.
+	// cam|stream|feed: the homepage samples featured pins of every kind (see build.ts).
 	if (req.method === "GET" && path === "/__dev/featured") {
 		const q = new URL(req.url).searchParams;
 		const kind = q.get("kind");
 		const ref = q.get("ref");
-		if (kind !== "cam" && kind !== "stream") return json({ error: "invalid kind" }, 400);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (!ref) return json({ error: "invalid ref" }, 400);
 		return json({ featured: isFeatured(db, kind, ref) });
 	}
@@ -75,7 +81,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	// ── POST /__dev/feature {kind, ref, on} → set homepage-feature membership ───────
 	if (req.method === "POST" && path === "/__dev/feature") {
 		const { kind, ref, on } = await readBody(req);
-		if (kind !== "cam" && kind !== "stream") return json({ error: "invalid kind" }, 400);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
 		if (typeof on !== "boolean") return json({ error: "invalid on" }, 400);
 		if (on) addFeatured(db, kind, ref);

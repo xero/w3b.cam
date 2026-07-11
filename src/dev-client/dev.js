@@ -125,8 +125,8 @@
 		}
 		// Tag applies to every kind.
 		menu.appendChild(itemButton("Tag", "", () => showTag(ctx)));
-		// Feature toggles homepage-showcase membership: cam + stream only (feed has no pins).
-		if (ctx.kind === "cam" || ctx.kind === "stream") {
+		// Feature toggles homepage-showcase membership, supported for every kind.
+		if (ctx.kind === "cam" || ctx.kind === "stream" || ctx.kind === "feed") {
 			menu.appendChild(featureItem(ctx));
 		}
 		// Blacklist removes a whole host: a cam-only concept.
