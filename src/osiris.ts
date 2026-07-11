@@ -10,6 +10,8 @@
 //   bun run osiris --source TfL            only cams whose source contains "TfL"
 //   bun run osiris --id cal-79,sin-2701    only these exact cam ids (re-scrape/hand-patch)
 //   bun run osiris --concurrency 32        snapshot fan-out (default 24)
+//   bun run osiris --delay 500             pace grab starts (ms) to stay under a per-IP limit
+//   bun run osiris --skip-existing         skip cams that already have a thumbnail (retry gaps)
 
 import { parseArgs } from "node:util";
 import { OSIRIS_JSON } from "./config.ts";
@@ -23,6 +25,8 @@ const { values, positionals } = parseArgs({
     source: { type: "string", short: "s" },
     id: { type: "string" },
     concurrency: { type: "string", short: "c" },
+    delay: { type: "string" },
+    "skip-existing": { type: "boolean" },
   },
   allowPositionals: true,
 });
@@ -37,6 +41,8 @@ try {
     source: values.source,
     id: values.id,
     concurrency: num(values.concurrency),
+    delayMs: num(values.delay),
+    skipExisting: values["skip-existing"],
     ytKey,
   });
 } catch (err) {

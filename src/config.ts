@@ -28,6 +28,16 @@ export const OSIRIS_JSON = `${IN_DIR}/new/osiris-cameras.json`;
  */
 export const MJPEG_MD = `${IN_DIR}/mjpeg.md`;
 
+/** Curated HLS list: one `.m3u8` URL per line (optional label). Override with a path
+ *  argument to `bun import --hls <file>`. */
+export const STREAMS_MD = `${IN_DIR}/streams.md`;
+
+/** Absolute site origin (no trailing slash). Used to build the absolute links syndication feeds require. */
+export const SITE_URL = "https://w3b.cam";
+
+/** Cameras listed in each syndication feed (rss.xml / atom.xml): the newest N by observed_at. */
+export const SYNDICATION_LIMIT = 50;
+
 /** Generated static site: root dir, wiped and recreated on every build. */
 export const OUT_DIR = "out";
 /** Extracted screenshot files, one per unique image, referenced by <img src>. */

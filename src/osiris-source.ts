@@ -24,6 +24,25 @@ export interface Snapshot {
 }
 
 /**
+ * Why a snapshot failed (G1). `timeout` is the important one: a connection that hangs
+ * to the deadline is the signature of a rate-limit / IP block (a dead feed refuses or
+ * 404s fast, an undecodable one errors fast). Ingesters use a run of `timeout`s to tell
+ * "we got banned" from "these feeds are just down". `null` reason ⇔ a real snapshot.
+ */
+export type SnapFail = "timeout" | "error" | "no-ffmpeg";
+
+/** A snapshot attempt: the still (on success) or the reason it failed (G1). */
+export interface SnapResult {
+  snap: Snapshot | null;
+  reason: SnapFail | null;
+}
+
+/** Wrap a captured still as a successful SnapResult. */
+const ok = (snap: Snapshot): SnapResult => ({ snap, reason: null });
+/** A failed SnapResult carrying why. */
+const fail = (reason: SnapFail): SnapResult => ({ snap: null, reason });
+
+/**
  * A browser-like User-Agent. Several public/government cam endpoints (e.g. NSW Live
  * Feed) serve a block/redirect HTML page to header-less clients but the real
  * image to a browser, so we present one when snapshotting. A real browser sends its
@@ -159,35 +178,38 @@ function sniffImageMime(b: Buffer): string | null {
  * on any failure — including Bun's stricter-than-a-browser TLS verification — so the
  * caller can fall back to ffmpeg, and a truly dead cam degrades to a placeholder card.
  */
-export async function fetchImage(url: string): Promise<Snapshot | null> {
+export async function fetchImage(url: string): Promise<SnapResult> {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(15_000),
       redirect: "follow",
       headers: { "User-Agent": UA, Accept: "image/*,*/*" },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return fail("error");
     const ct = res.headers.get("content-type")?.toLowerCase() ?? "";
-    if (ct.startsWith("multipart/") || ct.startsWith("video/")) return null; // a stream → grabFrame handles it
+    if (ct.startsWith("multipart/") || ct.startsWith("video/")) return fail("error"); // a stream → grabFrame handles it
     const buf = Buffer.from(await res.arrayBuffer());
     const mime = sniffImageMime(buf);
-    if (!mime) return null; // not an image (HTML block page, etc.)
+    if (!mime) return fail("error"); // not an image (HTML block page, etc.)
     const hash = createHash("sha256").update(buf).digest("hex");
-    return { data: buf.toString("base64"), mime, hash };
-  } catch {
-    return null;
+    return ok({ data: buf.toString("base64"), mime, hash });
+  } catch (err) {
+    // AbortSignal.timeout throws a TimeoutError; a hang to the deadline is the
+    // rate-limit signature. Everything else (refused, DNS, reset) fails fast → error.
+    return fail(err instanceof DOMException && err.name === "TimeoutError" ? "timeout" : "error");
   }
 }
 
-/** Download raw bytes (browser UA, timeout-guarded), or null. Used to feed ffmpeg a whole file when streaming fails. */
-async function downloadBytes(url: string): Promise<Buffer | null> {
+/** Download raw bytes (browser UA, timeout-guarded). `timedOut` distinguishes a hang to
+ *  the deadline (rate-limit signal) from a fast failure. Used to feed ffmpeg a whole file. */
+async function downloadBytes(url: string): Promise<{ bytes: Buffer | null; timedOut: boolean }> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000), redirect: "follow", headers: { "User-Agent": UA } });
-    if (!res.ok) return null;
+    if (!res.ok) return { bytes: null, timedOut: false };
     const buf = Buffer.from(await res.arrayBuffer());
-    return buf.length ? buf : null;
-  } catch {
-    return null;
+    return { bytes: buf.length ? buf : null, timedOut: false };
+  } catch (err) {
+    return { bytes: null, timedOut: err instanceof DOMException && err.name === "TimeoutError" };
   }
 }
 
@@ -204,9 +226,12 @@ export async function hasFfmpeg(): Promise<boolean> {
   return ffmpegAvailable;
 }
 
-/** One ffmpeg invocation that decodes a single frame (downscaled to 640px) to a JPEG. `inputArgs` carries any protocol options plus the `-i <input>`. Null on failure/timeout. */
-async function ffmpegFrame(inputArgs: string[]): Promise<Snapshot | null> {
+/** One ffmpeg invocation that decodes a single frame (downscaled to 640px) to a JPEG.
+ *  `inputArgs` carries any protocol options plus the `-i <input>`. Returns the still, or
+ *  null with `timedOut` set when the 20s kill-timer fired (the hang = rate-limit signal). */
+async function ffmpegFrame(inputArgs: string[]): Promise<{ snap: Snapshot | null; timedOut: boolean }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   try {
     const proc = Bun.spawn(
       [
@@ -220,17 +245,18 @@ async function ffmpegFrame(inputArgs: string[]): Promise<Snapshot | null> {
       { stdin: "ignore", stdout: "pipe", stderr: "ignore" },
     );
     timer = setTimeout(() => {
+      timedOut = true;
       try {
         proc.kill();
       } catch {}
     }, 20_000);
     const buf = Buffer.from(await new Response(proc.stdout).arrayBuffer());
     await proc.exited;
-    if (buf.length === 0) return null;
+    if (buf.length === 0) return { snap: null, timedOut };
     const hash = createHash("sha256").update(buf).digest("hex");
-    return { data: buf.toString("base64"), mime: "image/jpeg", hash };
+    return { snap: { data: buf.toString("base64"), mime: "image/jpeg", hash }, timedOut };
   } catch {
-    return null;
+    return { snap: null, timedOut };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -245,8 +271,8 @@ async function ffmpegFrame(inputArgs: string[]): Promise<Snapshot | null> {
  * is at the end and the server won't range-request — need a seekable local file). Null
  * if all fail / ffmpeg absent. `-user_agent` is only for URL inputs (it errors on a file).
  */
-export async function grabFrame(url: string): Promise<Snapshot | null> {
-  if (!(await hasFfmpeg())) return null;
+export async function grabFrame(url: string): Promise<SnapResult> {
+  if (!(await hasFfmpeg())) return fail("no-ffmpeg");
   const direct = ["-user_agent", UA, "-i", url];
   const mpjpeg = ["-user_agent", UA, "-f", "mpjpeg", "-i", url];
   // Axis image.cgi / mjpeg endpoints stream multipart and often allow only one
@@ -257,24 +283,31 @@ export async function grabFrame(url: string): Promise<Snapshot | null> {
   const mjpegLikely = /image\.cgi|mjpe?g/i.test(url) || (/axis-cgi/i.test(url) && !/media\.cgi/i.test(url));
   const order = mjpegLikely ? [mpjpeg, direct] : [direct, mpjpeg];
 
-  let snap: Snapshot | null = null;
+  // A hang to the deadline means the endpoint is unreachable/blocked, so the other
+  // demuxer attempts (and the download fallback) would just hang too — bail immediately
+  // and report `timeout`. This keeps a rate-limited grab ~20s instead of ~55s, which the
+  // HLS circuit breaker relies on to trip quickly.
   for (const args of order) {
-    snap = await ffmpegFrame(args);
-    if (snap) return snap;
+    const r = await ffmpegFrame(args);
+    if (r.snap) return ok(r.snap);
+    if (r.timedOut) return fail("timeout");
   }
   // Last resort: download the whole container to a seekable temp file (an mp4 whose
   // moov atom is at the end can't be decoded from a non-seekable HTTP stream).
-  const bytes = await downloadBytes(url);
-  if (bytes) {
+  const dl = await downloadBytes(url);
+  if (dl.timedOut) return fail("timeout");
+  if (dl.bytes) {
     const tmp = `${tmpdir()}/feed-frame-${Date.now()}-${Math.round(Math.random() * 1e9)}.bin`;
     try {
-      await Bun.write(tmp, bytes);
-      snap = await ffmpegFrame(["-i", tmp]);
+      await Bun.write(tmp, dl.bytes);
+      const r = await ffmpegFrame(["-i", tmp]);
+      if (r.snap) return ok(r.snap);
     } finally {
       await unlink(tmp).catch(() => {});
     }
   }
-  return snap;
+  // Reached here only via fast failures (no timeout short-circuited above).
+  return fail("error");
 }
 
 /**
@@ -283,10 +316,17 @@ export async function grabFrame(url: string): Promise<Snapshot | null> {
  * (mislabeled content-types, broken TLS chains, MJPEG streams). MP4/HLS go straight
  * to ffmpeg.
  */
-export async function snapshot(c: Classified): Promise<Snapshot | null> {
+export async function snapshot(c: Classified): Promise<SnapResult> {
   switch (c.feed_kind) {
-    case "jpg":
-      return (await fetchImage(c.live_url)) ?? (await grabFrame(c.live_url));
+    case "jpg": {
+      const f = await fetchImage(c.live_url);
+      if (f.snap) return f;
+      const g = await grabFrame(c.live_url);
+      if (g.snap) return g;
+      // Neither worked: a timeout from either attempt is the signal worth surfacing.
+      if (f.reason === "timeout" || g.reason === "timeout") return fail("timeout");
+      return fail(g.reason ?? f.reason ?? "error");
+    }
     case "mp4":
     case "hls":
     case "mjpeg":

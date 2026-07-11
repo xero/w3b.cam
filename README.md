@@ -74,11 +74,11 @@ rm -f camhunting.sqlite-wal camhunting.sqlite-shm
 
 ## Usage
 
-The core pipeline is four commands. Cameras come from the Shodan API (`scrape`) or `import`, one command that ingests every non-scraped source behind a type flag: `--shodan` for raw JSON files you already have, `--youtube` for a curated live-stream list, and `--mjpeg` for a hand-hunted camera list. Every source writes to the same database, `bake` turns it into a static site, and `serve` hosts that site locally.
+The core pipeline is four commands. Cameras come from the Shodan API (`scrape`) or `import`, one command that ingests every non-scraped source behind a type flag: `--shodan`, `--youtube`, `--mjpeg`, and `--hls`. Every source writes to the same database, `bake` turns it into a static site, and `serve` hosts that site locally. See [Importing data](#importing-data) for each type and its flags.
 
 **`bun scrape [--pages N]`.** Fetches `N` search pages (default 1, 100 results per page) and saves new cameras to `camhunting.sqlite`. Re-running is safe; cameras already stored are skipped. Costs 1 query credit per page.
 
-**`bun import --shodan [dir]`.** Loads raw Shodan JSON files into the database from a directory (default `./in`). It reads every `.json` file it finds, uses no API and no credits, skips files it cannot parse with a warning, and stores only cameras that have a screenshot. Accepts host lookups, search results, and single banners. The same command ingests the other two sources with `--youtube` and `--mjpeg`, covered below.
+**`bun import <--type> [input]`.** Ingests a non-scraped source into the database behind one type flag: `--shodan`, `--youtube`, `--mjpeg`, or `--hls`. Every type writes to the same `cams` table, and re-running is safe. See [Importing data](#importing-data) for each type and its flags.
 
 **`bun bake`.** Reads the database and writes a paginated static site to `out/`. It groups rows by IP into one entry per host, extracts each screenshot to a file under `out/img/`, and emits an index paginated 8 hosts to a page alongside a standalone page for every host. The `out/` directory is wiped and rebuilt on every run. Costs nothing and hits no API.
 
@@ -100,7 +100,17 @@ has_screenshot:1 screenshot.label:webcam -screenshot.label:desktop
 
 That matches hosts with a screenshot labeled as a webcam, excluding desktop captures.
 
-### YouTube streams
+---
+
+## Importing data
+
+`bun import` is one command that ingests non-scraped sources behind a type flag. Each type reads its own input and writes to the same `cams` table, so the gallery blends them. Re-running any import is safe. It refreshes existing rows rather than duplicating them, and a failed thumbnail grab never overwrites a good card with a blank. The Osiris re-ingest is a separate command, `bun run osiris`, because its dump is large and rarely re-run. Pick exactly one type per run.
+
+### Shodan
+
+**`bun import --shodan [dir]`.** Loads raw Shodan JSON files from a directory, defaulting to `./in`. It reads every `.json` file it finds, uses no API and no credits, and skips files it cannot parse with a warning. It stores only cameras that carry a screenshot, and accepts host lookups, search results, and single banners. These land as `kind='cam'`, the same shape `bun scrape` produces. Shodan is the odd one out among the import types: its screenshots are embedded in the JSON, so it grabs nothing over the network and takes none of the snapshot flags below.
+
+### YouTube
 
 **`bun import --youtube [--limit N]`.** Reads the local list at `in/youtube.md` (one `title <url>` per line, mixing `watch?v=`, `youtu.be/`, and `youtube.com/live/` forms), the list living in the same `in/` dir the importer reads. Both `in/` and `out/` are gitignored, so this list stays on your machine. Fetches each video's metadata and thumbnail from the YouTube Data API and upserts them into the unified `cams` table as `kind='stream'`, keyed on the video id. Re-running refreshes existing streams and picks up updated live thumbnails rather than duplicating them. `--limit N` processes only the first N unique entries for a quick test. Needs `YOUTUBE_API_KEY`.
 
@@ -115,9 +125,9 @@ bun bake
 bun serve
 ```
 
-### MJPEG camhunt cams
+### MJPEG
 
-**`bun import --mjpeg [file] [--limit N] [--concurrency N]`.** Reads a curated list of MJPEG camera URLs, one per line, defaulting to `in/mjpeg.md`. Blank lines and `#` comments are skipped, and an optional `label ` before the URL is kept. Like `in/youtube.md`, the list is gitignored and stays on your machine, so append to it and re-run as you hunt more cams. Each URL is classified by vendor from the fingerprints in [tips.md](./tips.md), a still is baked with ffmpeg for the gallery card, and the cam is upserted into the unified `cams` table as `kind='feed'`. Re-running refreshes thumbnails rather than duplicating cams. `--limit N` ingests only the first N unique cams; `--concurrency N` sets the snapshot fan-out, defaulting to 24.
+**`bun import --mjpeg [file] [--limit N] [--concurrency N] [--delay MS] [--skip-existing]`.** Reads a curated list of MJPEG camera URLs, one per line, defaulting to `in/mjpeg.md`. Blank lines and `#` comments are skipped, and an optional `label ` before the URL is kept. Like `in/youtube.md`, the list is gitignored and stays on your machine, so append to it and re-run as you hunt more cams. Each URL is classified by vendor from the fingerprints in [tips.md](./tips.md), a still is baked with ffmpeg for the gallery card, and the cam is upserted into the unified `cams` table as `kind='feed'`. Re-running refreshes thumbnails rather than duplicating cams. `--limit N` ingests only the first N unique cams; the snapshot flags `--concurrency`, `--delay`, and `--skip-existing` are shared with the other feed-grabbers and covered in [Rate limits and cool-off](#rate-limits-and-cool-off).
 
 The site is served over https, so how a cam plays depends on its feed. An https stream embeds live as a smooth Motion JPEG `<img>`; an https snapshot auto-refreshes; an http feed cannot embed, since browsers block mixed content, so it shows the baked still with a "View live" link that opens the feed in a new tab. Viewer-page URLs, such as Mobotix `guestimage.html`, Panasonic `CgiStart`, and Axis `#view`, are resolved to their real stream or snapshot endpoint so they still get a thumbnail. The cams join the feeds gallery at `/feeds`, labeled by vendor.
 
@@ -125,6 +135,52 @@ The site is served over https, so how a cam plays depends on its feed. An https 
 bun import --mjpeg
 bun bake
 bun serve
+```
+
+### HLS
+
+**`bun import --hls [file] [--source Name] [--limit N] [--concurrency N] [--delay MS] [--cooldown SEC] [--skip-existing] [--abort-after N]`.** Reads a curated list of `.m3u8` playlist URLs, one per line, defaulting to `in/streams.md`, with the same `label <url>` format and `#` comments as the MJPEG list. Any HLS playlist works; nothing is tied to one provider. ffmpeg grabs a single poster frame for the card, and the cam is upserted as `kind='feed'` with `feed_kind='hls'`. The detail page embeds it as a `<video>` played through the vendored hls.js. `--source Name` tags provenance and defaults to `HLS`. The cams join the feeds gallery at `/feeds`.
+
+HLS origins often cap how many streams one IP may pull before a temporary block, so the snapshot flags below matter most here. See [Rate limits and cool-off](#rate-limits-and-cool-off).
+
+```sh
+bun import --hls in/streams.md --source 511PA
+bun bake
+bun serve
+```
+
+### Osiris
+
+**`bun run osiris [file] [--limit N] [--source X] [--id a,b] [--concurrency N] [--delay MS] [--skip-existing]`.** Re-ingests the Osiris camera dump, defaulting to `in/new/osiris-cameras.json`, refreshing each cam's baked thumbnail and routing any YouTube cams to the streams table. It lives outside `bun import` on purpose, since the dump is large and this is a rare, hand-run maintenance command that CI invokes when the dump is committed. `--source X` limits to cams whose source contains `X`, and `--id a,b` limits to exact cam ids for a re-scrape or hand-patch.
+
+### Rate limits and cool-off
+
+The three feed-grabbers, `--mjpeg`, `--hls`, and `bun run osiris`, share a set of snapshot flags because they all pull thumbnails over the network with ffmpeg. Each grab opens a real connection to the stream origin, so a large run against a single host can trip that host's per-IP limits.
+
+**`--concurrency N`.** Parallel snapshot grabs. Defaults to 24 for MJPEG and Osiris, which fan out across many hosts, and 4 for HLS, whose streams usually share one origin.
+
+**`--delay MS`.** Paces grab starts so the aggregate request rate stays under a per-IP window. Off by default. Raise it when a run targets a single capped origin.
+
+**`--skip-existing`.** Skips cams that already have a thumbnail, so a re-run spends its budget only on the gaps. Cams that failed last time, showing a blank placeholder card, are retried rather than skipped.
+
+Two more flags are HLS-only, since a global block detector fits a single-origin stream list but not a mixed dump:
+
+**`--cooldown SEC`.** On a run of consecutive timeouts, sleep `SEC` and resume instead of aborting. Progress already grabbed is saved before the sleep, so an interrupted cool-off loses nothing.
+
+**`--abort-after N`.** Consecutive timeouts that trip the rate-limit circuit breaker, defaulting to 5. Dead feeds fail fast as errors and never count toward it; only true hangs do.
+
+Every feed-grabber saves progress incrementally and upserts idempotently. An interrupted run keeps what it grabbed, a re-run fills the gaps, and a failed grab never blanks a card that already has a good image. So the pattern for a capped origin is to run, let it stop when the origin blocks you, switch IP, and run again with `--skip-existing`, which advances past everything already stored.
+
+The Pittsburgh 511PA feeds are HLS behind exactly this kind of cap. Profiling the per-IP limit put the sweet spot at concurrency 2 with a 700 ms pace:
+
+```sh
+bun import --hls in/streams.md --source 511PA --concurrency 2 --delay 700 --skip-existing
+```
+
+Each fresh IP grabs roughly 30-40 streams before the block, so switch VPN endpoints between runs. For a large set like the statewide list, go hands-off and let one IP grind through the roughly hour-long blocks on its own:
+
+```sh
+bun import --hls in/streams-pa.md --source 511PA --concurrency 2 --delay 700 --cooldown 3600 --skip-existing
 ```
 
 ---

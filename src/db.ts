@@ -230,11 +230,19 @@ type UpsertRow = { id: string; ss_hash: string | null } & Record<string, string 
  * `columns` (preferred/product/coords by source; see the *_COLUMNS notes). Returns
  * a tally of added / updated / changed rows.
  */
+/** The baked-image columns, kept together: a snapshot either sets all three or none. */
+const IMAGE_COLS = new Set(["ss_mime", "ss_hash", "ss_base64"]);
+
 function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRow[]) => InsertResult {
 	const placeholders = columns.map((c) => `$${c}`).join(", ");
+	// G5: never overwrite a stored image with a blank. On a refresh whose snapshot
+	// failed (a dead feed, or — the case that bit us — a rate-limited re-grab), the
+	// image columns come in NULL; COALESCE keeps the last good screenshot instead of
+	// wiping the card. A successful grab (non-NULL) still replaces it. Metadata columns
+	// always take the fresh value.
 	const updates = columns
 		.filter((c) => c !== "id")
-		.map((c) => `${c} = excluded.${c}`)
+		.map((c) => (IMAGE_COLS.has(c) ? `${c} = COALESCE(excluded.${c}, ${c})` : `${c} = excluded.${c}`))
 		.join(", ");
 	const stmt = db.query(
 		`INSERT INTO cams (${columns.join(", ")}, last_seen)
@@ -255,7 +263,9 @@ function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRo
 				added++;
 			} else {
 				updated++;
-				if (before.h !== row.ss_hash) changed++;
+				// Only a real, non-null new image that differs counts as "changed"
+				// (a failed re-grab is preserved by COALESCE, so it changed nothing).
+				if (row.ss_hash != null && before.h !== row.ss_hash) changed++;
 			}
 		}
 		return { added, updated, changed };
@@ -346,6 +356,27 @@ export function hasStream(db: Database, videoId: string): boolean {
 /** True when a feed cam with this exact id is stored. Companion to hasHost / hasStream. */
 export function hasFeed(db: Database, id: string): boolean {
 	return db.query("SELECT 1 FROM cams WHERE kind = 'feed' AND id = ? LIMIT 1").get(id) != null;
+}
+
+/**
+ * Of the given feed ids, which already have a non-null thumbnail stored. Feeds the HLS
+ * importer's `--skip-existing`: already-grabbed cams are skipped so a per-IP re-run spends
+ * its limited request budget only on the gaps. A null-thumbnail placeholder row (a blocked
+ * or dead stream) is deliberately NOT counted as done, so those are retried. Chunked to
+ * stay under SQLite's bound-variable limit.
+ */
+export function feedThumbIds(db: Database, ids: string[]): Set<string> {
+	const have = new Set<string>();
+	const CHUNK = 900;
+	for (let i = 0; i < ids.length; i += CHUNK) {
+		const slice = ids.slice(i, i + CHUNK);
+		const placeholders = slice.map(() => "?").join(", ");
+		const rows = db
+			.query(`SELECT id FROM cams WHERE kind = 'feed' AND ss_base64 IS NOT NULL AND id IN (${placeholders})`)
+			.all(...slice) as { id: string }[];
+		for (const r of rows) have.add(r.id);
+	}
+	return have;
 }
 
 /**

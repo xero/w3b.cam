@@ -20,6 +20,7 @@ import {
 	IMG_DIR,
 	OUT_DIR,
 	PAGE_SIZE,
+	SYNDICATION_LIMIT,
 	TAG_PAGE_SIZE,
 	FEED_PAGE_SIZE,
 	YT_PAGE_SIZE,
@@ -58,6 +59,7 @@ import {
 	type FeedCam,
 	type YtStream,
 } from "./render.ts";
+import { hostToFeedItem, renderAtom, renderRss } from "./syndication.ts";
 import {
 	diskOf,
 	snipDiskOf,
@@ -380,6 +382,17 @@ export async function build(opts: { dev?: boolean } = {}): Promise<void> {
 		const mainInner = renderHostMain(host, { dev, slugForTag });
 		await writePage(hostRoute(host.slug), mainInner, `${host.displayName} | ${TITLE}`, stats, { dev });
 	}
+
+	// ── Syndication feeds: the newest cameras as RSS + Atom ───────────────────────────
+	// `hosts` is already newest-first by observed_at, so the top SYNDICATION_LIMIT are the
+	// freshest discoveries. Images are on disk by now (extractImages, above), so the
+	// enclosure byte length is a synchronous stat; a host with no screenshot omits it.
+	const feedItems = hosts.slice(0, SYNDICATION_LIMIT).map((h) => {
+		const len = h.thumbHref ? Bun.file(`${OUT_DIR}${h.thumbHref}`).size : null;
+		return hostToFeedItem(h, len);
+	});
+	await Bun.write(`${OUT_DIR}/rss.xml`, renderRss(feedItems));
+	await Bun.write(`${OUT_DIR}/atom.xml`, renderAtom(feedItems));
 
 	// ── Streams gallery (page 1 mirrors /streams) + per-video detail pages ────────────
 

@@ -42,6 +42,8 @@ interface Rule {
   deriveStream?: string;
   /** For viewer pages: a single-JPEG snapshot path, preferred for thumbnailing. */
   deriveSnapshot?: string;
+  /** Vendors that key cameras by path (not a query param) supply their own id. */
+  deriveId?: (u: URL) => string;
 }
 
 // Ordered: direct-media patterns first (so `/CgiStart/nphMotionJpeg` reads as a
@@ -52,6 +54,16 @@ const RULES: Rule[] = [
   { re: /\/mjpg\/(?:\d+\/)?video\.mjpg/i, vendor: "Generic MJPEG", category: "mjpeg-stream" },
   { re: /nphMotionJpeg/i, vendor: "Panasonic", category: "mjpeg-stream" },
   { re: /\/(?:cgi-bin|control)\/faststream\.jpg/i, vendor: "Mobotix", category: "mjpeg-stream" },
+  // 511PA aggregator: /map/Cctv/<id> is a live JPEG snapshot proxy (https, CORS *,
+  // cache 60s). Path-keyed, so it carries its own id — mjpegId keys on a query param,
+  // which every 511PA URL lacks (they'd all collapse to one row). Pattern is unique to
+  // this host and matches no other vendor rule.
+  {
+    re: /\/map\/Cctv\/\d+/i,
+    vendor: "511PA",
+    category: "jpg-snapshot",
+    deriveId: (u) => `mjpeg-511pa-${u.pathname.split("/").pop()}`,
+  },
   { re: /\/jpg\/image\.jpg/i, vendor: "Axis", category: "jpg-snapshot" },
   { re: /-wvhttp-01-\/image\.cgi/i, vendor: "Sony/Canon", category: "jpg-snapshot" },
   { re: /\/cgi-bin\/(?:hugesize|fullsize)\.jpg/i, vendor: "Mobotix", category: "jpg-snapshot" },
@@ -142,7 +154,7 @@ export function classifyMjpeg(raw: string): MjpegClassified | null {
   }
 
   return {
-    id: mjpegId(u),
+    id: rule.deriveId ? rule.deriveId(u) : mjpegId(u),
     vendor: rule.vendor,
     name: u.host,
     category: rule.category,

@@ -872,10 +872,17 @@ export function renderFeedCard(cam: FeedCam, opts: RenderOpts = {}): string {
 	const loc = escapeHtml(feedLoc(cam));
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
 	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
+	// Badge the card with its transport (the same label the detail page uses), so two cards
+	// of the same view — e.g. an HLS and an MJPEG feed — don't read as dupes. `link` cams
+	// aren't a real transport (unembeddable still + "view live"), so they go unbadged.
+	const badge =
+		cam.feedKind !== "link"
+			? `\n${T(2)}<span class="badge">${escapeHtml(feedKindLabel(cam.feedKind))}</span>`
+			: "";
 	const route = feedRoute(cam.slug);
 	return [
 		`<a class="card" href="${urlOf(route)}" hx-get="${snipUrlOf(route)}" hx-push-url="${urlOf(route)}"${devAttrs}>`,
-		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">`,
+		`${T(1)}<figure role="img" aria-label="${escapeHtml(cam.thumbAlt)}" style="background-image:url('${escapeHtml(cam.thumbHref)}')">${badge}`,
 		`${T(1)}</figure>`,
 		`${T(1)}<h2>`,
 		`${T(2)}<span class="dn-line dn-name">${escapeHtml(cam.name)}</span>`,
@@ -1473,7 +1480,6 @@ h1 > em {
 	flex-flow: column nowrap;
 	color: var(--muted);
 	font-variant-numeric: tabular-nums;
-	line-height: 1.23em;
 	align-self: flex-start;
 	align-items: self-end;
 	flex-grow: 1;
@@ -1909,14 +1915,48 @@ main {
 }
 
 body > footer {
-	display: none;
-	@media (max-width: 735px) {
+	display: flex;
+	flex-flow: row wrap;
+	gap: 0.75rem 1.5rem;
+	padding: clamp(1rem, 1vw, 1rem);
+	border-top: 1px solid var(--border);
+	align-items: center;
+	justify-content: space-between;
+
+	cite {
 		display: flex;
-		flex-flow: row wrap;
-		align-items: baseline;
-		gap: 0.75rem 1.5rem;
-		padding: var(--gap);
-		border-top: 1px solid var(--border);
+		font-style: normal;
+		font-weight: 500;
+		line-height: 1em;
+		@media (max-width: 480px) {
+			display: none;
+		}
+		a {
+			font-size: 1.5em;
+			padding-inline: 4px;
+		}
+	}
+	#syndication {
+		a {
+			&:hover {
+				background: transparent;
+				svg * {
+					fill: var(--ice);
+				}
+			}
+			svg {
+				width: 40px;
+				height: 40px;
+				margin-right: 8px;
+				* {
+					fill: var(--ocean);
+				}
+			}
+		}
+	}
+	.count {
+		line-height: 1.23em;
+		flex-grow: 0;
 	}
 }
 
@@ -2030,16 +2070,15 @@ body > footer {
 	line-height: 1.3;
 
 	& a {
-		color: var(--ice);
+		color: var(--muted);
 		font-variant-numeric: tabular-nums;
-		text-decoration: none;
-		transition: color 0.15s;
+		transition: background 0.5s;
+		padding: 8px;
 	}
 
 	& a:hover,
 	& a:focus-visible {
-		color: var(--accent);
-		text-decoration: underline;
+		color: var(--sand);
 	}
 }
 
@@ -2239,8 +2278,6 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 	// document (its own <main> included) and appends it. Set both explicitly so these
 	// links swap the snippet into <main>, exactly like the in-main links.
 	const navAttrs = 'hx-target="main" hx-swap="innerHTML show:top"';
-	const stat = (label: string, value: string): string =>
-		`<span>${escapeHtml(label)} <strong>${escapeHtml(value)}</strong></span>`;
 	const ghStat= (label: string, value: string, href: string): string =>
 		`<span>${escapeHtml(label)} <strong><a href="${href}" target="_blank">${escapeHtml(value)}</a></strong></span>`;
 	const statLink = (label: string, value: string, href: string, snip: string): string =>
@@ -2252,7 +2289,7 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 	].join("");
 	const navLink = (href: string, snip: string, label: string, classes:string = ''): string => [
 		`<a class="${classes}" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
-		`<svg alt="${label}" aria-label="${label}"><use href=icons.svg#${label}></use></svg>`,
+		`<svg alt="${label}" aria-label="${label}"><use href="/icons.svg#${label}"></use></svg>`,
 		`</a>`,
 	].join("");
 	return [
@@ -2269,6 +2306,8 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(2)}<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />`,
 		`${T(2)}<meta name="apple-mobile-web-app-title" content="${escapeHtml(TITLE)}" />`,
 		`${T(2)}<link rel="manifest" href="/site.webmanifest" />`,
+		`${T(2)}<link rel="alternate" type="application/rss+xml" title="${escapeHtml(TITLE)} live feed" href="/rss.xml" />`,
+		`${T(2)}<link rel="alternate" type="application/atom+xml" title="${escapeHtml(TITLE)} live feed" href="/atom.xml" />`,
 		`${T(2)}<style>`,
 		indentBlock(CSS, 2),
 		`${T(2)}</style>`,
@@ -2281,7 +2320,6 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(4)}<em>internet voyeurism</em>`,
 		`${T(3)}</div>`,
 		`${T(3)}<nav class="nav">`,
-
 		indentBlock(navLink(urlOf(GALLERY), snipUrlOf(GALLERY), "gallery"), 4),
 		indentBlock(navLink(urlOf(HOSTS), snipUrlOf(HOSTS), "hosts"), 4),
 		indentBlock(navLink(urlOf(FEEDS), snipUrlOf(FEEDS), "feeds"), 4),
@@ -2290,15 +2328,18 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		indentBlock(navLink(urlOf(TAGS), snipUrlOf(TAGS), "tags"), 4),
 		indentBlock(navLink(urlOf(MAP), snipUrlOf(MAP), "map"), 4),
 		indentBlock(navLink(urlOf(TIPS), snipUrlOf(TIPS), "tips"), 4),
-		// Dev-only: a nav entry that hx-gets the import view into <main> (see renderImportMain).
 		...(dev ? [indentBlock(navLink(urlOf(IMPORT), snipUrlOf(IMPORT), "import", "dev"), 4)] : []),
 		`${T(3)}</nav>`,
-		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</header>`,
 		`${T(2)}<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">`,
 		indentBlock(mainInner, 3),
 		`${T(2)}</main>`,
 		`${T(2)}<footer>`,
+		`${T(3)}<p id="syndication">`,
+		`${T(4)}<a href="/rss.xml"><svg alt="rss feed" aria-label="rss feed"><use href="/icons.svg#rss"></use></svg></a>`,
+		`${T(4)}<a href="/atom.xml"><svg alt="atom feed" aria-label="atom feed"><use href="/icons.svg#atom"></use></svg></a>`,
+		`${T(3)}</p>`,
+		`${T(3)}<cite><a href="https://3xi.club" target="_blank">3xi.club</a> project by <a href="https://x-e.ro" target="_blank">xero</a></cite>`,
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</footer>`,
 		`${T(2)}<script src="/htmx.min.js"></script>`,
