@@ -467,7 +467,7 @@ function faviconInherit(rows: StoredRow[], byRef: Map<string, Decision>, favicon
  */
 const MAKE_PREFIXES = [
 	"Panasonic/i-PRO", "D-Link/Airlink", "Vivotek/D-Link", "Hipcam/HiSilicon", "hi3510/INSTAR",
-	"TVT Digital", "H264 DVR", "Blue Iris", "StarDot", "IQinVision",
+	"TVT Digital", "H264 DVR", "Blue Iris", "StarDot", "IQinVision", "EarthCam",
 	"Axis", "Panasonic", "Canon", "Hikvision", "D-Link", "Trendnet", "Xiongmai", "Mobotix", "Dahua",
 	"Ubiquiti", "Bosch", "Crestron", "LILIN", "Foscam", "Uniview", "Intelbras", "Vivotek", "Apexis",
 	"mjpg-streamer", "webcamXP", "Yawcam", "webcam 7",

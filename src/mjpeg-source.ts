@@ -54,6 +54,7 @@ const RULES: Rule[] = [
   { re: /\/mjpg\/(?:\d+\/)?video\.mjpg/i, vendor: "Generic MJPEG", category: "mjpeg-stream" },
   { re: /nphMotionJpeg/i, vendor: "Panasonic", category: "mjpeg-stream" },
   { re: /\/(?:cgi-bin|control)\/faststream\.jpg/i, vendor: "Mobotix", category: "mjpeg-stream" },
+  { re: /\/nph-mjpeg\.cgi/i, vendor: "StarDot", category: "mjpeg-stream" },
   // 511PA aggregator: /map/Cctv/<id> is a live JPEG snapshot proxy (https, CORS *,
   // cache 60s). Path-keyed, so it carries its own id — mjpegId keys on a query param,
   // which every 511PA URL lacks (they'd all collapse to one row). Pattern is unique to
@@ -65,6 +66,7 @@ const RULES: Rule[] = [
     deriveId: (u) => `mjpeg-511pa-${u.pathname.split("/").pop()}`,
   },
   { re: /\/jpg\/image\.jpg/i, vendor: "Axis", category: "jpg-snapshot" },
+  { re: /\/nph-jpeg\.cgi|\/netcam\.jpg/i, vendor: "StarDot", category: "jpg-snapshot" },
   { re: /-wvhttp-01-\/image\.cgi/i, vendor: "Sony/Canon", category: "jpg-snapshot" },
   { re: /\/cgi-bin\/(?:hugesize|fullsize)\.jpg/i, vendor: "Mobotix", category: "jpg-snapshot" },
   {

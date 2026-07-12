@@ -451,7 +451,7 @@ export async function ingestMjpegFile(
   console.log(`Embeddable: mjpeg ${byKind.mjpeg} + jpg ${byKind.jpg}; screenshot-only: link ${byKind.link}.`);
   if (alreadyDone) console.log(`--skip-existing: ${alreadyDone} already have a thumbnail; ${pending.length} still to grab.`);
   if (limit && work.length < pending.length) console.log(`--limit ${limit}: ingesting ${work.length} of ${pending.length}`);
-  if (!(await hasFfmpeg())) console.warn("ffmpeg not found: MJPEG-stream cams will get placeholder cards (no thumbnail).");
+  if (!(await hasFfmpeg())) console.warn("ffmpeg not found: MJPEG-stream cams can't be grabbed and will be skipped (jpg-snapshot cams still work).");
   const paceNote = delayMs > 0 ? ` · pacing ${delayMs}ms between starts` : "";
   console.log(`Snapshotting ${work.length.toLocaleString()} cam(s) with concurrency ${concurrency}${paceNote}…`);
 
@@ -468,7 +468,10 @@ export async function ingestMjpegFile(
       tally(stats, r);
       done++;
       if (done % 50 === 0) console.log(`  …${done}/${work.length}`);
-      flusher.push(buildFeedRow(toOsirisCam(cam, label), cam, r.snap));
+      // Only persist cams we actually grabbed a shot for: a blank card never renders on the
+      // built site, so writing a screenshot-less row just pollutes the DB (an existing row's
+      // good shot is preserved either way — a failed re-grab simply isn't written).
+      if (r.snap) flusher.push(buildFeedRow(toOsirisCam(cam, label), cam, r.snap));
     });
   } catch (err) {
     console.error(`\nMJPEG ingest error: ${err instanceof Error ? err.message : String(err)}`);
@@ -480,10 +483,10 @@ export async function ingestMjpegFile(
       endingRows = countFeedRows(db);
     } catch {}
     console.log(`\n── MJPEG ingest summary ──`);
-    console.log(`Cams ingested:   ${done}`);
+    console.log(`Cams processed:  ${done}`);
     console.log(`New cams added:  ${flusher.added}`);
     console.log(`Refreshed:       ${flusher.updated} existing (${flusher.changed} with a changed thumbnail)`);
-    console.log(`No thumbnail:    ${stats.timeouts + stats.errors} (dead/blocked feed; placeholder card)`);
+    console.log(`Skipped (no shot): ${stats.timeouts + stats.errors} (dead/blocked feed; not written)`);
     console.log(`Feed DB rows: ${startingRows} → ${endingRows}`);
     warnIfRateLimited(stats);
   }
@@ -494,9 +497,11 @@ export async function ingestMjpegOne(db: Database, input: { url: string; label?:
   const cam = classifyMjpeg(input.url);
   if (!cam) throw new Error("unrecognized MJPEG URL (no vendor rule matched)");
   const r = await grabMjpeg(cam.grabUrl);
+  // No shot, no row: a blank card never renders, so don't write a screenshot-less cam.
+  if (!r.snap) return { added: 0, updated: 0, changed: 0, noThumb: 1 };
   const row = buildFeedRow(toOsirisCam(cam, (input.label ?? "").trim()), cam, r.snap);
   const { added, updated, changed } = makeFeedInserter(db)([row]);
-  return { added, updated, changed, noThumb: r.snap ? 0 : 1 };
+  return { added, updated, changed, noThumb: 0 };
 }
 
 // ── HLS (generic; `bun import --hls`) ─────────────────────────────────────────────
@@ -581,7 +586,7 @@ export async function ingestHlsFile(
     return;
   }
   const ffmpeg = await hasFfmpeg();
-  if (!ffmpeg) console.warn("ffmpeg not found: HLS cams will get placeholder cards (no thumbnail).");
+  if (!ffmpeg) console.warn("ffmpeg not found: HLS cams can't be grabbed and will all be skipped (not written).");
 
   // ── G2: pre-flight probe ──────────────────────────────────────────────────────
   // Stream origins cap concurrent viewers per-IP; hitting a wall of timeouts means we
@@ -673,7 +678,9 @@ export async function ingestHlsFile(
       }
       done++;
       if (done % 50 === 0) console.log(`  …${done}/${work.length}`);
-      flusher.push(buildFeedRow(cam, classified, r.snap));
+      // Only persist streams we grabbed a poster for; a blank card never renders, and a
+      // failed re-grab leaves any existing row (and its shot) untouched.
+      if (r.snap) flusher.push(buildFeedRow(cam, classified, r.snap));
     }
   };
 
@@ -692,7 +699,7 @@ export async function ingestHlsFile(
     console.log(`Streams grabbed:  ${done}${done < work.length ? ` of ${work.length}` : ""}`);
     console.log(`New cams added:   ${flusher.added}`);
     console.log(`Refreshed:        ${flusher.updated} existing (${flusher.changed} with a changed thumbnail)`);
-    console.log(`No thumbnail:     ${stats.timeouts + stats.errors} (dead/blocked feed; placeholder card)`);
+    console.log(`Skipped (no shot): ${stats.timeouts + stats.errors} (dead/blocked feed; not written)`);
     if (cooldowns > 0) console.log(`Cool-off cycles:  ${cooldowns}`);
     console.log(`Feed DB rows: ${startingRows} → ${endingRows}`);
     if (aborted) {
@@ -802,7 +809,7 @@ export async function ingestOsirisFile(
   );
   if (alreadyDone) console.log(`--skip-existing: ${alreadyDone} already have a thumbnail; ${pending.length} still to grab.`);
   if (limit && ingestable.length < pending.length) console.log(`--limit ${limit}: ingesting ${ingestable.length} of ${pending.length}`);
-  if (!(await hasFfmpeg())) console.warn("ffmpeg not found: MP4/HLS cams will get placeholder cards (no thumbnail).");
+  if (!(await hasFfmpeg())) console.warn("ffmpeg not found: MP4/HLS cams can't be grabbed and will be skipped (jpg cams still work).");
   const paceNote = delayMs > 0 ? ` · pacing ${delayMs}ms between starts` : "";
   console.log(`Snapshotting ${ingestable.length.toLocaleString()} feed cam(s) with concurrency ${concurrency}${paceNote}…`);
 
@@ -820,7 +827,8 @@ export async function ingestOsirisFile(
       tally(stats, r);
       done++;
       if (done % 250 === 0) console.log(`  …${done}/${ingestable.length}`);
-      flusher.push(buildFeedRow(cam, c, r.snap));
+      // Only persist cams we grabbed a shot for; a blank card never renders on the site.
+      if (r.snap) flusher.push(buildFeedRow(cam, c, r.snap));
     });
   } finally {
     flusher.flush(); // finished feed grabs persist even if YouTube routing throws (G4)
@@ -883,7 +891,7 @@ export async function ingestOsirisFile(
     console.log(`Ingestable feed cams: ${ingestable.length}`);
     console.log(`New cams added:          ${added}`);
     console.log(`Refreshed:               ${updated} existing (${changed} with a changed thumbnail)`);
-    console.log(`No thumbnail:            ${stats.timeouts + stats.errors} (dead feed / grab failed; placeholder card)`);
+    console.log(`Skipped (no shot):       ${stats.timeouts + stats.errors} (dead feed / grab failed; not written)`);
     console.log(`Feed DB rows:         ${startingRows} → ${endingRows}`);
     warnIfRateLimited(stats);
     if (ytEntries.length) {

@@ -276,19 +276,21 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	let featured: { cams: string[]; streams: string[]; feeds: string[] };
 	let vendorRefs: { byVendor: Map<string, { hosts: Set<string>; feeds: Set<string> }>; byRef: Map<string, string> };
 	try {
-		// Blocked products (RDP/VNC) are filtered at ingestion, but rows that predate
-		// that guard can still be in the DB. Never render them, whatever the DB holds.
-		// --index-only skips the screenshot payload (~99% of the DB); images come from the
-		// manifest, not these rows. The metadata readers keep every other column.
-		rows = (indexOnly ? allRowsMeta(db) : allRows(db)).filter((r) => !isBlockedProduct(r.product));
+		// The site never renders a blank card, whatever the DB holds, so every kind is
+		// filtered to rows that carry a screenshot. Feeds are the usual offender: an
+		// ingest can leave a row whose grab was blocked/dead (see the ingesters, which now
+		// also decline to write those). Blocked products (RDP/VNC) are dropped too: they
+		// are filtered at ingestion, but rows predating that guard can still be stored.
+		// (--index-only reads ss_base64 as a truthy '1' sentinel, so this filter still works.)
+		rows = (indexOnly ? allRowsMeta(db) : allRows(db)).filter((r) => r.ss_base64 && !isBlockedProduct(r.product));
 		tagsByIp = loadTags(db, "cam");
 		tagsByVideo = loadTags(db, "stream");
 		tagsByFeed = loadTags(db, "feed");
 		tagCounts = loadTagCounts(db);
 		tagIndex = loadTagIndex(db);
-		ytRows = indexOnly ? allYtRowsMeta(db) : allYtRows(db);
+		ytRows = (indexOnly ? allYtRowsMeta(db) : allYtRows(db)).filter((r) => r.ss_base64);
 		ytGeo = loadYtGeo(db);
-		feedRows = indexOnly ? allFeedRowsMeta(db) : allFeedRows(db);
+		feedRows = (indexOnly ? allFeedRowsMeta(db) : allFeedRows(db)).filter((r) => r.ss_base64);
 		featured = loadFeatured(db);
 		vendorRefs = loadVendorRefs(db);
 	} finally {
