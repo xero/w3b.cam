@@ -37,7 +37,7 @@ import {
 } from "./urls.ts";
 
 export const TITLE = "w3b.cam";
-export const THEME_COLOR = "#0f1117";
+export const THEME_COLOR = "#667eea";
 
 /** Map viewBox size. The world outlines in worldmap.ts are pre-projected into this space. */
 export const MAP_W = 1000;
@@ -1316,28 +1316,30 @@ export function renderImportMain(): string {
 // ── Page shell + CSS ─────────────────────────────────────────────────────────
 
 const CSS = `:root {
-	/* palette */
-	--depths:   #0f1117;
-	--abyss:    #161925;
-	--poseidon: #114b5f;
-	--ocean:    #1c7293;
-	--mist:     #c6dabf;
-	--fog:      #8a94a6;
-	--sand:     #d4d6b6;
-	--ice:      #b3dcde;
+	/* palette — dual-mode brand (identical in light & dark) */
+	--cornflower:  #667eea;
+	--indigo:      #495dc6;
+	--ultramarine: #0091ba;
+	--tangerine:   #d06900;
+	--salmon:      #e25569;
+	--mercury:     #efefef;
 
-	/* theme */
-	--bg:      var(--depths);
-	--surface: var(--abyss);
-	--text:    var(--mist);
-	--muted:   var(--fog);
-	--accent:  var(--ocean);
-	--border:  var(--poseidon);
+	/* neutrals — dark defaults (flipped in the light media query below) */
+	--bg:      #0f1117;
+	--surface: #161925;
+	--text:    #e6e8ee;
+	--muted:   #8a94a6;
+	--border:  rgba(255, 255, 255, 0.1);
 	--land:    #1b2333;
 	--coast:   #2b3a52;
-	--dot:     #6cc6e6;
-	--dot-hi:  #f2c14e;
-	--warn:    #e0533f;
+
+	/* semantic — accent as surface/line is constant; accent as text is mode-aware */
+	--accent:    var(--cornflower);
+	--link:      var(--cornflower);
+	--on-accent: var(--mercury);
+	--dot:       var(--ultramarine);
+	--dot-hi:    var(--tangerine);
+	--warn:      var(--salmon);
 	--font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -1364,34 +1366,14 @@ const CSS = `:root {
 
 @media (prefers-color-scheme: light) {
 	:root {
-		--bg:      #f4f6f8;
-		--surface: #ffffff;
-		--text:    #1a2230;
-		--muted:   #5b6472;
-		--accent:  #0d3b4a;
-		--border:  #d3dbe3;
+		--bg:      #efefef;
+		--surface: #f4f6f8;
+		--text:    #14171f;
+		--muted:   #5c6270;
+		--border:  rgba(0, 0, 0, 0.09);
 		--land:    #dfe6ee;
 		--coast:   #b9c4d0;
-		--dot:     #12667f;
-		--dot-hi:  #c0392b;
-		--warn:    #c0392b;
-	}
-}
-#favicon {
-	fill: #000000;
-}
-@media (prefers-color-scheme: dark) {
-	#favicon {
-		fill: #ffffff;
-	}
-}
-
-svg #favicon {
-	fill: #ff00ff;
-}
-@media (prefers-color-scheme: dark) {
-	svg #favicon {
-		fill: #00ff00;
+		--link:    var(--indigo);
 	}
 }
 
@@ -1414,13 +1396,13 @@ body {
 }
 
 a {
-	color: var(--accent);
+	color: var(--link);
 	text-decoration: none;
 
 	&:hover,
 	&:focus-visible {
 		background: var(--accent);
-		color: var(--ice);
+		color: var(--on-accent);
 		text-decoration: none;
 		outline: none;
 	}
@@ -1451,7 +1433,7 @@ body > header {
 			&:hover {
 				background: transparent !important;
 				* {
-					fill: var(--ice);
+					fill: var(--accent);
 				}
 			}
 			svg {
@@ -1459,7 +1441,7 @@ body > header {
 				width: 50px;
 				height: 50px;
 				* {
-					fill: var(--mist);
+					fill: var(--text);
 				}
 
 				@media (max-width: 480px) {
@@ -1502,7 +1484,7 @@ h1 > em {
 	flex-grow: 1;
 	font-size: 11px;
 	& strong {
-		color: var(--ice);
+		color: var(--link);
 		font-weight: 600;
 		font-size: 10px;
 	}
@@ -1529,6 +1511,10 @@ main {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
 	gap: var(--gap);
+
+	@media (min-width: 80rem) {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+	}
 }
 
 .card {
@@ -1588,7 +1574,7 @@ main {
 		bottom: 0.5rem;
 		padding: 0.1rem 0.5rem;
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 		font-size: 0.85em;
 	}
 }
@@ -1638,9 +1624,9 @@ main {
 	}
 }
 
-.dn-name  { color: var(--sand); }
-.dn-ip    { color: var(--mist); }
-.dn-ports { color: var(--ice); }
+.dn-name  { color: var(--text); }
+.dn-ip    { color: var(--muted); }
+.dn-ports { color: var(--link); }
 
 .shots {
 	display: flex;
@@ -1657,6 +1643,7 @@ main {
 		display: block;
 		width: auto;
 		height: auto;
+		max-width: 100%;
 		background: #000;
 	}
 
@@ -1774,7 +1761,7 @@ main {
 		width: 1%;
 		white-space: nowrap;
 		padding-right: 1.5rem;
-		color: var(--accent);
+		color: var(--link);
 		font-weight: 500;
 	}
 }
@@ -1802,7 +1789,7 @@ main {
 		margin-top: 2.5rem;
 		padding-bottom: 0.3rem;
 		font-size: var(--h-md);
-		color: var(--accent);
+		color: var(--link);
 		border-bottom: 1px solid var(--border);
 	}
 
@@ -1815,7 +1802,7 @@ main {
 	& h5 {
 		margin-top: 1.25rem;
 		font-size: 1rem;
-		color: var(--accent);
+		color: var(--link);
 	}
 
 	& p {
@@ -1840,7 +1827,7 @@ main {
 		padding: 0.1em 0.35em;
 		font-family: var(--font-mono);
 		font-size: 0.9em;
-		color: var(--fog);
+		color: var(--muted);
 		background: var(--surface);
 		border-radius: 4px;
 		overflow-wrap: anywhere;
@@ -1911,7 +1898,7 @@ main {
 	}
 
 	& thead th {
-		color: var(--accent);
+		color: var(--link);
 		font-weight: 600;
 		white-space: nowrap;
 		background: var(--surface);
@@ -1920,7 +1907,7 @@ main {
 
 .back {
 	align-self: flex-start;
-	color: var(--accent);
+	color: var(--link);
 	text-decoration: none;
 
 	&:hover,
@@ -1956,7 +1943,7 @@ body > footer {
 			&:hover {
 				background: transparent;
 				svg * {
-					fill: var(--ice);
+					fill: var(--accent);
 				}
 			}
 			svg {
@@ -1964,7 +1951,7 @@ body > footer {
 				height: 40px;
 				margin-right: 8px;
 				* {
-					fill: var(--ocean);
+					fill: var(--muted);
 				}
 			}
 		}
@@ -1976,11 +1963,11 @@ body > footer {
 }
 
 .badge.live {
-	background: #c0392b;
+	background: var(--warn);
 }
 
 .badge.upcoming {
-	background: var(--poseidon);
+	background: var(--dot);
 }
 
 .shot video {
@@ -2056,7 +2043,7 @@ body > footer {
 	& > h3 {
 		font-size: 1.1rem;
 		font-weight: 600;
-		color: var(--accent);
+		color: var(--link);
 	}
 }
 
@@ -2093,7 +2080,7 @@ body > footer {
 
 	& a:hover,
 	& a:focus-visible {
-		color: var(--sand);
+		color: var(--on-accent);
 	}
 }
 
@@ -2105,7 +2092,7 @@ body > footer {
 		margin-bottom: 0.2rem;
 		font-size: var(--h-md);
 		font-weight: 600;
-		color: var(--accent);
+		color: var(--link);
 	}
 
 	& .bd-sub {
@@ -2130,7 +2117,7 @@ body > footer {
 	}
 
 	& thead th {
-		color: var(--accent);
+		color: var(--link);
 		font-weight: 600;
 		white-space: nowrap;
 	}
@@ -2187,7 +2174,7 @@ body > footer {
 .vendor-title {
 	font-size: var(--h-md);
 	font-weight: 600;
-	color: var(--accent);
+	color: var(--link);
 	border-bottom: 1px solid var(--border);
 	padding-bottom: 0.35rem;
 	margin-bottom: var(--gap);
@@ -2202,14 +2189,14 @@ body > footer {
 	& .section-title {
 		font-size: var(--h-md);
 		font-weight: 600;
-		color: var(--accent);
+		color: var(--link);
 		border-bottom: 1px solid var(--border);
 		padding-bottom: 0.35rem;
 	}
 
 	& .more {
 		align-self: flex-start;
-		color: var(--accent);
+		color: var(--link);
 		text-decoration: none;
 	}
 
