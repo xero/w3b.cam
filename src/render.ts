@@ -1343,6 +1343,23 @@ const CSS = `:root {
 
 	/* metrics */
 	--gap:    clamp(1rem, 2vw, 1.5rem);
+
+	/* typography — fluid scale; tune min/max/steps to taste */
+	--font-min:  13px;
+	--font-max:  17px;
+	--font-base: clamp(var(--font-min), 0.72rem + 0.3vw, var(--font-max));
+	--text-xs:   0.8rem;   /* fine print (e.g. bd-total) */
+	--text-sm:   0.9rem;   /* sub-labels (e.g. bd-sub, filter btn) */
+	--h-sm:      clamp(1.05rem, 2.5vw, 1.2rem);
+	--h-md:      clamp(1.1rem,  3vw,   1.5rem);
+	--h-lg:      clamp(1.1rem,  3vw,   1.6rem);
+	--h-xl:      clamp(1.5rem,  4vw,   2rem);
+
+	/* layout widths — content sizing; tune to taste */
+	--content-max: 160rem;              /* overall cap on <main> — the main "how wide" knob */
+	--measure:     var(--content-max);  /* prose (.tips); set e.g. 74ch for readable line length */
+	--table-max:   var(--content-max);  /* data tables (.bd-table, .meta) */
+	--card-min:    22rem;               /* gallery grid column min */
 }
 
 @media (prefers-color-scheme: light) {
@@ -1384,7 +1401,7 @@ body {
 	background: var(--bg);
 	color: var(--text);
 	font-family: var(--font-family);
-	font-size: 13px;
+	font-size: var(--font-base);
 	line-height: 1.6;
 
 	*,
@@ -1498,6 +1515,7 @@ h1 > em {
 }
 
 main {
+	max-width: var(--content-max);
 	padding: var(--gap);
 	padding-top: 0px;
 }
@@ -1508,9 +1526,8 @@ main {
 }
 
 .gallery {
-	display: flex;
-	flex-flow: row wrap;
-	align-items: stretch;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
 	gap: var(--gap);
 }
 
@@ -1518,9 +1535,7 @@ main {
 	display: flex;
 	flex-flow: column nowrap;
 	gap: 0.5rem;
-	flex: 1 1 22rem;
 	min-width: 0;
-	max-width: 32rem;
 	padding: 1rem;
 	background: var(--surface);
 	border: 1px solid var(--border);
@@ -1617,7 +1632,7 @@ main {
 	gap: var(--gap);
 
 	& > h2 {
-		font-size: clamp(1.1rem, 3vw, 1.6rem);
+		font-size: var(--h-lg);
 		font-weight: 600;
 		overflow-wrap: anywhere;
 	}
@@ -1744,7 +1759,7 @@ main {
 
 .meta {
 	width: 100%;
-	max-width: 40rem;
+	max-width: var(--table-max);
 	border-collapse: collapse;
 
 	& th,
@@ -1765,7 +1780,7 @@ main {
 }
 
 .tips {
-	max-width: 48rem;
+	max-width: var(--measure);
 
 	& h2,
 	& h3,
@@ -1778,7 +1793,7 @@ main {
 	& h2 {
 		margin-bottom: 1rem;
 		padding-bottom: 0.35rem;
-		font-size: clamp(1.5rem, 4vw, 2rem);
+		font-size: var(--h-xl);
 		color: var(--text);
 		border-bottom: 1px solid var(--border);
 	}
@@ -1786,14 +1801,14 @@ main {
 	& h3 {
 		margin-top: 2.5rem;
 		padding-bottom: 0.3rem;
-		font-size: clamp(1.2rem, 3vw, 1.5rem);
+		font-size: var(--h-md);
 		color: var(--accent);
 		border-bottom: 1px solid var(--border);
 	}
 
 	& h4 {
 		margin-top: 1.75rem;
-		font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+		font-size: var(--h-sm);
 		color: var(--text);
 	}
 
@@ -2088,7 +2103,7 @@ body > footer {
 
 	& h2 {
 		margin-bottom: 0.2rem;
-		font-size: clamp(1.1rem, 3vw, 1.5rem);
+		font-size: var(--h-md);
 		font-weight: 600;
 		color: var(--accent);
 	}
@@ -2096,13 +2111,13 @@ body > footer {
 	& .bd-sub {
 		margin-bottom: 1.1rem;
 		color: var(--muted);
-		font-size: 0.9rem;
+		font-size: var(--text-sm);
 	}
 }
 
 .bd-table {
 	width: 100%;
-	max-width: 40rem;
+	max-width: var(--table-max);
 	border-collapse: collapse;
 	font-variant-numeric: tabular-nums;
 
@@ -2137,7 +2152,7 @@ body > footer {
 		display: block;
 		color: var(--muted);
 		font-weight: 400;
-		font-size: 0.8rem;
+		font-size: var(--text-xs);
 	}
 
 	& .bd-model {
@@ -2163,14 +2178,14 @@ body > footer {
 
 	& .bd-filter .btn .front {
 		padding: 0.3rem 0.7rem;
-		font-size: 0.9rem;
+		font-size: var(--text-sm);
 	}
 }
 
 /* Heading atop a per-vendor fingerprint gallery (reuses the section-title look, but not
    scoped to .home, and with its own spacing above the card grid that follows). */
 .vendor-title {
-	font-size: clamp(1.1rem, 3vw, 1.5rem);
+	font-size: var(--h-md);
 	font-weight: 600;
 	color: var(--accent);
 	border-bottom: 1px solid var(--border);
@@ -2185,7 +2200,7 @@ body > footer {
 	margin-bottom: calc(var(--gap) * 1.5);
 
 	& .section-title {
-		font-size: clamp(1.1rem, 3vw, 1.5rem);
+		font-size: var(--h-md);
 		font-weight: 600;
 		color: var(--accent);
 		border-bottom: 1px solid var(--border);
