@@ -127,7 +127,7 @@ bun serve
 
 ### MJPEG
 
-**`bun import --mjpeg [file] [--limit N] [--concurrency N] [--delay MS] [--skip-existing]`.** Reads a curated list of MJPEG camera URLs, one per line, defaulting to `in/mjpeg.md`. Blank lines and `#` comments are skipped, and an optional `label ` before the URL is kept. Like `in/youtube.md`, the list is gitignored and stays on your machine, so append to it and re-run as you hunt more cams. Each URL is classified by vendor from the fingerprints in [tips.md](./tips.md), a still is baked with ffmpeg for the gallery card, and the cam is upserted into the unified `cams` table as `kind='feed'`. Re-running refreshes thumbnails rather than duplicating cams. `--limit N` ingests only the first N unique cams; the snapshot flags `--concurrency`, `--delay`, and `--skip-existing` are shared with the other feed-grabbers and covered in [Rate limits and cool-off](#rate-limits-and-cool-off).
+**`bun import --mjpeg [file] [--limit N] [--concurrency N] [--delay MS] [--skip-existing]`.** Reads a curated list of MJPEG camera URLs, one per line, defaulting to `in/mjpeg.md`. Blank lines and `#` comments are skipped, and an optional `label ` before the URL is kept. Like `in/youtube.md`, the list is gitignored and stays on your machine, so append to it and re-run as you hunt more cams. Each URL is classified by vendor from the endpoint fingerprints in [the cam-hunting guide](https://w3b.cam/tips), a still is baked with ffmpeg for the gallery card, and the cam is upserted into the unified `cams` table as `kind='feed'`. Re-running refreshes thumbnails rather than duplicating cams. `--limit N` ingests only the first N unique cams; the snapshot flags `--concurrency`, `--delay`, and `--skip-existing` are shared with the other feed-grabbers and covered in [Rate limits and cool-off](#rate-limits-and-cool-off).
 
 The site is served over https, so how a cam plays depends on its feed. An https stream embeds live as a smooth Motion JPEG `<img>`; an https snapshot auto-refreshes; an http feed cannot embed, since browsers block mixed content, so it shows the baked still with a "View live" link that opens the feed in a new tab. Viewer-page URLs, such as Mobotix `guestimage.html`, Panasonic `CgiStart`, and Axis `#view`, are resolved to their real stream or snapshot endpoint so they still get a thumbnail. The cams join the feeds gallery at `/feeds`, labeled by vendor.
 
@@ -233,10 +233,14 @@ A few details worth knowing:
 - **You pick a host's card image.** A host seen on several ports has several screenshots, and its gallery card shows the most recent one by default. `bun reorder <ip> <port>` pins one port so its screenshot leads instead, and `bun reorder <ip> --clear` reverts to the default. The pin lives in a `preferred` column that the scraper and importer never overwrite, so it survives later runs. Re-run `bun bake` to rebuild the site.
 - **Tags are unified across all three sources.** `bun tag <cam|stream|feed> <ref> <tag>` attaches a free-form label to a cam (by IP), a stream (by video id), or a feed cam (by id), stored in the `meta` table (`type='tag'`) keyed on `(kind, ref, type, value)`. The same tag spans every source, so tagging `street` on a webcam, a stream, and a feed cam groups all three under it. Tags are normalized to lowercase and deduplicated, and an entity can carry several. They show on each detail page, size a tag cloud at `/tags` in the header nav, and each tag links to a paginated browse page at `/tags/<slug>` mixing every entity that carries it. Remove one with `bun untag <cam|stream|feed> <ref> <tag>`, or in `bun dev` by clicking the × on a tag chip in the right-click Tag menu. Re-run `bun bake` to rebuild the site.
 - **YouTube streams live in their own table.** `bun import --youtube` reads `in/youtube.md`, pulls metadata and a thumbnail per video from the YouTube Data API, and stores them in the unified `cams` table as `kind='stream'`, keyed on the video id. The thumbnail is the screenshot; YouTube keeps a 24/7 live cam's thumbnail current, so a re-run refreshes it. They render as a flat gallery at `/streams`, one card per stream, and each stream's page links the other streams sharing its channel.
-- **MJPEG cams come from a curated URL list.** `bun import --mjpeg` reads `in/mjpeg.md`, one camera URL per line, and classifies each by vendor using the endpoint fingerprints in [tips.md](./tips.md). It bakes a still with ffmpeg for the card and upserts into the unified `cams` table as `kind='feed'`, distinguished by a per-vendor `source`. Because the site is https, only https feeds embed live, a smooth Motion JPEG `<img>` for streams and an auto-refreshing `<img>` for snapshots; http feeds are mixed-content-blocked, so they store as a `link` kind that shows the baked still plus a "View live" link. Viewer-page URLs resolve to their real media endpoint so they still yield a thumbnail. Re-run `bun bake` to rebuild the site.
+- **MJPEG cams come from a curated URL list.** `bun import --mjpeg` reads `in/mjpeg.md`, one camera URL per line, and classifies each by vendor using the endpoint fingerprints in [the cam-hunting guide](https://w3b.cam/tips). It bakes a still with ffmpeg for the card and upserts into the unified `cams` table as `kind='feed'`, distinguished by a per-vendor `source`. Because the site is https, only https feeds embed live, a smooth Motion JPEG `<img>` for streams and an auto-refreshing `<img>` for snapshots; http feeds are mixed-content-blocked, so they store as a `link` kind that shows the baked still plus a "View live" link. Viewer-page URLs resolve to their real media endpoint so they still yield a thumbnail. Re-run `bun bake` to rebuild the site.
 - **The homepage is a curated mix.** `index.html` is a landing page, not page one of the index: it shows a cams row, a streams row, and a feeds row, each up to two featured cards followed by the newest of that kind. `bun feature <cam|stream|feed> <ref>` adds an entry to the `meta` table (`type='featured'`) keyed on `(kind, ref)` (an IP for a cam, a video id for a stream, a feed id for a feed cam). The set is unbounded, and each build randomly picks two per kind to show, so the homepage rotates on its own. A featured entry whose row is gone is skipped and backfilled from the newest, so each row always fills four. Remove one with `bun unfeature <cam|stream|feed> <ref>`, or in `bun dev` by right-clicking a card and choosing Unfeature. The full paginated galleries live at `/hosts`, `/streams`, and `/feeds`, reachable from the header nav alongside a combined `/gallery` of every kind. Re-run `bun bake` to rebuild the site.
 - **The visualizer escapes everything.** Banner text such as the organization name and hostnames comes from scanned hosts and is untrusted, so every value is HTML-escaped before it reaches the page. Host folder names keep the dotted IP but pass a hex-and-dot allowlist, and feed folder names an `[A-Za-z0-9_.-]` allowlist, so a hostile value cannot escape the output directory. YouTube titles and channel names are escaped the same way, and a video-id slug is allowlisted to `[A-Za-z0-9_-]`.
 - **Every geolocated camera plots on a world map.** `/map`, in the header nav, is one baked SVG that plots every located camera across all three sources as a dot linking to its detail page. Shodan and feed cams carry coordinates already; YouTube publishes none, so `bun geo <video_id> <lat> <lng>` assigns one by hand, stored inline on the stream's `cams` row. With JavaScript on you drag to pan and scroll to zoom; without it the map is a fixed world view whose dots are still plain links, each with a location tooltip. Re-run `bun bake` to rebuild the site.
+
+- **Camera models are fingerprinted.** Shodan's own `product` is often empty or just the web server (`nginx`, `Boa`) rather than the camera. `bun fingerprint` mines the full banner (the page title, the Hikvision block, cpe23, the HTTP `Server:` header, HTML endpoint paths, and the RTSP banner) through a highest-confidence-first cascade and derives the real make and model into the `product` field the site renders as "Fingerprint". It is a dry run by default, printing a report and recording every decision in a reviewable `fingerprints` table; pass `--apply` to write the `product` column. It refuses to touch the production `camhunting.sqlite`, so run it against a copy: `cp camhunting.sqlite camhunting.fp.sqlite`, then `DB_PATH=camhunting.fp.sqlite bun fingerprint --apply` (or add `--force` to override the guard). The `/fingerprints` page in the header nav is the make, model, and count breakdown built from those labels, each make linking a gallery of its matching cams. Re-run `bun bake` to rebuild the site.
+
+- **The gallery is followable in a feed reader.** Every build writes `rss.xml` (RSS 2.0) and `atom.xml` (Atom 1.0), each holding the 50 newest discovered hosts with the screenshot as an enclosure, and the header links both. A new camera the scheduled scraper finds shows up in your reader without a visit to the site.
 
 - **The site works without JavaScript.** Every index page and per-host page is a real file with plain links, so it stays browsable on its own. When JavaScript is on, htmx intercepts those links and swaps only the page body, which skips reloading the shell and shared assets. Each page is generated in two forms, the full document and a body-only snippet, from a single source string so the two cannot drift.
 
@@ -261,12 +265,15 @@ src/
   yt-api.ts       YouTube Data API client, youtube.md parser, thumbnail fetch
   db.ts           schema, open/close, and inserts
   scraper.ts      fetch cameras from the Shodan API, dedupe, store
-  import.ts       unified importer CLI: --shodan | --youtube | --mjpeg
+  preflight.ts    CI credit precheck: skip a scrape when no query credits remain
+  import.ts       unified importer CLI: --shodan | --youtube | --mjpeg | --hls
   ingest.ts       shared ingest core (bulk + single-record), CLI and web
   shodan-source.ts normalize and filter raw Shodan JSON banners into rows
-  mjpeg-source.ts classify an MJPEG cam URL by vendor (see tips.md)
+  mjpeg-source.ts classify an MJPEG cam URL by vendor (endpoint fingerprints)
+  hls-source.ts   ingest a curated .m3u8 list as vendor-agnostic hls feed rows
   osiris-source.ts classify + snapshot Osiris cams; shared feed row builder
   osiris.ts       internal: re-ingest the one-off Osiris dump into feed
+  fingerprint.ts  derive camera make/model from a banner into the product field
   blacklist.ts    drop a host and record it so scrapes skip it
   unblacklist.ts  reverse a blacklist entry
   reorder.ts      pin a host's card image to one port
@@ -276,7 +283,10 @@ src/
   unfeature.ts    remove a cam or stream from the featured set
   geo.ts          assign a YouTube stream's map coordinates (cams.lat/lng)
   purge.ts        remove stored RDP/VNC rows that predate the ingest filter
+  urls.ts         the route layer: one place that decides every site path
   render.ts       pure HTML rendering (grouping, pager, pages, shell)
+  syndication.ts  render the newest hosts as rss.xml / atom.xml feeds
+  tips.ts         the cam-hunting guide as pre-rendered HTML for the tips page
   worldmap.ts     pre-projected world-country outlines for the map page
   build.ts        database to static site (orchestrator)
   serve.ts        static file server for out/
@@ -306,16 +316,21 @@ out/               generated site (gitignored). Clean folder URLs: every page is
   tags/               tag cloud, links to per-tag browse pages
   tags/<slug>/{n}/    one paginated browse page per tag
   map/                world map of every geolocated camera
-  tips/               cam-hunting guide (baked from tips.md)
+  tips/               cam-hunting guide (baked from src/tips.ts, served at w3b.cam/tips)
+  rss.xml             RSS 2.0 feed of the 50 newest discovered hosts
+  atom.xml            Atom 1.0 feed of the same
   img/                extracted screenshots and thumbnails
   htmx.min.js         vendored htmx library
+  hls.min.js          vendored hls.js, fetched on demand to play an HLS feed
+  icons.svg           sprite sheet the nav and cards reference
+  <assets>            favicons and the web manifest, copied verbatim from assets/
 ```
 
 ---
 
 ## GitHub Actions
 
-The workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream plus blacklist, reorder, tag, untag, feature, unfeature, and geo edits happen from the Actions tab without a local checkout.
+The workflows in `.github/workflows/` run the same commands in CI. The site builds and deploys to GitHub Pages on its own, the scraper runs on a schedule, and adding a YouTube stream, re-ingesting the feed cams, plus blacklist, reorder, tag, untag, feature, unfeature, and geo edits happen from the Actions tab without a local checkout.
 
 **`build`.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
 
@@ -337,13 +352,15 @@ The workflows in `.github/workflows/` run the same commands in CI. The site buil
 
 **`geo`.** Takes a video id, a latitude, and a longitude, assigns that stream's map coordinates on its `cams` row, saves the database, then calls `build` so the stream appears on the map.
 
+**`feeds`.** Re-ingests the Osiris feed cams on demand, refreshing each cam's baked card thumbnail, then saves the database and calls `build`. It takes an optional dump path, a cam limit, and a source filter. The dump lives under `in/` and is gitignored, so CI can only ingest a copy committed to the checkout; the simpler path is to run `bun run osiris` locally and publish with `bun sync --push`. Either way the live detail feeds stay current on their own; only the gallery thumbnails go stale between refreshes.
+
 ### The database store
 
 `camhunting.sqlite` is too large for git (a few hundred MB, and it only grows), so it lives as an asset on a prerelease named `db-store` instead of in the repo. Every workflow that changes the database restores it from that release first and uploads the new copy when it finishes. `build` reads it without saving. All the writing workflows share one concurrency group (`db-write`), so a scheduled scrape, the YouTube ingester, and a manual blacklist can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine, which is how edits you make locally reach the site; see [Editing locally](#editing-locally).
 
 ### Running a workflow
 
-Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` and `untag` each take a kind, a ref, and a label, and `feature` and `unfeature` each take a kind and a ref. Invalid input fails the run immediately.
+Open the Actions tab, pick the workflow, and choose "Run workflow". `scrape` takes an optional page count (default 2). `youtube` takes a video URL and an optional label. `blacklist` and `unblacklist` each take an IP or a hostname, `reorder` takes an IP and a port, `tag` and `untag` each take a kind, a ref, and a label, `feature` and `unfeature` each take a kind and a ref, and `feeds` takes an optional dump path, cam limit, and source filter. Invalid input fails the run immediately.
 
 ### One-time setup
 
