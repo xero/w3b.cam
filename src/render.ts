@@ -338,7 +338,7 @@ function renderPagerWith(
 
 	parts.push(first ? link(1, "&laquo;") : pageDisabled("&laquo;"));
 	parts.push(first ? link(cur - 1, "&lsaquo;") : pageDisabled("&lsaquo;"));
-	// The boundary shortcuts — leading `1 …` / trailing `… total` — carry `.pager-ends`
+	// The boundary shortcuts, leading `1 …` / trailing `… total`, carry `.pager-ends`
 	// so a narrow-width media query can hide them, leaving the local window + arrows.
 	// `pageWindow` only ever emits "…" beside a boundary sentinel, so every gap is an
 	// end, and a page number is an end only when it sits at the window edge next to a gap.
@@ -478,13 +478,51 @@ export function renderIndexMain(hosts: Host[], page: number, totalPages: number,
 // ── Homepage ─────────────────────────────────────────────────────────────────
 
 /**
- * Inner-<main> for the homepage (index.html): a curated landing page with a cams
- * section and a streams section, each showing up to four cards — the featured pins
- * first, then the newest (build.ts assembles the ordering). Reuses the gallery
- * cards verbatim; a "more" link jumps to the full paginated gallery. An empty
- * section is dropped, and if both are empty the galleries' "nothing yet" note shows.
+ * The two "top N" lists shown below the card sections on the homepage: the most-used
+ * tags beside the most-common camera makes. Both come pre-sliced (top 10, descending)
+ * from build.ts; `slugForTag` maps a tag to its browse-page slug, and `vendorsWithGallery`
+ * gates which makes link to a `/fingerprints/<vendor>` gallery (the rest are plain text).
  */
-export function renderHomeMain(cams: Host[], streams: YtStream[], feeds: FeedCam[], opts: RenderOpts = {}): string {
+export interface HomeExtras {
+	topTags: { tag: string; count: number }[];
+	topMakes: ProductGroup[];
+	slugForTag: (tag: string) => string;
+	vendorsWithGallery: Set<string>;
+}
+
+/**
+ * One "top N" column: an underlined heading, a ranked list of `name (count)` rows, then a
+ * "more" link to the full listing. `rows` are pre-rendered <li> strings so tags and makes
+ * can each build their own link/plain-text markup. Returns "" when there are no rows, so an
+ * empty column is dropped rather than showing a bare header.
+ */
+function renderHomeColumn(title: string, rows: string[], moreHref: string, moreSnip: string, moreLabel: string): string {
+	if (rows.length === 0) return "";
+	return [
+		`<div class="home-col">`,
+		`${T(1)}<h2 class="section-title">${escapeHtml(title)}</h2>`,
+		`${T(1)}<ol class="top-list">`,
+		indentBlock(rows.join("\n"), 2),
+		`${T(1)}</ol>`,
+		`${T(1)}<a class="more" href="${moreHref}" hx-get="${moreSnip}" hx-push-url="${moreHref}">${escapeHtml(moreLabel)} &rarr;</a>`,
+		`</div>`,
+	].join("\n");
+}
+
+/** A `name (count)` row where the name links somewhere. */
+function topRow(href: string, snip: string, name: string, count: number): string {
+	return `<li><a href="${href}" hx-get="${snip}" hx-push-url="${href}">${escapeHtml(name)}</a> <span class="cnt">${count.toLocaleString()}</span></li>`;
+}
+
+/**
+ * Inner-<main> for the homepage (index.html): a curated landing page with cams, streams,
+ * and feeds sections (each up to four cards: the featured pins first, then the newest —
+ * build.ts assembles the ordering), followed by two "top N" columns (most-used tags beside
+ * most-common camera makes). Reuses the gallery cards verbatim; a "more" link jumps to the
+ * full paginated gallery. An empty section is dropped, and if everything is empty the
+ * galleries' "nothing yet" note shows.
+ */
+export function renderHomeMain(cams: Host[], streams: YtStream[], feeds: FeedCam[], extras: HomeExtras, opts: RenderOpts = {}): string {
 	const section = (title: string, cards: string, moreHref: string, moreSnip: string, moreLabel: string): string =>
 		[
 			`<section class="home">`,
@@ -509,6 +547,29 @@ export function renderHomeMain(cams: Host[], streams: YtStream[], feeds: FeedCam
 		const cards = feeds.map((c) => indentBlock(renderFeedCard(c, opts), 1)).join("\n");
 		parts.push(section("feeds", cards, urlOf(FEEDS), snipUrlOf(FEEDS), "all feeds"));
 	}
+
+	// Two "top N" columns below the card sections. Tags always link to their browse page;
+	// a make links to its vendor gallery only when that vendor actually got one this build,
+	// otherwise it renders as plain text (still escaped — makes echo banner text).
+	const { topTags, topMakes, slugForTag, vendorsWithGallery } = extras;
+	const tagRows = topTags.map((t) => {
+		const route = tagRoute(slugForTag(t.tag));
+		return topRow(urlOf(route), snipUrlOf(route), t.tag, t.count);
+	});
+	const makeRows = topMakes.map((g) => {
+		if (g.vendor && vendorsWithGallery.has(g.vendor)) {
+			const route = vendorRoute(g.vendor);
+			return topRow(urlOf(route), snipUrlOf(route), g.make, g.total);
+		}
+		return `<li><span>${escapeHtml(g.make)}</span> <span class="cnt">${g.total.toLocaleString()}</span></li>`;
+	});
+	const tagsCol = renderHomeColumn("top tags", tagRows, urlOf(TAGS), snipUrlOf(TAGS), "all tags");
+	const makesCol = renderHomeColumn("top makes", makeRows, urlOf(FINGERPRINTS), snipUrlOf(FINGERPRINTS), "all fingerprints");
+	const cols = [tagsCol, makesCol].filter((c) => c !== "");
+	if (cols.length) {
+		parts.push([`<section class="home-cols">`, indentBlock(cols.join("\n"), 1), `</section>`].join("\n"));
+	}
+
 	if (parts.length === 0) {
 		return `<p class="empty">Nothing to feature yet. Run <code>bun scrape</code>, <code>bun import --youtube</code>, <code>bun import --mjpeg</code>, <code>bun import --hls</code>, or <code>bun run osiris</code> first.</p>`;
 	}
@@ -622,7 +683,6 @@ export interface YtStream {
 	publishedAt: string | null;
 	scheduledStart: string | null;
 	actualStart: string | null;
-	description: string | null;
 	/** URL of the already-extracted thumbnail file, or "" when none was stored. */
 	thumbHref: string;
 	thumbAlt: string;
@@ -644,7 +704,6 @@ export function toYtStream(row: StoredYtRow, thumbHref: string, tags: string[] =
 		publishedAt: row.published_at,
 		scheduledStart: row.scheduled_start,
 		actualStart: row.actual_start,
-		description: row.description,
 		thumbHref,
 		thumbAlt: `Thumbnail for ${label}`,
 		tags,
@@ -746,7 +805,6 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[], opts: Ren
 	push("Published", stream.publishedAt);
 	push("Scheduled", stream.scheduledStart);
 	push("Started", stream.actualStart);
-	push("Description", stream.description);
 	if (stream.tags.length) rows.push(metaRow("Tags", renderTagLinks(stream.tags, opts.slugForTag)));
 
 	const siblingSection = renderSiblings(stream, siblings, opts);
@@ -771,7 +829,7 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[], opts: Ren
 /**
  * Click-to-load YouTube facade for a stream detail page: the thumbnail with a play
  * overlay, rendered as an <a> to the watch URL so it works with no JS. assets/feeds.js
- * intercepts the click and swaps in a youtube-nocookie iframe — no third-party DOM loads
+ * intercepts the click and swaps in a youtube-nocookie iframe, no third-party DOM loads
  * until the user opts in. The "Watch on YouTube" button beneath it stays as the fallback.
  */
 function ytFacade(stream: YtStream): string {
@@ -786,7 +844,7 @@ function ytFacade(stream: YtStream): string {
 // ── Feed (Osiris) cams ────────────────────────────────────────────────────────
 // A third source with its own flat gallery (one card per cam, like the streams
 // gallery). Hybrid rendering: the gallery card shows a baked, same-origin thumbnail
-// exactly like the other sources, but the detail page embeds the LIVE feed — an
+// exactly like the other sources, but the detail page embeds the LIVE feed, an
 // auto-refreshing <img> (jpg), a <video> (mp4/hls, hls via the vendored hls.js), or,
 // for iframe/external-only cams, just a "view live" link (we never load third-party
 // DOM). Every live element degrades to that link on error.
@@ -873,7 +931,7 @@ export function renderFeedCard(cam: FeedCam, opts: RenderOpts = {}): string {
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
 	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
 	// Badge the card with its transport (the same label the detail page uses), so two cards
-	// of the same view — e.g. an HLS and an MJPEG feed — don't read as dupes. `link` cams
+	// of the same view (e.g. an HLS and an MJPEG feed) don't read as dupes. `link` cams
 	// aren't a real transport (unembeddable still + "view live"), so they go unbadged.
 	const badge =
 		cam.feedKind !== "link"
@@ -1248,7 +1306,7 @@ export function renderMapMain(points: MapPoint[], total: number): string {
 
 /**
  * The Tips page: a static article (cam-hunting guide) whose body is pre-converted
- * from tips.md into TIPS_HTML (src/tips.ts). No dynamic data — the same string is
+ * from tips.md into TIPS_HTML (src/tips.ts). No dynamic data, the same string is
  * the full page's <main> and its htmx snippet. Headings carry GitHub-style anchor
  * ids so the in-page table-of-contents links resolve.
  */
@@ -1316,7 +1374,7 @@ export function renderImportMain(): string {
 // ── Page shell + CSS ─────────────────────────────────────────────────────────
 
 const CSS = `:root {
-	/* palette — dual-mode brand (identical in light & dark) */
+	/* palette: dual-mode brand (identical in light & dark) */
 	--cornflower:  #667eea;
 	--indigo:      #495dc6;
 	--ultramarine: #0091ba;
@@ -1324,7 +1382,7 @@ const CSS = `:root {
 	--salmon:      #e25569;
 	--mercury:     #efefef;
 
-	/* neutrals — dark defaults (flipped in the light media query below) */
+	/* neutrals: dark defaults (flipped in the light media query below) */
 	--bg:      #0f1117;
 	--surface: #161925;
 	--text:    #e6e8ee;
@@ -1333,20 +1391,26 @@ const CSS = `:root {
 	--land:    #1b2333;
 	--coast:   #2b3a52;
 
-	/* semantic — accent as surface/line is constant; accent as text is mode-aware */
-	--accent:    var(--cornflower);
-	--link:      var(--cornflower);
-	--on-accent: var(--mercury);
-	--dot:       var(--ultramarine);
-	--dot-hi:    var(--tangerine);
-	--warn:      var(--salmon);
+	/* semantic: accent as surface/line is constant; accent as text is mode-aware */
+	--accent:      var(--cornflower);
+	--link:        var(--cornflower);
+	--menu:        var(--muted);
+	--link-hover:  var(--bg);
+	--on-accent:   var(--mercury);
+	--dot:         var(--ultramarine);
+	--dot-hi:      var(--tangerine);
+	--warn:        var(--salmon);
 	--font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--font-mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
 	/* metrics */
 	--gap:    clamp(1rem, 2vw, 1.5rem);
 
-	/* typography — fluid scale; tune min/max/steps to taste */
+	/* timings */
+	--transition-duration: 250ms;
+	--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+	/* typography: fluid scale */
 	--font-min:  13px;
 	--font-max:  17px;
 	--font-base: clamp(var(--font-min), 0.72rem + 0.3vw, var(--font-max));
@@ -1357,8 +1421,8 @@ const CSS = `:root {
 	--h-lg:      clamp(1.1rem,  3vw,   1.6rem);
 	--h-xl:      clamp(1.5rem,  4vw,   2rem);
 
-	/* layout widths — content sizing; tune to taste */
-	--content-max: 160rem;              /* overall cap on <main> — the main "how wide" knob */
+	/* layout widths: content sizing */
+	--content-max: 160rem;              /* overall cap on <main>, */
 	--measure:     var(--content-max);  /* prose (.tips); set e.g. 74ch for readable line length */
 	--table-max:   var(--content-max);  /* data tables (.bd-table, .meta) */
 	--card-min:    22rem;               /* gallery grid column min */
@@ -1375,6 +1439,11 @@ const CSS = `:root {
 		--coast:   #b9c4d0;
 		--link:    var(--indigo);
 	}
+}
+html, body, * {
+	transition-property: all;
+	transition-duration: var(--transition-duration);
+	transition-timing-function: var(--ease-in-out);
 }
 
 html,
@@ -1402,7 +1471,7 @@ a {
 	&:hover,
 	&:focus-visible {
 		background: var(--accent);
-		color: var(--on-accent);
+		color: var(--link-hover);
 		text-decoration: none;
 		outline: none;
 	}
@@ -1436,21 +1505,32 @@ body > header {
 					fill: var(--accent);
 				}
 			}
-			svg {
-				display: block;
-				width: 50px;
-				height: 50px;
-				* {
-					fill: var(--text);
-				}
-
-				@media (max-width: 480px) {
-					width: 40px;
-					height: 40px;
-				}
-			}
 		}
 	}
+	svg {
+		display: block;
+		width: 50px;
+		height: 50px;
+		* {
+			fill: var(--menu);
+		}
+
+		@media (max-width: 480px) {
+			width: 40px;
+			height: 40px;
+		}
+	}
+	aside {
+		display: flex;
+		flex-grow: 1;
+		justify-content: end;
+
+	}
+}
+
+button {
+	background-color: transparent;
+	border: 0;
 }
 
 h1 {
@@ -1558,6 +1638,7 @@ main {
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		color: var(--text);
 	}
 
 	& .dn-sub {
@@ -1949,7 +2030,6 @@ body > footer {
 			svg {
 				width: 40px;
 				height: 40px;
-				margin-right: 8px;
 				* {
 					fill: var(--muted);
 				}
@@ -2194,15 +2274,49 @@ body > footer {
 		padding-bottom: 0.35rem;
 	}
 
-	& .more {
-		align-self: flex-start;
-		color: var(--link);
-		text-decoration: none;
-	}
+}
+.more {
+	align-self: flex-start;
+}
 
-	& .more:hover,
-	& .more:focus-visible {
-		text-decoration: underline;
+/* Two "top N" columns below the homepage card sections: side by side on desktop, stacked
+   on mobile. Nested under nothing, but each column reuses the .home .section-title look via
+   its own rule below so both headers keep an independent underline. */
+.home-cols {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--gap);
+	margin-bottom: calc(var(--gap) * 1.5);
+
+	@media (max-width: 735px) {
+		grid-template-columns: 1fr;
+	}
+}
+
+.home-col {
+	display: flex;
+	flex-flow: column nowrap;
+	gap: 0.6rem;
+
+	& .section-title {
+		font-size: var(--h-md);
+		font-weight: 600;
+		color: var(--link);
+		border-bottom: 1px solid var(--border);
+		padding-bottom: 0.35rem;
+	}
+}
+
+.top-list {
+	list-style: none;
+	display: flex;
+	flex-flow: column nowrap;
+	gap: 0.2rem;
+	font-variant-numeric: tabular-nums;
+
+	& .cnt {
+		color: var(--muted);
+		font-size: var(--text-sm);
 	}
 }
 
@@ -2338,8 +2452,8 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(2)}</main>`,
 		`${T(2)}<footer>`,
 		`${T(3)}<p id="syndication">`,
-		`${T(4)}<a href="/rss.xml"><svg alt="rss feed" aria-label="rss feed"><use href="/icons.svg#rss"></use></svg></a>`,
 		`${T(4)}<a href="/atom.xml"><svg alt="atom feed" aria-label="atom feed"><use href="/icons.svg#atom"></use></svg></a>`,
+		`${T(4)}<a href="/rss.xml"><svg alt="rss feed" aria-label="rss feed"><use href="/icons.svg#rss"></use></svg></a>`,
 		`${T(3)}</p>`,
 		`${T(3)}<cite><a href="https://3xi.club" target="_blank">3xi.club</a> project by <a href="https://x-e.ro" target="_blank">xero</a></cite>`,
 		`${T(3)}<p class="count">${counts}</p>`,

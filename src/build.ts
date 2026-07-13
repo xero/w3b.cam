@@ -215,6 +215,32 @@ const HOME_PER_KIND = 4;
 /** How many of the HOME_PER_KIND cards are sampled at random from the featured set each build (rest fill from newest). */
 const HOME_FEATURED_PER_KIND = 2;
 
+/** Rows shown in each homepage "top N" column (most-used tags, most-common cam makes). */
+const HOME_TOP_N = 10;
+
+/**
+ * The set of vendors that will get a `/fingerprints/<vendor>` gallery this build: a vendor
+ * qualifies iff it has at least one visible host or feed. Computed straight from vendorRefs +
+ * the already-filtered `hosts`/`feedCams` (both carry only rows with a screenshot), so it is
+ * available before the --index-only early return — and matches the emptiness check the
+ * vendor-gallery loop makes when it actually writes the pages.
+ */
+function computeVendorsWithGallery(
+	vendorRefs: { byVendor: Map<string, { hosts: Set<string>; feeds: Set<string> }> },
+	hosts: Host[],
+	feedCams: FeedCam[],
+): Set<string> {
+	const visibleHostIps = new Set(hosts.map((h) => h.ip));
+	const visibleFeedIds = new Set(feedCams.map((c) => c.id));
+	const out = new Set<string>();
+	for (const [vendor, refs] of vendorRefs.byVendor) {
+		const has =
+			[...refs.hosts].some((ip) => visibleHostIps.has(ip)) || [...refs.feeds].some((id) => visibleFeedIds.has(id));
+		if (has) out.add(vendor);
+	}
+	return out;
+}
+
 /**
  * Assemble one homepage row: resolve the featured `refs` against `byRef` (a pin
  * whose row is gone is skipped), then top up from `newest` until `limit` cards,
@@ -451,7 +477,24 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	const homeCams = pickHome(pickRandom(liveCamRefs, HOME_FEATURED_PER_KIND), camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
 	const homeStreams = pickHome(pickRandom(liveStreamRefs, HOME_FEATURED_PER_KIND), streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
 	const homeFeeds = pickHome(pickRandom(liveFeedRefs, HOME_FEATURED_PER_KIND), feedById, newestFeeds, (c) => c.id, HOME_PER_KIND);
-	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, { dev }), TITLE, stats, { dev });
+
+	// Homepage "top N" columns. Both feed off aggregations that are also used later (the tags
+	// cloud and the fingerprints breakdown), but the homepage needs them before the
+	// --index-only early return, so they are computed here from data already in scope.
+	// loadTagCounts orders by name, so re-sort a copy by count for the "most-used" list.
+	const topTags = [...tagCounts].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)).slice(0, HOME_TOP_N);
+	// productBreakdown is reused verbatim for the /fingerprints page below; a make links to its
+	// vendor gallery only when that vendor got one this build (vendorsWithGallery, also reused).
+	const breakdown = productBreakdown([
+		...rows.map((r) => ({ product: r.product, vendor: vendorRefs.byRef.get(r.id) })),
+		...feedRows.map((t) => ({ product: t.product, vendor: vendorRefs.byRef.get(t.id) })),
+	]);
+	const vendorsWithGallery = computeVendorsWithGallery(vendorRefs, hosts, feedCams);
+	// Drop the catch-all "Unidentified"/"Other" makes: the front page features what we've
+	// actually identified. breakdown is already total-descending, so slice the top N.
+	const topMakes = breakdown.filter((g) => g.make !== "Unidentified" && g.make !== "Other").slice(0, HOME_TOP_N);
+	const homeExtras = { topTags, topMakes, slugForTag, vendorsWithGallery };
+	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, homeExtras, { dev }), TITLE, stats, { dev });
 
 	// --index-only stops here: index.html is fresh, and every other page + image is reused
 	// from the last full bake's out/.
@@ -575,21 +618,20 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		if (p === 1) await writePage(GALLERY, mainInner, `gallery | ${TITLE}`, stats, { dev });
 	}
 
-	// Per-vendor galleries: the cam hosts + feeds whose fingerprint vendor matches, blended
-	// by discovery date. `vendorsWithGallery` (vendors that produced at least one visible
-	// card) gates the fingerprints page's "filter" links, so a link never points at an
-	// empty page. Empty when the fingerprints table is absent (see loadVendorRefs).
-	const vendorsWithGallery = new Set<string>();
+	// Per-vendor galleries: the cam hosts + feeds whose fingerprint vendor matches, blended by
+	// discovery date. `vendorsWithGallery` (computed above, before the homepage) is the set of
+	// vendors with at least one visible card; iterating it skips vendors that would yield an
+	// empty page, so a "filter" link never points at nothing.
 	let vendorPagesWritten = 0;
-	for (const [vendor, refs] of vendorRefs.byVendor) {
+	for (const vendor of vendorsWithGallery) {
+		const refs = vendorRefs.byVendor.get(vendor);
+		if (!refs) continue;
 		const items = [
 			...datedHosts.filter((d) => d.item.kind === "cam" && refs.hosts.has(d.item.host.ip)),
 			...datedFeeds.filter((d) => d.item.kind === "feed" && refs.feeds.has(d.item.cam.id)),
 		]
 			.sort(byNewest)
 			.map((d) => d.item);
-		if (items.length === 0) continue; // every ref blocked/absent; no page (and no filter link)
-		vendorsWithGallery.add(vendor);
 		const vTotalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
 		for (let p = 1; p <= vTotalPages; p++) {
 			const pageItems = items.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
@@ -601,13 +643,9 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	}
 
 	// ── Fingerprints breakdown: make/model/count, each make linking its vendor gallery ─
-	// Built from cams.product across both device sources (Shodan cams + feeds), tagged with
-	// each row's fingerprint vendor (vendorRefs.byRef, keyed on cams.id) so productBreakdown
-	// can pick a dominant vendor per make. vendorsWithGallery gates which makes get a link.
-	const breakdown = productBreakdown([
-		...rows.map((r) => ({ product: r.product, vendor: vendorRefs.byRef.get(r.id) })),
-		...feedRows.map((t) => ({ product: t.product, vendor: vendorRefs.byRef.get(t.id) })),
-	]);
+	// `breakdown` and `vendorsWithGallery` were both computed above for the homepage columns
+	// (breakdown from cams.product across both device sources, tagged with each row's vendor);
+	// reuse them here so the make → model → count table and its "filter" links stay in sync.
 	await writePage(FINGERPRINTS, renderFingerprintsMain(breakdown, vendorsWithGallery), `fingerprints | ${TITLE}`, stats, { dev });
 
 	// ── Tips: a single static standalone page (content baked from tips.md) ────────────
