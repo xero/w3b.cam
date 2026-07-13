@@ -1,8 +1,7 @@
 // Dev mode: build the site with in-browser editing hooks, serve it, and expose
-// mutation endpoints that emulate the blacklist / reorder / tag workflows, plus a
-// feed-cam remove, against the LOCAL camhunting.sqlite (never the GitHub Actions
-// db-store). Right-clicking a card or screenshot in the browser drives those
-// endpoints (see src/dev-client/).
+// mutation endpoints that emulate the blacklist / remove / reorder / tag workflows,
+// against the LOCAL camhunting.sqlite (never the GitHub Actions db-store). Right-clicking
+// a card or screenshot in the browser drives those endpoints (see src/dev-client/).
 //
 // Mutations write straight to the DB; we deliberately do NOT rebuild per click. A
 // full bake re-extracts thousands of screenshots from a ~441MB DB (tens of seconds).
@@ -18,7 +17,7 @@
 import { parseArgs } from "node:util";
 import { isIP } from "node:net";
 import { OUT_DIR } from "./config.ts";
-import { addFeatured, addTag, blacklist, closeDb, distinctTags, entityTags, isFeatured, openDb, removeFeatured, removeTag, setPreferred } from "./db.ts";
+import { addFeatured, addTag, blacklist, closeDb, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, openDb, removeEntity, removeFeatured, removeTag, setPreferred } from "./db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "./ingest.ts";
 import { build } from "./build.ts";
 import { serveStatic } from "./serve.ts";
@@ -93,7 +92,7 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	if (req.method === "POST" && path === "/__dev/blacklist") {
 		const { ip } = await readBody(req);
 		if (typeof ip !== "string" || isIP(ip) === 0) return json({ error: "invalid ip" }, 400);
-		const { changes } = db.query("DELETE FROM cams WHERE kind = 'cam' AND ip_str = ?").run(ip);
+		const changes = deleteWebcamsByIp(db, ip);
 		const added = blacklist(db, ip);
 		return json({ ip, deleted: changes, blacklisted: added });
 	}
@@ -132,16 +131,18 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		return json({ kind, ref, tag: tag.trim().toLowerCase(), removed });
 	}
 
-	// ── POST /__dev/remove {kind, ref}, delete a feed cam and its tags ──────────
-	// Feed cams (Osiris, mjpeg camhunt, ...) have no re-scrape blacklist, so this is
-	// a plain delete; a removed cam returns if you re-ingest its source list.
+	// ── POST /__dev/remove {kind, ref}, plain delete (no blacklist) for any kind ──
+	// A cam removes every port for the host (ref = ip_str); a stream/feed removes the one
+	// row (ref = id). Also clears the entry's tags/featured pins. Nothing is recorded to
+	// keep it out, so a removed entry returns if you re-ingest its source; use /blacklist
+	// to keep a host out for good.
 	if (req.method === "POST" && path === "/__dev/remove") {
 		const { kind, ref } = await readBody(req);
-		if (kind !== "feed") return json({ error: "invalid kind" }, 400);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
 		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
-		const { changes } = db.query("DELETE FROM cams WHERE kind = 'feed' AND id = ?").run(ref);
-		db.query("DELETE FROM meta WHERE kind = 'feed' AND ref = ?").run(ref);
-		return changes ? json({ kind, ref, deleted: changes }) : json({ error: "id not stored" }, 404);
+		if (kind === "cam" && isIP(ref) === 0) return json({ error: "invalid ip" }, 400);
+		const deleted = removeEntity(db, kind, ref);
+		return deleted ? json({ kind, ref, deleted }) : json({ error: "not stored" }, 404);
 	}
 
 	// ── POST /__dev/import {type, ...fields}, add one record from the browser ──────

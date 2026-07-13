@@ -13,6 +13,7 @@
     "osiris": "bun run src/osiris.ts",
     "blacklist": "bun run src/blacklist.ts",
     "unblacklist": "bun run src/unblacklist.ts",
+    "remove": "bun run src/remove.ts",
     "reorder": "bun run src/reorder.ts",
     "tag": "bun run src/tag.ts",
     "untag": "bun run src/untag.ts",

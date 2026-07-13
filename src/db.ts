@@ -749,24 +749,69 @@ export function unblacklistHost(db: Database, host: string): boolean {
 /**
  * Delete every stored cam whose hostnames or domains match `host` (itself or a
  * subdomain). SQLite can't suffix-match inside the JSON columns, so we scan cam rows
- * and reuse hostBlocked. Returns the number of rows removed.
+ * and reuse hostBlocked. Returns the number of cam rows removed and the distinct
+ * `ip_str`s they belonged to (a host's ports share one ip_str), so a caller can act on
+ * those hosts — e.g. clean their meta. Callers that only want the count use `.rows`.
  */
-export function deleteWebcamsByHost(db: Database, host: string): number {
+export function deleteWebcamsByHost(db: Database, host: string): { rows: number; ips: string[] } {
 	const hosts = new Set([normalizeHost(host)]);
 	const rows = db
-		.query("SELECT id, hostnames, domains FROM cams WHERE kind = 'cam'")
-		.all() as { id: string; hostnames: string | null; domains: string | null }[];
+		.query("SELECT id, ip_str, hostnames, domains FROM cams WHERE kind = 'cam'")
+		.all() as { id: string; ip_str: string | null; hostnames: string | null; domains: string | null }[];
 	const del = db.query("DELETE FROM cams WHERE id = ?");
 	return db.transaction(() => {
 		let n = 0;
+		const ips = new Set<string>();
 		for (const r of rows) {
 			const names = [...parseHostArray(r.hostnames ?? "[]"), ...parseHostArray(r.domains ?? "[]")];
 			if (names.some((name) => hostBlocked(name, hosts))) {
-				n += del.run(r.id).changes;
+				const c = del.run(r.id).changes;
+				n += c;
+				if (c && r.ip_str) ips.add(r.ip_str);
 			}
 		}
-		return n;
+		return { rows: n, ips: [...ips] };
 	})();
+}
+
+/** Delete every stored cam for one IP (all ports). Returns rows removed. No meta side effect. */
+export function deleteWebcamsByIp(db: Database, ip: string): number {
+	return db.query("DELETE FROM cams WHERE kind = 'cam' AND ip_str = ?").run(ip).changes;
+}
+
+/**
+ * Delete an entity's tags/featured pins (its meta rows). `ref` is that kind's meta key:
+ * ip_str (cam), video_id (stream), id (feed) — see META_SCHEMA.
+ */
+export function deleteEntityMeta(db: Database, kind: TagKind, ref: string): void {
+	db.query("DELETE FROM meta WHERE kind = ? AND ref = ?").run(kind, ref);
+}
+
+/**
+ * Remove one entity and its meta, WITHOUT blacklisting (so it returns on re-ingest). A cam
+ * removes every port for the host (matched on ip_str); a stream/feed removes the single row
+ * (matched on id). Returns the number of cam/stream/feed rows deleted.
+ */
+export function removeEntity(db: Database, kind: TagKind, ref: string): number {
+	return db.transaction(() => {
+		const changes =
+			kind === "cam"
+				? deleteWebcamsByIp(db, ref)
+				: db.query("DELETE FROM cams WHERE kind = ? AND id = ?").run(kind, ref).changes;
+		deleteEntityMeta(db, kind, ref);
+		return changes;
+	})();
+}
+
+/**
+ * Remove every cam matching `host` (itself or a subdomain) and each removed host's meta,
+ * without blacklisting. The hostname counterpart to removeEntity's cam path. Returns the
+ * number of cam rows removed.
+ */
+export function removeWebcamsByHost(db: Database, host: string): number {
+	const { rows, ips } = deleteWebcamsByHost(db, host);
+	for (const ip of ips) deleteEntityMeta(db, "cam", ip);
+	return rows;
 }
 
 // ── Preferred screenshot (card image pin) ─────────────────────────────────────

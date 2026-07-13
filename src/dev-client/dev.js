@@ -129,12 +129,13 @@
 		if (ctx.kind === "cam" || ctx.kind === "stream" || ctx.kind === "feed") {
 			menu.appendChild(featureItem(ctx));
 		}
-		// Blacklist removes a whole host: a cam-only concept.
+		// Blacklist removes a whole host and blocks re-scraping: a cam-only concept.
 		if (ctx.kind === "cam") {
 			menu.appendChild(itemButton("Blacklist", "danger", () => showBlacklist(ctx)));
 		}
-		// Remove drops a single feed cam (Osiris, mjpeg camhunt, ...) from the DB.
-		if (ctx.kind === "feed") {
+		// Remove is a plain delete (no re-scrape block), offered for every kind; a removed
+		// entry returns on the next re-ingest.
+		if (ctx.kind === "cam" || ctx.kind === "stream" || ctx.kind === "feed") {
 			menu.appendChild(itemButton("Remove", "danger", () => showRemove(ctx)));
 		}
 	}
@@ -215,7 +216,7 @@
 				try {
 					const r = await api("/blacklist", "POST", { ip: ctx.ref });
 					closeMenu();
-					removeHost(ctx);
+					removeCard(ctx, "blacklisted");
 					toast(`blacklisted ${ctx.ref}, removed ${r.deleted} camera(s). run \`bun run bake\``);
 				} catch (e) {
 					toast(`blacklist failed: ${e.message}`, "error");
@@ -232,7 +233,10 @@
 		menu.replaceChildren(menuHeader(ctx));
 		const msg = document.createElement("p");
 		msg.className = "dev-msg";
-		msg.textContent = "Remove this cam from the DB? It comes back if you re-ingest its source list.";
+		msg.textContent =
+			ctx.kind === "cam"
+				? `Remove ${ctx.ref}? This drops every camera for this host from the DB; it comes back if you re-ingest.`
+				: "Remove this cam from the DB? It comes back if you re-ingest its source list.";
 		menu.appendChild(msg);
 
 		const row = document.createElement("div");
@@ -243,7 +247,7 @@
 				try {
 					await api("/remove", "POST", { kind: ctx.kind, ref: ctx.ref });
 					closeMenu();
-					removeFeedCam(ctx);
+					removeCard(ctx, "removed");
 					toast(`removed ${ctx.ref}. run \`bun run bake\``);
 				} catch (e) {
 					toast(`remove failed: ${e.message}`, "error");
@@ -429,57 +433,38 @@
 		setTimeout(() => el.remove(), 220);
 	}
 
-	function removeHost(ctx) {
-		if (ctx.role === "card") {
-			// Gallery: drop the matching cam card(s) from the grid.
-			document.querySelectorAll('.card[data-kind="cam"]').forEach((el) => {
-				if (el.dataset.ref === ctx.ref) fadeRemove(el);
-			});
-			return;
-		}
-		// Host page: the whole page is this IP; replace the content with a notice.
-		const main = document.querySelector("main");
-		if (!main) return;
-		const p = document.createElement("p");
-		p.className = "empty";
-		const code = document.createElement("code");
-		code.textContent = "bun run bake";
-		p.append(`Host ${ctx.ref} blacklisted. Run `, code, " to update the gallery.");
-		const nav = document.createElement("p");
-		const back = document.createElement("a");
-		back.className = "back";
-		back.href = "/hosts";
-		back.setAttribute("hx-get", "/hosts/index.snippet.html");
-		back.setAttribute("hx-push-url", "/hosts");
-		back.innerHTML = "&larr; Back to hosts";
-		nav.appendChild(back);
-		main.replaceChildren(p, nav);
-		if (window.htmx) window.htmx.process(main);
-	}
+	// Per-kind gallery landing: the "back" target after removing an item on its detail page.
+	const LISTINGS = {
+		cam: { noun: "Host", href: "/hosts", snippet: "/hosts/index.snippet.html", label: "hosts" },
+		stream: { noun: "Stream", href: "/streams", snippet: "/streams/index.snippet.html", label: "streams" },
+		feed: { noun: "Cam", href: "/feeds", snippet: "/feeds/index.snippet.html", label: "feeds" },
+	};
 
-	function removeFeedCam(ctx) {
+	// Optimistic update after a blacklist/remove. On a gallery (role "card") fade the matching
+	// card(s); on a detail page ("shot") swap <main> for a "run `bun run bake`" notice plus a
+	// link back to that kind's gallery. `verb` is the past-tense action shown in the notice.
+	function removeCard(ctx, verb) {
 		if (ctx.role === "card") {
-			// Gallery: drop the matching feed card(s) from the grid.
-			document.querySelectorAll('.card[data-kind="feed"]').forEach((el) => {
+			document.querySelectorAll(`.card[data-kind="${ctx.kind}"]`).forEach((el) => {
 				if (el.dataset.ref === ctx.ref) fadeRemove(el);
 			});
 			return;
 		}
-		// Detail page: replace the content with a notice + a link back to the gallery.
 		const main = document.querySelector("main");
-		if (!main) return;
+		const L = LISTINGS[ctx.kind];
+		if (!main || !L) return;
 		const p = document.createElement("p");
 		p.className = "empty";
 		const code = document.createElement("code");
 		code.textContent = "bun run bake";
-		p.append(`Cam ${ctx.ref} removed. Run `, code, " to update the gallery.");
+		p.append(`${L.noun} ${ctx.ref} ${verb}. Run `, code, " to update the gallery.");
 		const nav = document.createElement("p");
 		const back = document.createElement("a");
 		back.className = "back";
-		back.href = "/feeds";
-		back.setAttribute("hx-get", "/feeds/index.snippet.html");
-		back.setAttribute("hx-push-url", "/feeds");
-		back.innerHTML = "&larr; Back to feeds";
+		back.href = L.href;
+		back.setAttribute("hx-get", L.snippet);
+		back.setAttribute("hx-push-url", L.href);
+		back.innerHTML = `&larr; Back to ${L.label}`;
 		nav.appendChild(back);
 		main.replaceChildren(p, nav);
 		if (window.htmx) window.htmx.process(main);

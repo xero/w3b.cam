@@ -37,10 +37,12 @@ export const TIPS_HTML = `
 			<li><a href="#by-chipset-or-pattern">By chipset or pattern</a></li>
 		</ul>
 		</li>
-		<li><a href="#fresh-proxies">Fresh proxies</a>
-		<ul>
-			<li><a href="#usage-examples">usage examples</a></li>
-		</ul>
+		<li><a href="#protecting-your-anonymity">Protecting your anonymity</a>
+			<ul>
+				<li><a href="#vpns-versus-proxies">VPNs versus proxies</a></li>
+				<li><a href="#finding-fresh-proxies">Finding fresh proxies</a></li>
+				<li><a href="#usage-examples">Usage examples</a></li>
+			</ul>
 		</li>
 	</ul>
 </blockquote>
@@ -525,4 +527,38 @@ export const TIPS_HTML = `
 	<li><strong>Uniview <code>/media/videoN</code>.</strong> Numbered media paths, <code>video1</code> / <code>video2</code> / <code>video3</code> for main / sub / third.</li>
 </ul>
 <p>When you find a new one, note the working URL, the protocol, the codec (from VLC), the default port, and anything the login page or HTTP response headers reveal (the <code>Server</code> header, the auth realm, or on-page branding). That is usually enough to slot the camera into a family later.</p>
+<hr />
+<h2 id="protecting-your-anonymity">Protecting your anonymity</h2>
+<blockquote class="admonition caution">
+	<p class="admonition-label">Caution</p>
+	<p>I don't advise poking around other people's webcams (open or not) using your real IP. I suggest using a <a href="https://docs.seedboxes.cc/gettingstarted/how-to-use-your-VPN-service/" target="_blank" rel="noopener noreferrer">VPN</a> or proxy. VPNs are virtual private networks that encrypt all web activity and device IP addresses. A proxy server, on the other hand, is a computer that stands between the user and their server. It hides only their device's IP address, not all of their web activity.</p>
+</blockquote>
+<p>Common Types of Proxy Servers:</p>
+<ul>
+	<li><strong>SOCKS5:</strong> Many people opt to use SOCKS5 for things like file sharing, video streaming, and online gaming, but it's much slower than HTTP.</li>
+	<li><strong>HTTP:</strong> HTTP is a proxy server commonly used to access geo-restricted websites or simply mask your IP. If you live in a country with high levels of internet censorship, HTTP is a good option.</li>
+	<li><strong>Transparent:</strong> Proxy servers aren't just used to unlock certain websites; they can also be used for the opposite purpose. You know how you can't go on Facebook at those computers in your public library? Well, that's because those pesky librarians may have used a transparent proxy server, which blocks certain websites from view. Colleges and employers use these servers frequently, as well.</li>
+</ul>
+<blockquote class="admonition tip">
+	<p class="admonition-label">Tip</p>
+	<p>Use a VPN to bypass transparent proxy servers and circumvent access restrictions.</p>
+</blockquote>
+<h3 id="vpns-versus-proxies">VPNs versus proxies</h3>
+<p>Similar characteristics:</p>
+<ul>
+	<li><strong>Hide IP Addresses:</strong> Both VPNs and proxy servers will hide your device's IP address.</li>
+	<li><strong>Streaming and Gaming-Compatible:</strong> Both work with streaming services and gaming consoles.</li>
+	<li><strong>Slow Down Browsing Speeds:</strong> Both methods will slow down your browsing speeds at least a little (proxy connections are typically slower).</li>
+	<li><strong>Bypass Geo-Restrictions and Blacklisting:</strong> If you want to get around geographic restrictions or level 3/5/7 firewalls, either a VPN or proxy server can get the job done.</li>
+</ul>
+<p>Key differences:</p>
+<ul>
+	<li><strong>Encryption:</strong> The main difference between a proxy and a VPN is encryption. VPNs hide not only your private IP address but all your web activity, such as the websites you visit, using encryption. Proxy servers, on the other hand, will only change your IP address, but they won't encrypt your online activities.</li>
+	<li><strong>Selling Data:</strong> Most proxy servers are free, and to make up for this lack of charge, many will sell user data to advertisers. Most VPNs, on the other hand, are paid and do not log or share user traffic data.</li>
+	<li><strong>Paid vs. Free:</strong> While there are many free VPN options available, the majority have limits on how much data you can use per day, how many servers you can switch to, and more. For most people, it makes sense to invest in a paid option, whereas the majority of proxy servers are free.</li>
+	<li><strong>Coverage:</strong> While VPNs encrypt all of a user's network activity, no matter the application, proxy servers only mask the requests you explicitly make through them.</li>
+</ul>
+<h3 id="finding-fresh-proxies">Finding fresh proxies</h3>
+<p>I use the <a href="https://github.com/rofl0r/proxychains-ng/" target="_blank" rel="noopener noreferrer">proxychains-ng</a> terminal application. It's designed for using proxies, not sourcing them. You need to provide your own list via a config file.</p>
+<p>The <em><a href="https://github.com/vakhov/fresh-proxy-list">Fresh Proxies</a></em> project publishes new hosts daily. The following bash script automates the process of downloading and formatting them into a valid configuration file.</p>
 `;

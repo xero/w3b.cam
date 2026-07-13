@@ -13,6 +13,7 @@ import {
   closeDb,
   countRows,
   deleteWebcamsByHost,
+  deleteWebcamsByIp,
   openDb,
 } from "./db.ts";
 
@@ -29,7 +30,7 @@ const startingRows = countRows(db);
 try {
   console.log(`\n── Blacklist summary ──`);
   if (isIP(arg) !== 0) {
-    const { changes } = db.query("DELETE FROM cams WHERE kind = 'cam' AND ip_str = ?").run(arg);
+    const changes = deleteWebcamsByIp(db, arg);
     const added = blacklist(db, arg);
     console.log(`IP:         ${arg}`);
     console.log(`Deleted:    ${changes} row(s)`);
@@ -38,7 +39,7 @@ try {
       console.warn(`⚠ No stored camera matched ${arg}. Check for a typo. Recorded anyway so future scrapes skip it.`);
     }
   } else {
-    const deleted = deleteWebcamsByHost(db, arg);
+    const deleted = deleteWebcamsByHost(db, arg).rows;
     const added = blacklistHost(db, arg);
     console.log(`Hostname:   ${arg}`);
     console.log(`Deleted:    ${deleted} row(s)`);
