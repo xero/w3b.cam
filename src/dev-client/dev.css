@@ -84,6 +84,7 @@ header nav .dev,
 
 .dev-row {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: 0.4rem;
 	padding: 0.25rem;
@@ -137,6 +138,34 @@ header nav .dev,
 	&:focus-visible {
 		outline: none;
 		border-color: var(--accent, #1c7293);
+	}
+}
+
+/* Change-thumbnail file picker. Matches .dev-input; the native button is themed via
+   ::file-selector-button so it reads like an accent .dev-btn. */
+.dev-file {
+	width: 100%;
+	padding: 0.4rem 0.5rem;
+	background: var(--bg, #0f1117);
+	border: 1px solid var(--border, #114b5f);
+	border-radius: 4px;
+	color: var(--text, #c6dabf);
+	font: inherit;
+	cursor: pointer;
+
+	&::file-selector-button {
+		margin-right: 0.6rem;
+		padding: 0.3rem 0.6rem;
+		background: var(--accent, #1c7293);
+		border: none;
+		border-radius: 4px;
+		color: #fff;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	&:hover::file-selector-button {
+		filter: brightness(1.15);
 	}
 }
 

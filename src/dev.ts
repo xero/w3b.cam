@@ -16,10 +16,12 @@
 
 import { parseArgs } from "node:util";
 import { isIP } from "node:net";
+import { createHash } from "node:crypto";
 import { OUT_DIR } from "./config.ts";
-import { addFeatured, addTag, blacklist, closeDb, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, openDb, removeEntity, removeFeatured, removeTag, setPreferred } from "./db.ts";
+import { addFeatured, addTag, blacklist, closeDb, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "./db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "./ingest.ts";
 import { build } from "./build.ts";
+import { isSafeImageMime } from "./render.ts";
 import { serveStatic } from "./serve.ts";
 
 const { values } = parseArgs({ args: Bun.argv.slice(2), options: { "index-only": { type: "boolean" } }, allowPositionals: true });
@@ -108,6 +110,33 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 			: json({ error: "ip:port not stored" }, 404);
 	}
 
+	// ── POST /__dev/thumbnail {kind, ref, port?, mime, data, permanent} → overwrite ss_* ──
+	// `data` is raw base64 (no data: prefix). cam id = ref:port (port = the detail shot, or a
+	// card's shown rep shot); stream/feed id = ref. permanent=true locks it against re-scan
+	// (last_seen sentinel); permanent=false stamps now (clearing any prior lock). The new
+	// image only appears on the site after `bun run bake` re-extracts out/img/.
+	if (req.method === "POST" && path === "/__dev/thumbnail") {
+		const { kind, ref, port: rawPort, mime, data, permanent } = await readBody(req);
+		if (kind !== "cam" && kind !== "stream" && kind !== "feed") return json({ error: "invalid kind" }, 400);
+		if (typeof ref !== "string" || ref.trim() === "") return json({ error: "invalid ref" }, 400);
+		if (typeof mime !== "string" || !isSafeImageMime(mime)) return json({ error: "unsupported image type" }, 400);
+		if (typeof data !== "string" || data === "") return json({ error: "no image data" }, 400);
+		if (typeof permanent !== "boolean") return json({ error: "invalid permanent" }, 400);
+		const buf = Buffer.from(data, "base64");
+		if (buf.length === 0) return json({ error: "empty image" }, 400);
+		let id = ref;
+		if (kind === "cam") {
+			const p = Number(rawPort);
+			if (isIP(ref) === 0) return json({ error: "invalid ip" }, 400);
+			if (!Number.isInteger(p) || p < 0) return json({ error: "invalid port" }, 400);
+			id = `${ref}:${p}`;
+		}
+		const hash = createHash("sha256").update(buf).digest("hex");
+		return setThumbnail(db, id, mime, hash, data, permanent)
+			? json({ kind, ref, id, permanent, bytes: buf.length })
+			: json({ error: "not stored" }, 404);
+	}
+
 	// ── POST /__dev/tag {kind, ref, tag}, unified tagging (INSERT OR IGNORE) ───────
 	// `kind` picks the source; `ref` is that source's key (ip_str / video_id / id).
 	// Only cams get the isIP shape-check; stream/feed refs are opaque strings.
@@ -189,7 +218,7 @@ const server = Bun.serve({
 
 console.log(
 	`Dev server on http://localhost:${server.port}, serving ${OUT_DIR}/. Mutations write to the local camhunting.sqlite.\n` +
-		`Right-click a card or screenshot to blacklist / reorder / tag / remove. Run \`bun run bake\` to regenerate the static site.`,
+		`Right-click a card or screenshot to blacklist / reorder / tag / remove / change thumbnail. Run \`bun run bake\` to regenerate the static site.`,
 );
 
 // 3. Open the browser (macOS). Fire-and-forget; ignore if `open` is unavailable.

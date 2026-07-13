@@ -233,6 +233,13 @@ type UpsertRow = { id: string; ss_hash: string | null } & Record<string, string 
 /** The baked-image columns, kept together: a snapshot either sets all three or none. */
 const IMAGE_COLS = new Set(["ss_mime", "ss_hash", "ss_base64"]);
 
+/**
+ * last_seen sentinel marking a hand-set thumbnail (see setThumbnail) that a re-scan must
+ * never overwrite. A valid, maximal datetime string no `datetime('now')` write can produce;
+ * the upserter below preserves both the image and this sentinel on conflict.
+ */
+export const SS_PERMANENT = "9999-12-31 23:59:59";
+
 function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRow[]) => InsertResult {
 	const placeholders = columns.map((c) => `$${c}`).join(", ");
 	// G5: never overwrite a stored image with a blank. On a refresh whose snapshot
@@ -240,32 +247,45 @@ function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRo
 	// image columns come in NULL; COALESCE keeps the last good screenshot instead of
 	// wiping the card. A successful grab (non-NULL) still replaces it. Metadata columns
 	// always take the fresh value.
+	// Permanence: a row whose last_seen equals SS_PERMANENT (a hand-set thumbnail marked
+	// permanent in the dev tool) keeps BOTH its image and the sentinel on conflict, so a
+	// re-scan refreshes only its metadata. `last_seen` in these CASEs is the pre-update
+	// (existing) row value (every SET expression in ON CONFLICT DO UPDATE reads the original
+	// row), so assignment order is irrelevant. SS_PERMANENT is a fixed constant, not input.
+	const lock = `last_seen = '${SS_PERMANENT}'`;
 	const updates = columns
 		.filter((c) => c !== "id")
-		.map((c) => (IMAGE_COLS.has(c) ? `${c} = COALESCE(excluded.${c}, ${c})` : `${c} = excluded.${c}`))
+		.map((c) =>
+			IMAGE_COLS.has(c)
+				? `${c} = CASE WHEN ${lock} THEN ${c} ELSE COALESCE(excluded.${c}, ${c}) END`
+				: `${c} = excluded.${c}`,
+		)
 		.join(", ");
 	const stmt = db.query(
 		`INSERT INTO cams (${columns.join(", ")}, last_seen)
 		 VALUES (${placeholders}, datetime('now'))
-		 ON CONFLICT(id) DO UPDATE SET ${updates}, last_seen = excluded.last_seen`,
+		 ON CONFLICT(id) DO UPDATE SET ${updates},
+		   last_seen = CASE WHEN ${lock} THEN last_seen ELSE excluded.last_seen END`,
 	);
 	// ON CONFLICT DO UPDATE reports changes>0 for both inserts and updates, so we
-	// can't infer "new" from changes. Peek at the prior screenshot hash instead.
-	const prior = db.query("SELECT ss_hash AS h FROM cams WHERE id = ?");
+	// can't infer "new" from changes. Peek at the prior screenshot hash instead. We
+	// also read last_seen so a locked (permanent) row isn't miscounted as "changed".
+	const prior = db.query("SELECT ss_hash AS h, last_seen AS ls FROM cams WHERE id = ?");
 	return db.transaction((rows: UpsertRow[]): InsertResult => {
 		let added = 0;
 		let updated = 0;
 		let changed = 0;
 		for (const row of rows) {
-			const before = prior.get(row.id) as { h: string | null } | null;
+			const before = prior.get(row.id) as { h: string | null; ls: string } | null;
 			stmt.run(row);
 			if (before == null) {
 				added++;
 			} else {
 				updated++;
-				// Only a real, non-null new image that differs counts as "changed"
-				// (a failed re-grab is preserved by COALESCE, so it changed nothing).
-				if (row.ss_hash != null && before.h !== row.ss_hash) changed++;
+				// Only a real, non-null new image that differs counts as "changed". A failed
+				// re-grab is preserved by COALESCE, and a permanent row's image by the lock,
+				// so neither counts here.
+				if (row.ss_hash != null && before.h !== row.ss_hash && before.ls !== SS_PERMANENT) changed++;
 			}
 		}
 		return { added, updated, changed };
@@ -834,4 +854,17 @@ export function setPreferred(db: Database, ip: string, port: number): boolean {
 /** Clear any pin on this IP (its card reverts to the newest screenshot). Returns true if one existed. */
 export function clearPreferred(db: Database, ip: string): boolean {
 	return db.query("UPDATE cams SET preferred = 0 WHERE kind = 'cam' AND ip_str = ? AND preferred = 1").run(ip).changes > 0;
+}
+
+/**
+ * Replace one row's stored thumbnail (the ss_* columns) by primary-key id, stamping
+ * last_seen so a later re-scan either MAY overwrite it (`permanent = false` -> datetime('now'),
+ * which also clears any prior permanence) or must NOT (`permanent = true` -> the SS_PERMANENT
+ * sentinel the upserter honors). Returns false if no row has that id. `hash` is the sha256
+ * hex of the decoded image bytes, uniform with the ingest sources. `stamp` is a fixed
+ * constant expression, never user input.
+ */
+export function setThumbnail(db: Database, id: string, mime: string, hash: string, base64: string, permanent: boolean): boolean {
+	const stamp = permanent ? `'${SS_PERMANENT}'` : "datetime('now')";
+	return db.query(`UPDATE cams SET ss_mime = ?, ss_hash = ?, ss_base64 = ?, last_seen = ${stamp} WHERE id = ?`).run(mime, hash, base64, id).changes > 0;
 }

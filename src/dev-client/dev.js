@@ -37,6 +37,24 @@
 		return tagCache;
 	}
 
+	/**
+	 * Read a chosen File as { mime, data } where data is base64, via readAsDataURL (robust
+	 * for binary). The result is "data:<mime>;base64,<data>", so split off the prefix.
+	 */
+	function readImage(file) {
+		return new Promise((resolve, reject) => {
+			const fr = new FileReader();
+			fr.onerror = () => reject(new Error("could not read file"));
+			fr.onload = () => {
+				const s = String(fr.result);
+				const comma = s.indexOf(",");
+				const mime = (s.slice(5, s.indexOf(";")) || file.type || "").trim();
+				resolve({ mime, data: comma >= 0 ? s.slice(comma + 1) : "" });
+			};
+			fr.readAsDataURL(file);
+		});
+	}
+
 	// ── Toast ──────────────────────────────────────────────────────────────────────
 
 	function toast(message, kind = "info") {
@@ -91,8 +109,9 @@
 	function menuHeader(ctx) {
 		const h = document.createElement("div");
 		h.className = "dev-head";
-		// Cam shots carry a port (ref:port); everything else is just the ref.
-		h.textContent = ctx.port ? `${ctx.ref}:${ctx.port}` : ctx.ref;
+		// Cam shots show ref:port; cards (incl. cam cards, which now carry a data-port for
+		// change-thumbnail) show just the ref, since their other actions target the whole ref.
+		h.textContent = ctx.role === "shot" && ctx.port ? `${ctx.ref}:${ctx.port}` : ctx.ref;
 		return h;
 	}
 
@@ -125,6 +144,8 @@
 		}
 		// Tag applies to every kind.
 		menu.appendChild(itemButton("Tag", "", () => showTag(ctx)));
+		// Change thumbnail: replace the stored image, for any kind, on a card or a shot.
+		menu.appendChild(itemButton("Change thumbnail", "", () => showThumbnail(ctx)));
 		// Feature toggles homepage-showcase membership, supported for every kind.
 		if (ctx.kind === "cam" || ctx.kind === "stream" || ctx.kind === "feed") {
 			menu.appendChild(featureItem(ctx));
@@ -424,6 +445,64 @@
 				toast(`tag failed: ${err.message}`, "error");
 			}
 		});
+	}
+
+	// ── Change thumbnail (file picker → confirm + permanence → upload) ─────────────────
+
+	// Replace the menu with a file picker. Choosing a file goes straight to the confirm
+	// step (no submit button); the change event only fires on an actual selection.
+	function showThumbnail(ctx) {
+		menu.replaceChildren(menuHeader(ctx));
+		const msg = document.createElement("p");
+		msg.className = "dev-msg";
+		msg.textContent = "Choose an image to replace this thumbnail.";
+		menu.appendChild(msg);
+
+		const input = document.createElement("input");
+		input.type = "file";
+		input.className = "dev-file";
+		input.accept = "image/*";
+		input.addEventListener("change", () => {
+			const file = input.files && input.files[0];
+			if (file) confirmThumbnail(ctx, file);
+		});
+		menu.appendChild(input);
+		clampMenu();
+		input.focus();
+	}
+
+	// The are-you-sure step (like blacklist/remove), but with a permanence choice: Yes marks
+	// the thumbnail permanent (a re-scan never overwrites it), No keeps it replaceable, Cancel
+	// aborts. Both Yes and No upload; only the `permanent` flag differs.
+	function confirmThumbnail(ctx, file) {
+		menu.replaceChildren(menuHeader(ctx));
+		const msg = document.createElement("p");
+		msg.className = "dev-msg";
+		msg.textContent =
+			`Replace ${ctx.ref}'s thumbnail with "${file.name}". Make it permanent? ` +
+			"Permanent thumbnails survive a re-scan of the source; otherwise the next scan can overwrite it.";
+		menu.appendChild(msg);
+
+		const upload = async (permanent) => {
+			try {
+				const { mime, data } = await readImage(file);
+				const payload = { kind: ctx.kind, ref: ctx.ref, mime, data, permanent };
+				if (ctx.kind === "cam") payload.port = Number(ctx.port);
+				await api("/thumbnail", "POST", payload);
+				closeMenu();
+				toast(`updated thumbnail for ${ctx.ref}${permanent ? " (permanent)" : ""}. run \`bun run bake\``);
+			} catch (e) {
+				toast(`thumbnail failed: ${e.message}`, "error");
+			}
+		};
+
+		const row = document.createElement("div");
+		row.className = "dev-row";
+		row.appendChild(actionButton("Yes", "accent", () => upload(true))); // permanent
+		row.appendChild(actionButton("No", "", () => upload(false))); // replaceable
+		row.appendChild(actionButton("Cancel", "", () => showOptions(ctx))); // abort, back to menu
+		menu.appendChild(row);
+		clampMenu();
 	}
 
 	// ── Optimistic DOM updates ─────────────────────────────────────────────────────

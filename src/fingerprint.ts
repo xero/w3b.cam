@@ -4,8 +4,8 @@
 // bag — often empty, often just the web server (`Apache httpd`, `nginx`, `Boa`) rather
 // than the camera. This mines the full banner (http.title, the `hikvision` block,
 // cpe23, http.server, http.html path fragments, and the RTSP `data` banner) through an
-// ordered cascade, highest-confidence signal first, and records every decision in a
-// `fingerprints` table so a run is reviewable and reversible.
+// ordered cascade, highest-confidence signal first, and records the fingerprint of every
+// row (signal, confidence, vendor, evidence) in a `fingerprints` table so a run is reviewable.
 //
 // The classifiers (fingerprintWebcam / fingerprintFeed) are pure so ingesters can
 // adopt them later; this file's CLI is the batch backfill.
@@ -83,9 +83,12 @@ function fromTitle(title: string): FpResult | null {
 	const hit = (product: string, vendor: string): FpResult => ({ product, vendor, method: "title", tier: "high", evidence: t.slice(0, 120) });
 
 	let m: RegExpMatchArray | null;
-	// Axis: "AXIS M1113 Network Camera", "AXIS Q1755", bare "AXIS".
-	if ((m = t.match(/\bAXIS\s+([A-Z]?\d{3,4}[A-Z0-9-]*)/))) return hit(`Axis ${m[1]}`, "axis");
-	if (/^AXIS\b/.test(t)) return hit("Axis (model unknown)", "axis");
+	// Axis: "AXIS M1113 Network Camera", "AXIS Q1755", "Axis 2100 Network Camera", bare "AXIS".
+	// Case-insensitive: older firmware uses mixed case ("Axis 2100"); normalize the model to upper.
+	if ((m = t.match(/\bAXIS\s+([A-Za-z]?\d{3,4}[A-Za-z0-9-]*)/i))) return hit(`Axis ${(m[1] ?? "").toUpperCase()}`, "axis");
+	if (/^AXIS\b/i.test(t)) return hit("Axis (model unknown)", "axis");
+	// Sony: "Sony Network Camera SNC-RZ30", bare "SNC-CH110" — the SNC- prefix names the model.
+	if ((m = t.match(/\b(SNC-[A-Z0-9]+)\b/i))) return hit(`Sony ${(m[1] ?? "").toUpperCase()}`, "sony");
 	// Panasonic / i-PRO: "WV-SF438 Network Camera", "BB-SC382 Network Camera", "DG-SP304".
 	if ((m = t.match(/\b((?:WV|BB|DG|BL|BM|BY|NP|NW|KX)-[A-Z0-9]+)\b/))) return hit(`Panasonic/i-PRO ${m[1]}`, "panasonic");
 	// Canon: "Network Camera VB-C60", "Network Camera VB-M40".
@@ -100,14 +103,21 @@ function fromTitle(title: string): FpResult | null {
 	if (/NETSurveillance/i.test(t)) return hit("Xiongmai (NetSurveillance/uc-httpd)", "xiongmai");
 	// Mobotix default hostname title ("mx10-20-132-213") or explicit name.
 	if (/\bMOBOTIX\b/i.test(t) || /^mx\d/i.test(t)) return hit("Mobotix", "mobotix");
-	// StarDot NetCam SC.
-	if (/NetCamSC/i.test(t)) return hit("StarDot NetCam SC", "stardot");
+	// StarDot: title is "<model> Live Image" — NetCam SC/SCX/XL/LIVE, ExpressXL. Capture the model token.
+	if ((m = t.match(/^(NetCam[A-Z0-9]*|Express[A-Z0-9]*)\s+Live Image$/i))) {
+		const mdl = (m[1] ?? "").replace(/^NetCam(?=[A-Za-z0-9])/i, "NetCam ");
+		return hit(`StarDot ${mdl}`, "stardot");
+	}
 	// Intelbras (Dahua OEM, Brazil).
 	if (/^INTELBRAS/i.test(t)) return hit("Intelbras", "intelbras");
 	// IQinVision / IQeye: title names the model, e.g. "IQeye511DV ...", "IQeye755 ...".
 	if ((m = t.match(/\b(IQeye\d+[A-Z]*)\b/i))) return hit(`IQinVision ${m[1]}`, "iqinvision");
 	// Blue Iris NVR software (Windows) aggregating cameras behind a web UI.
 	if (/Blue Iris/i.test(t)) return hit("Blue Iris (NVR software)", "blueiris");
+	// Toshiba network cameras: "TOSHIBA Network Camera - User Login".
+	if (/^TOSHIBA\b/i.test(t)) return hit("Toshiba", "toshiba");
+	// Blue Iris UI3 web client titles each server "<name> UI3" (server is BlueServer; see fromServer).
+	if (/(?:^|\s)UI3$/.test(t)) return hit("Blue Iris (NVR software)", "blueiris");
 	// DIY / hobbyist MJPEG streamer (Raspberry Pi & friends).
 	if (/MJPG[-_ ]?streamer/i.test(t)) return hit("mjpg-streamer (DIY/RPi)", "mjpg-streamer");
 	// Camera software packages that legitimately self-title.
@@ -142,7 +152,12 @@ function fromServer(server: string): FpResult | null {
 	if (l.includes("mjpg-streamer")) return hit("mjpg-streamer (DIY/RPi)", "mjpg-streamer", "high");
 	if (l.startsWith("hipcam")) return hit("Hipcam/HiSilicon-family", "hipcam", "medium");
 	if (l.startsWith("iqinvision")) return hit("IQinVision IQeye", "iqinvision", "high");
-	if (l.startsWith("blueiris")) return hit("Blue Iris (NVR software)", "blueiris", "high");
+	// Blue Iris's bundled web server reports "BlueServer/<ver>" (not "blueiris").
+	if (l.startsWith("blueserver") || l.startsWith("blueiris")) return hit("Blue Iris (NVR software)", "blueiris", "high");
+	// Sony network cameras: "NetEVI/<ver>" server (model comes from the SNC- title when present).
+	if (l.startsWith("netevi")) return hit("Sony (model unknown)", "sony", "high");
+	// Android "IP Webcam" app.
+	if (l.startsWith("ip webcam server")) return hit("Android IP Webcam", "ipwebcam", "high");
 	// "gen5th" is a distinctive embedded camera web server; vendor not confirmed, so name the server, not a guess.
 	if (l.startsWith("gen5th")) return hit("IP camera (gen5th httpd)", "gen5th", "medium");
 	return null;
@@ -159,8 +174,12 @@ const HTML_RULES: { re: RegExp; product: string; vendor: string }[] = [
 	{ re: /video\/mjpg\.cgi/i, product: "Trendnet", vendor: "trendnet" },
 	{ re: /\/media2?\/video\d|lapi\/v1\.0/i, product: "Uniview", vendor: "uniview" },
 	{ re: /faststream\.jpg|guestimage\.html|userimage\.html/i, product: "Mobotix", vendor: "mobotix" },
-	{ re: /nphmotionjpeg|cgistart\?page=/i, product: "Panasonic/i-PRO", vendor: "panasonic" },
+	{ re: /nphmotionjpeg|cgistart\?page=|cgitagmenu|barfoot\.html/i, product: "Panasonic/i-PRO", vendor: "panasonic" },
 	{ re: /getmjstream|cgistream\.cgi/i, product: "Foscam", vendor: "foscam" },
+	// Vivotek self-brands its web UI ("Powered by VIVOTEK" / VVTK namespace / vivotek.com logo link).
+	{ re: /updatePowerByVVTKLogo|\bVVTK\b|vivotek/i, product: "Vivotek", vendor: "vivotek" },
+	// Dahua web UI: RPC2 login SDK (rpcCore.js / RPC2_Login / ptzCtrl.js), often titled "WEB SERVICE".
+	{ re: /rpcCore\.js|RPC2_Login|ptzCtrl\.js/i, product: "Dahua-family", vendor: "dahua" },
 	// live*.sdp / video.mjpg are the D-Link/Vivotek OEM family; keep them late (broad).
 	{ re: /live\d?\.sdp|video1?\.mjpg/i, product: "Vivotek/D-Link-family", vendor: "vivotek-dlink" },
 ];
@@ -169,6 +188,31 @@ function fromHtml(html: string): FpResult | null {
 	if (!html) return null;
 	for (const r of HTML_RULES) {
 		if (r.re.test(html)) return { product: r.product, vendor: r.vendor, method: "html-path", tier: "medium", evidence: r.re.source };
+	}
+	return null;
+}
+
+// ── <meta name="description"> model self-report ──────────────────────────────────
+
+/**
+ * Some OEM camera firmwares put the bare model number in the page's meta description
+ * (e.g. `<meta name="description" content="WVC80N">`), even when the visible title is a
+ * broken JS template. Only prefixes that map unambiguously to one vendor are trusted;
+ * the exact model is carried through verbatim.
+ */
+const META_MODELS: { re: RegExp; make: string; vendor: string }[] = [
+	{ re: /^WVC\d[A-Z0-9]*/i, make: "Linksys", vendor: "linksys" }, // Linksys/Cisco WVC "Wireless Video Camera" line
+	{ re: /^FCS-\d[A-Z0-9]*/i, make: "LevelOne", vendor: "levelone" }, // LevelOne FCS IP cameras
+];
+
+function fromMeta(html: string): FpResult | null {
+	if (!html) return null;
+	const m = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+	const content = m && m[1] ? m[1].trim() : "";
+	if (!content) return null;
+	for (const r of META_MODELS) {
+		const mm = content.match(r.re);
+		if (mm) return { product: `${r.make} ${mm[0].toUpperCase()}`, vendor: r.vendor, method: "meta-desc", tier: "high", evidence: `meta description "${content.slice(0, 60)}"` };
 	}
 	return null;
 }
@@ -253,6 +297,10 @@ export function fingerprintWebcam(rawJson: string | Record<string, unknown>): Fp
 	// 4. Distinctive HTTP server banner.
 	const byServer = fromServer(sig.server);
 	if (byServer) return byServer;
+
+	// 4b. Exact model self-reported in the meta description (before the weaker path fragments).
+	const byMeta = fromMeta(sig.html);
+	if (byMeta) return byMeta;
 
 	// 5. HTML endpoint path fragments.
 	const byHtml = fromHtml(sig.html);
@@ -359,17 +407,19 @@ interface Decision {
 	action: Action;
 }
 
+// The stored audit is the fingerprint itself: which signal (method) at what confidence
+// (tier) named which vendor, with the raw matched string (evidence). The derived product
+// lives on cams.product (new_value was a 1:1 duplicate of it), and the backfill-diff
+// columns (old_value, action) were dropped as migration cruft — decideWebcam still
+// computes them in memory to drive --apply, they are just no longer persisted.
 const AUDIT_SCHEMA = `
 CREATE TABLE IF NOT EXISTS fingerprints (
 	kind      TEXT NOT NULL,   -- 'cam' | 'feed'
 	ref       TEXT NOT NULL,   -- cams.id: 'ip:port' for cams, feed id for feeds
-	old_value TEXT,
-	new_value TEXT,
 	tier      TEXT,
 	method    TEXT,
 	vendor    TEXT,
 	evidence  TEXT,
-	action    TEXT NOT NULL,   -- fill | fix-server | upgrade | normalize | keep | unknown
 	PRIMARY KEY (kind, ref)
 ) STRICT;
 `;
@@ -386,9 +436,19 @@ function decideWebcam(row: StoredRow, fp: FpResult | null): Decision {
 		return { ...base, next: null, tier: "-", method: fp ? "" : "none", action: "unknown" };
 	}
 
-	// Existing good product: normalize, and upgrade only on an equal-or-more-specific high-tier hit.
+	// Existing product: normalize, and upgrade on either
+	//  - a high-tier hit that is equal-or-more-specific (a better model self-report), or
+	//  - ANY strictly-more-specific hit when the current label is only a generic floor.
+	// A floor ("Generic IP camera", "RTSP camera (generic)", …) is an explicit "make unknown"
+	// placeholder, not an identification, so a medium-tier vendor signal on a later run — the
+	// VVTK logo, the Dahua RPC UI, the Panasonic CgiTagMenu frameset — should still win it.
 	const canon = canonicalizeExisting(old as string);
-	if (fp && fp.tier === "high" && fp.product !== old && specificity(fp.product) >= specificity(canon)) {
+	const oldIsFloor = GENERIC_LABELS.has(canon);
+	if (
+		fp && fp.product !== old &&
+		((fp.tier === "high" && specificity(fp.product) >= specificity(canon)) ||
+			(oldIsFloor && specificity(fp.product) > specificity(canon)))
+	) {
 		return { ...base, next: fp.product, tier: fp.tier, method: fp.method, action: "upgrade" };
 	}
 	if (canon !== old) return { ...base, next: canon, tier: "-", method: "canon", action: "normalize" };
@@ -470,6 +530,7 @@ const MAKE_PREFIXES = [
 	"TVT Digital", "H264 DVR", "Blue Iris", "StarDot", "IQinVision", "EarthCam",
 	"Axis", "Panasonic", "Canon", "Hikvision", "D-Link", "Trendnet", "Xiongmai", "Mobotix", "Dahua",
 	"Ubiquiti", "Bosch", "Crestron", "LILIN", "Foscam", "Uniview", "Intelbras", "Vivotek", "Apexis",
+	"Sony", "Linksys", "LevelOne", "Toshiba",
 	"mjpg-streamer", "webcamXP", "Yawcam", "webcam 7",
 ];
 
@@ -493,7 +554,9 @@ function cleanModel(rest: string): string | null {
 	m = m.replace(/\s*\((?:RTSP|Network Camera|DIY\/RPi|NVR software)\)\s*$/gi, "").trim();
 	const paren = m.match(/^\((.+)\)$/); // "(uc-httpd)" / "(NetSurveillance/uc-httpd)" -> inner text
 	if (paren && paren[1]) m = paren[1].trim();
-	if (/^model unknown$/i.test(m)) return "unknown";
+	// "(model unknown)" is make-known/model-unknown — same state as a bare make, so render it
+	// as the shared "—" row rather than a separate "unknown" row (keeps every make consistent).
+	if (/^model unknown$/i.test(m)) return null;
 	if (/^ip camera$/i.test(m)) return null;
 	return m === "" ? null : m;
 }
@@ -647,12 +710,12 @@ function main(): void {
 		// ── Write audit (always; rebuilt each run) ──
 		db.run("DELETE FROM fingerprints");
 		const ins = db.query(
-			`INSERT OR REPLACE INTO fingerprints (kind, ref, old_value, new_value, tier, method, vendor, evidence, action)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT OR REPLACE INTO fingerprints (kind, ref, tier, method, vendor, evidence)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
 		);
 		db.transaction(() => {
 			for (const d of [...decisions, ...feedDecisions]) {
-				ins.run(d.kind, d.ref, d.old, d.next, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null, d.action);
+				ins.run(d.kind, d.ref, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null);
 			}
 		})();
 

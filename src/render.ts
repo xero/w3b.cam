@@ -85,6 +85,9 @@ export function extFromMime(mime: string): string {
 	return SAFE_MIME.test(mime) ? (MIME_EXT[mime] ?? "jpg") : "jpg";
 }
 
+/** Whether a MIME string is an image type we allow to be stored/baked (see SAFE_MIME). */
+export const isSafeImageMime = (mime: string): boolean => SAFE_MIME.test(mime);
+
 // The page/snippet URL + slug helpers now live in src/urls.ts (imported above): the
 // route model (urlOf/snipUrlOf), the per-section route builders, and the slug functions.
 
@@ -126,6 +129,7 @@ export interface Host {
 	shots: Shot[];
 	thumbHref: string;
 	thumbAlt: string;
+	thumbPort: number; // cam: port of the shot the card image comes from (dev change-thumbnail hook)
 	// shared metadata, coalesced from the most-recent-timestamp row
 	country_name: string | null;
 	city: string | null;
@@ -250,6 +254,7 @@ export function groupByIp(
 			count: shots.length,
 			shots,
 			thumbHref: imgHref(rep),
+			thumbPort: rep.port,
 			thumbAlt: `Screenshot from ${ip}`,
 			country_name: rep.country_name,
 			city: rep.city,
@@ -444,8 +449,9 @@ export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 		.map(escapeHtml)
 		.join(", ");
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
-	// Dev hook: blacklist/tag act on the IP (ref); reorder is per-screenshot, not per-card.
-	const devAttrs = opts.dev ? ` data-kind="cam" data-ref="${escapeHtml(host.ip)}"` : "";
+	// Dev hook: blacklist/tag act on the IP (ref); data-port is the shot the card image is
+	// from, used by change-thumbnail (reorder stays per-shot, gated in showOptions).
+	const devAttrs = opts.dev ? ` data-kind="cam" data-ref="${escapeHtml(host.ip)}" data-port="${escapeHtml(host.thumbPort)}"` : "";
 
 	const route = hostRoute(host.slug);
 	return [
