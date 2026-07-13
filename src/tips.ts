@@ -37,9 +37,13 @@ export const TIPS_HTML = `
 			<li><a href="#by-chipset-or-pattern">By chipset or pattern</a></li>
 		</ul>
 		</li>
+		<li><a href="#fresh-proxies">Fresh proxies</a>
+		<ul>
+			<li><a href="#usage-examples">usage examples</a></li>
+		</ul>
+		</li>
 	</ul>
 </blockquote>
-<hr />
 <h3 id="cam-hunting">Cam hunting</h3>
 <p>An exposed camera advertises itself. Its web UI ships a fixed page title (an Axis M1124 reports <code>Live view - AXIS M1124 Network Camera</code>), its stream and snapshot endpoints sit at fixed paths (the fragments from the vendor sections above), and its service banner names the software. Two search engines have already cataloged that for you. Google crawls the pages, so you hunt it there with dorks. Shodan scans the ports and keeps the banners, so you hunt it there with filters. Both lean on the same fingerprints.</p>
 <blockquote class="admonition caution">
