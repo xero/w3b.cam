@@ -26,7 +26,8 @@ import {
 	FEED_PAGE_SIZE,
 	YT_PAGE_SIZE,
 } from "./config.ts";
-import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb } from "./db.ts";
+import { computeAutoTags } from "./autotags.ts";
+import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb, type TagKind } from "./db.ts";
 import { productBreakdown } from "./fingerprint.ts";
 import { isBlockedProduct, pickRandom } from "./util.ts";
 import {
@@ -432,6 +433,24 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	}
 	const feedCams: FeedCam[] = feedRows.map((r) => toFeedCam(r, feedImgById.get(r.id) ?? "", tagsByFeed.get(r.id) ?? [], feedSlugs.get(r.id)));
 
+	// ── Auto-tags: derived metadata merged into the cloud (not the DB, not the homepage) ──
+	// Computed from the grouped view models above; each becomes a cloud entry + browse gallery
+	// via the same machinery as hand tags. They deliberately never reach `topTags` (below), so
+	// their huge counts can't clobber the homepage's top-tags column. See autotags.ts.
+	const autoTags = computeAutoTags(hosts, feedCams);
+	const autoTagIndex = new Map<string, { kind: TagKind; ref: string }[]>(autoTags.map((a) => [a.tag, a.refs]));
+	const autoTagCounts = autoTags.map((a) => ({ tag: a.tag, count: a.refs.length, auto: true }));
+	// Give each auto-tag a browse slug, reusing the dedup set so it can't collide with a hand tag.
+	for (const { tag } of autoTagCounts) {
+		const base = tagSlug(tag);
+		let slug = base;
+		for (let n = 2; usedTagSlugs.has(slug); n++) slug = `${base}-${n}`;
+		usedTagSlugs.add(slug);
+		tagSlugs.set(tag, slug);
+	}
+	// Cloud order: hand tags + auto-tags, re-sorted so auto-tags interleave alphabetically.
+	const cloudTags = [...tagCounts, ...autoTagCounts].sort((a, b) => a.tag.localeCompare(b.tag));
+
 	// ── Homepage (index.html): two featured + two newest of each kind ────────────────
 	// Rendered before the galleries so --index-only can write just this page and return,
 	// reusing the rest of out/ from the last full bake.
@@ -564,7 +583,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 
 	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────
 
-	await writePage(TAGS, renderTagsMain(tagCounts, slugForTag), `tags | ${TITLE}`, stats, { dev });
+	await writePage(TAGS, renderTagsMain(cloudTags, slugForTag), `tags | ${TITLE}`, stats, { dev });
 
 	// ── Tag browse pages: one paginated, blended gallery per tag ─────────────────────
 	// Resolve each tagged (kind, ref) against the in-memory view models via the maps
@@ -572,9 +591,9 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	// all gone still gets a page (its cloud link must not 404), as the empty state.
 	// Page 1 also mirrors the bare /tags/<slug> landing the cloud links to.
 	let tagPagesWritten = 0;
-	for (const { tag } of tagCounts) {
+	for (const { tag } of cloudTags) {
 		const slug = slugForTag(tag);
-		const entries = tagIndex.get(tag) ?? [];
+		const entries = tagIndex.get(tag) ?? autoTagIndex.get(tag) ?? [];
 		const camRefs = new Set(entries.filter((e) => e.kind === "cam").map((e) => e.ref));
 		const streamRefs = new Set(entries.filter((e) => e.kind === "stream").map((e) => e.ref));
 		const feedRefs = new Set(entries.filter((e) => e.kind === "feed").map((e) => e.ref));
@@ -698,7 +717,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 			`${feedCams.length} feed(s) across ${feedTotalPages} feeds page(s), ` +
 			`gallery (${galleryItems.length} card(s) across ${galleryTotalPages} page(s)), ` +
 			`${vendorsWithGallery.size} vendor gallery/-ies across ${vendorPagesWritten} page(s), ` +
-			`map (${mapPoints.length.toLocaleString()} dot(s)), tags cloud + ${tagPagesWritten} browse page(s) across ${tagCounts.length} tag(s), ` +
+			`map (${mapPoints.length.toLocaleString()} dot(s)), tags cloud + ${tagPagesWritten} browse page(s) across ${cloudTags.length} tag(s), ` +
 			`fingerprints, tips page, ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
 	);
 }

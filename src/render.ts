@@ -1050,11 +1050,15 @@ export function renderFeedDetail(cam: FeedCam, opts: RenderOpts = {}): string {
 export interface TagCount {
 	tag: string;
 	count: number;
+	/** Derived auto-tag (see autotags.ts): sized on the hand-tag scale but may overshoot TAG_MAX_SIZE. */
+	auto?: boolean;
 }
 
 /** Smallest / largest font-size (percent) a tag maps to; the count range spans these. */
 const TAG_MIN_SIZE = 100;
 const TAG_MAX_SIZE = 320;
+/** Auto-tags dwarf hand tags (mjpeg ~5k vs the biggest hand tag ~500), so let them grow a bit past TAG_MAX_SIZE, up to this ceiling. */
+const AUTO_TAG_MAX_SIZE = 440;
 
 /**
  * Inner-<main> content for the tags page: a cloud of every tag, each an anchor to its
@@ -1068,14 +1072,20 @@ export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => st
 	if (tags.length === 0) {
 		return `<p class="empty">No tags yet. Tag something with <code>bun run tag &lt;cam|stream|feed&gt; &lt;ref&gt; &lt;tag&gt;</code>, then re-bake.</p>`;
 	}
-	const logs = tags.map((t) => Math.log(t.count));
+	// Scale from the hand tags only, so the existing cloud keeps its sizing when auto-tags
+	// (whose counts dwarf hand tags) are mixed in. Auto-tags ride the same scale but clamp to
+	// the higher AUTO_TAG_MAX_SIZE, so a genuinely-huge one reads a bit larger than the biggest
+	// hand tag while smaller auto-tags still size like any normal tag below the max.
+	const scaleTags = tags.filter((t) => !t.auto);
+	const logs = (scaleTags.length ? scaleTags : tags).map((t) => Math.log(t.count));
 	const minLog = Math.min(...logs);
 	const span = Math.max(1e-9, Math.max(...logs) - minLog);
 	const step = (TAG_MAX_SIZE - TAG_MIN_SIZE) / span;
 
 	const items = tags
 		.map((t) => {
-			const size = Math.round(TAG_MIN_SIZE + (Math.log(t.count) - minLog) * step);
+			const raw = TAG_MIN_SIZE + (Math.log(t.count) - minLog) * step;
+			const size = Math.round(Math.min(t.auto ? AUTO_TAG_MAX_SIZE : TAG_MAX_SIZE, Math.max(TAG_MIN_SIZE, raw)));
 			const name = escapeHtml(t.tag);
 			const route = tagRoute(slugForTag(t.tag));
 			const title = `${t.count} ${t.count === 1 ? "entry" : "entries"} tagged ${name}`;

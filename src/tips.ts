@@ -53,7 +53,7 @@ export const TIPS_HTML = `
 	<p>Treat these as discovery for cameras meant to be public (traffic, weather, and storefronts). Do not authenticate against a device you do not own, and honor robots.txt and each site's terms.</p>
 </blockquote>
 <h4 id="google-dorks">Google dorks</h4>
-<p>Google Dorking is searching with advanced operators to surface pages an ordinary query buries. It finds cameras because both of a camera's tells, the page title and the endpoint path, get crawled and indexed whenever the device is exposed without auth. A query that pins the title, the path, or both pulls the live ones straight out of the index. Most fragments below are the same paths as the vendor schemes above, so a hit on the fragment is a hit on the camera family.</p>
+<p><a href="https://github.com/commit-issues/google-dorking/blob/main/what-is-dorking/intro.md" rel="noopener noreferrer">Google Dorking</a> is searching with advanced operators to surface pages an ordinary query buries. It finds cameras because both of a camera's tells, the page title and the endpoint path, get crawled and indexed whenever the device is exposed without auth. A query that pins the title, the path, or both pulls the live ones straight out of the index. Most fragments below are the same paths as the vendor schemes above, so a hit on the fragment is a hit on the camera family.</p>
 <p>Build a query in layers:</p>
 <ol>
 	<li><strong>Path.</strong> Start from a fragment: <code>inurl:axis-cgi/mjpg/video.cgi</code>.</li>
@@ -175,7 +175,7 @@ export const TIPS_HTML = `
 	<li><code>fullsize.jpg?camera=&lt;N&gt;&amp;motion=0</code>, <code>hugesize.jpg?camera=&lt;N&gt;&amp;motion=0</code> (multi-lens JPEG server, likely Mobotix)</li>
 </ul>
 <h4 id="shodan-safari">Shodan safari</h4>
-<p>Shodan (shodan.io) is a search engine for internet-connected devices. Rather than crawl web pages like Google, it scans the internet, connects to each open port, and records the banner the service returns. A banner is the metadata a service volunteers on connection: the server software and version, the options it supports, a welcome message, and so on. Cameras leak their model straight into that banner, which turns Shodan into a fingerprinting tool. Match the banner and you have the model.</p>
+<p><a href="https://shodan.io" rel="noopener noreferrer">Shodan</a> is a search engine for internet-connected devices. Rather than crawl web pages like Google, it scans the internet, connects to each open port, and records the banner the service returns. A banner is the metadata a service volunteers on connection: the server software and version, the options it supports, a welcome message, and so on. Cameras leak their model straight into that banner, which turns Shodan into a fingerprinting tool. Match the banner and you have the model.</p>
 <p>A query ANDs its terms together. A bare quoted string matches anywhere in the banner, a <code>filter:value</code> pair narrows to one field, and a leading <code>-</code> excludes; <code>-401</code> drops the auth-required responses and leaves the open ones. Most filters need a free account.</p>
 <div class="table-wrap">
 	<table>
