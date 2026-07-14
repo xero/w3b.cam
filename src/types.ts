@@ -206,9 +206,10 @@ export interface OsirisCamera {
 
 /**
  * A feed-source (ex-"feed": live JPEG/MJPEG/MP4/HLS/link pointers) row to
- * INSERT into `cams`. Keys map 1:1 to FEED_COLUMNS. `product` is NOT written here
- * (it's the fingerprint-backfill target, so it survives re-ingest), hence absent
- * from this insert shape. `live_url` is the URL the detail page embeds or links.
+ * INSERT into `cams`. Keys map 1:1 to FEED_COLUMNS. `product` is NOT written here:
+ * it is omitted from FEED_COLUMNS (so the upsert never touches it) and set by the
+ * ingest fingerprint hook via a separate UPDATE only on a rule match, so it survives
+ * a re-ingest that matches nothing. `live_url` is the URL the detail page embeds or links.
  */
 export type FeedRow = {
   id: string;
@@ -228,8 +229,8 @@ export type FeedRow = {
   raw_json: string;
 } & Record<string, string | number | null>;
 
-/** A `cams` row (kind='feed') as read back. Adds the generated columns plus
- * `product` (the fingerprint-backfill target, read but never written by ingest). */
+/** A `cams` row (kind='feed') as read back. Adds the generated columns plus `product`
+ * (set at ingest by the fingerprint hook on a rule match; absent from the insert shape). */
 export type StoredFeedRow = FeedRow & { first_seen: string; last_seen: string; product: string | null };
 
 /**

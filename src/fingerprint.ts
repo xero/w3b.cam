@@ -1,23 +1,18 @@
 // Fingerprint: derive the real camera device (vendor + model where possible) from a
-// stored Shodan banner or a feed feed URL, and write it to the `product` field the
-// site renders as "Fingerprint" (see render.ts). Shodan's own `product` is a mixed
-// bag — often empty, often just the web server (`Apache httpd`, `nginx`, `Boa`) rather
-// than the camera. This mines the full banner (http.title, the `hikvision` block,
-// cpe23, http.server, http.html path fragments, and the RTSP `data` banner) through an
-// ordered cascade, highest-confidence signal first, and records the fingerprint of every
-// row (signal, confidence, vendor, evidence) in a `fingerprints` table so a run is reviewable.
+// stored Shodan banner or a feed URL, and write it to the `product` field the site
+// renders as "Fingerprint" (see render.ts). Shodan's own `product` is a mixed bag —
+// often empty, often just the web server (`Apache httpd`, `nginx`, `Boa`) rather than
+// the camera. This mines the full banner (http.title, the `hikvision` block, cpe23,
+// http.server, http.html path fragments, and the RTSP `data` banner) through an ordered
+// cascade, highest-confidence signal first.
 //
-// The classifiers (fingerprintWebcam / fingerprintFeed) are pure so ingesters can
-// adopt them later; this file's CLI is the batch backfill.
-//
-// Usage:
-//   DB_PATH=camhunting.fp.sqlite bun run fingerprint            # dry run: audit + report only
-//   DB_PATH=camhunting.fp.sqlite bun run fingerprint --apply    # write product + feed column
+// This module is a PURE LEAF (it imports only ./types.ts): the classifiers
+// (fingerprintWebcam / fingerprintFeed) and the anti-downgrade decision (decideCamProduct)
+// run at ingestion time — db.ts wires them into the cam/feed upserters, so `product` and
+// the `fingerprints` audit row are correct at insert. The catch-up backfill that re-derives
+// the whole table on demand (e.g. after adding a rule) lives in src/fingerprint-cli.ts.
 
-import { Database } from "bun:sqlite";
-import { DB_PATH } from "./config.ts";
-import { allRows, allFeedRows, closeDb, openDb } from "./db.ts";
-import type { ProductGroup, StoredRow } from "./types.ts";
+import type { ProductGroup } from "./types.ts";
 
 // ── Result shape ────────────────────────────────────────────────────────────────
 
@@ -29,7 +24,7 @@ export type Tier = "high" | "medium" | "low";
 export interface FpResult {
 	/** The label written to `product`, e.g. "Axis M3027" or "Dahua-family (RTSP)". */
 	product: string;
-	/** Coarse vendor/family key for aggregation (favicon inheritance, reporting). */
+	/** Coarse vendor/family key for aggregation (per-vendor galleries, reporting). */
 	vendor: string;
 	/** Which signal matched, e.g. "title", "hik-block", "html-path", "rtsp", "server". */
 	method: string;
@@ -45,7 +40,6 @@ interface Signals {
 	server: string;
 	html: string;
 	data: string;
-	favicon: number | null;
 	hik: boolean;
 	cpe: string; // cpe23 joined lowercase
 }
@@ -53,14 +47,12 @@ interface Signals {
 /** Pull the fields the cascade reads out of a parsed Shodan match object. */
 function signalsFrom(raw: Record<string, unknown>): Signals {
 	const http = (raw.http ?? {}) as Record<string, unknown>;
-	const favObj = (http.favicon ?? null) as Record<string, unknown> | null;
 	const cpe23 = raw.cpe23;
 	return {
 		title: str(http.title),
 		server: str(http.server),
 		html: str(http.html),
 		data: str(raw.data),
-		favicon: favObj && typeof favObj.hash === "number" ? (favObj.hash as number) : null,
 		hik: raw.hikvision != null,
 		cpe: Array.isArray(cpe23) ? cpe23.join(" ").toLowerCase() : "",
 	};
@@ -262,8 +254,8 @@ function fromData(data: string): FpResult | null {
 /**
  * Derive a device fingerprint for one stored webcam from its raw Shodan banner, or null
  * if no signal is strong enough. Ordered highest-confidence first (self-reported model,
- * then vendor blocks, then endpoint paths, then RTSP servers, then a generic floor).
- * `favicon` inheritance (rule 8) is applied by the CLI in a second pass, not here.
+ * then vendor blocks, then endpoint paths, then RTSP servers, then a generic floor). The
+ * anti-downgrade decision and the final "Generic IP camera" floor live in decideCamProduct.
  */
 export function fingerprintWebcam(rawJson: string | Record<string, unknown>): FpResult | null {
 	let raw: Record<string, unknown>;
@@ -310,7 +302,7 @@ export function fingerprintWebcam(rawJson: string | Record<string, unknown>): Fp
 	const byData = fromData(sig.data);
 	if (byData) return byData;
 
-	// 9. Generic title floor.
+	// 8. Generic title floor.
 	const gt = sig.title.trim().toLowerCase();
 	if (gt === "network camera" || gt === "ip camera" || gt === "ip camera viewer") {
 		return { product: "Generic IP camera", vendor: "generic", method: "title-generic", tier: "low", evidence: sig.title.trim().slice(0, 120) };
@@ -363,13 +355,13 @@ const GENERIC_LABELS = new Set([
 ]);
 
 /** True when a product is empty or a server name (the primary fingerprint targets). */
-function isServerOrEmpty(p: string | null | undefined): boolean {
+export function isServerOrEmpty(p: string | null | undefined): boolean {
 	const t = (p ?? "").trim();
 	return t === "" || SERVER_PRODUCTS.has(t.toLowerCase());
 }
 
 /** Strip Shodan's descriptive suffixes so an existing good product displays uniformly. */
-function canonicalizeExisting(p: string): string {
+export function canonicalizeExisting(p: string): string {
 	return p
 		.replace(/\s+webcam http config$/i, "")
 		.replace(/\s+webcam http interface$/i, "")
@@ -383,7 +375,7 @@ function canonicalizeExisting(p: string): string {
  * known vendor/family, 1 = a generic floor. An existing good product is only replaced
  * when the derived label is at least as specific.
  */
-function specificity(label: string): number {
+export function specificity(label: string): number {
 	if (GENERIC_LABELS.has(label)) return 1;
 	// Treat H264/H265 as codec noise, not a model number, before the digit test.
 	const cleaned = label.replace(/h\.?26[45]/gi, "");
@@ -391,57 +383,51 @@ function specificity(label: string): number {
 	return 2;
 }
 
-// ── Audit + decision plumbing ─────────────────────────────────────────────────────
+// ── The ingest decision (anti-downgrade + floor) ──────────────────────────────────
 
-type Action = "fill" | "fix-server" | "upgrade" | "normalize" | "keep" | "unknown";
+/** What decideCamProduct decided to do, relative to the existing product. */
+export type Action = "fill" | "fix-server" | "upgrade" | "normalize" | "keep";
 
-interface Decision {
-	kind: "cam" | "feed";
-	ref: string;
-	old: string | null;
-	next: string | null;
+/** The product to store for one webcam plus the audit fields that describe how it was derived. */
+export interface CamDecision {
+	/** The product to write to `cams.product`. */
+	product: string;
 	tier: Tier | "-";
 	method: string;
+	/** Coarse vendor key for the audit / per-vendor galleries ("-" when unknown). */
 	vendor: string;
 	evidence: string;
 	action: Action;
 }
 
-// The stored audit is the fingerprint itself: which signal (method) at what confidence
-// (tier) named which vendor, with the raw matched string (evidence). The derived product
-// lives on cams.product (new_value was a 1:1 duplicate of it), and the backfill-diff
-// columns (old_value, action) were dropped as migration cruft — decideWebcam still
-// computes them in memory to drive --apply, they are just no longer persisted.
-const AUDIT_SCHEMA = `
-CREATE TABLE IF NOT EXISTS fingerprints (
-	kind      TEXT NOT NULL,   -- 'cam' | 'feed'
-	ref       TEXT NOT NULL,   -- cams.id: 'ip:port' for cams, feed id for feeds
-	tier      TEXT,
-	method    TEXT,
-	vendor    TEXT,
-	evidence  TEXT,
-	PRIMARY KEY (kind, ref)
-) STRICT;
-`;
-
-/** Decide what (if anything) to write for one webcam row, given its cascade result. */
-function decideWebcam(row: StoredRow, fp: FpResult | null): Decision {
-	const ref = `${row.ip_str}:${row.port}`;
-	const old = row.product;
-	const base = { kind: "cam" as const, ref, old, vendor: fp?.vendor ?? "-", evidence: fp?.evidence ?? "" };
+/**
+ * Decide the product to store for one webcam given its existing product and a fresh cascade
+ * result, and record which signal drove it. This is the anti-downgrade brain shared by the
+ * ingest path (db.ts) and the catch-up backfill (fingerprint-cli.ts):
+ *   - an empty or server-name product always re-derives (fill / fix-server),
+ *   - a real product upgrades only on a high-tier equal-or-more-specific hit, and a generic
+ *     floor upgrades on ANY strictly-more-specific hit (so a medium-tier vendor signal on a
+ *     later run wins an already-floored row), else it is normalized or kept,
+ *   - a target left unidentified is floored to "Generic IP camera" at the lowest tier
+ *     (all Shodan cams are webcam-labeled screenshots, so an unknown one is a camera of
+ *     unknown make; RDP/VNC never reach here — they are filtered before ingest).
+ * The fresh fp's vendor threads into EVERY outcome (even keep/normalize) so the audit's
+ * vendor tracks the device, not just the rows that changed.
+ */
+export function decideCamProduct(oldProduct: string | null, fp: FpResult | null): CamDecision {
+	const old = oldProduct;
+	const base = { vendor: fp?.vendor ?? "-", evidence: fp?.evidence ?? "" };
 
 	if (isServerOrEmpty(old)) {
-		// Target row: take any tier the cascade produced.
-		if (fp) return { ...base, next: fp.product, tier: fp.tier, method: fp.method, action: (old ?? "").trim() === "" ? "fill" : "fix-server" };
-		return { ...base, next: null, tier: "-", method: fp ? "" : "none", action: "unknown" };
+		const action: Action = (old ?? "").trim() === "" ? "fill" : "fix-server";
+		// Target row: take any tier the cascade produced, else floor.
+		if (fp) return { ...base, product: fp.product, tier: fp.tier, method: fp.method, action };
+		return { product: "Generic IP camera", tier: "low", method: "floor", vendor: "generic", evidence: "webcam-labeled screenshot; vendor unknown", action };
 	}
 
 	// Existing product: normalize, and upgrade on either
 	//  - a high-tier hit that is equal-or-more-specific (a better model self-report), or
 	//  - ANY strictly-more-specific hit when the current label is only a generic floor.
-	// A floor ("Generic IP camera", "RTSP camera (generic)", …) is an explicit "make unknown"
-	// placeholder, not an identification, so a medium-tier vendor signal on a later run — the
-	// VVTK logo, the Dahua RPC UI, the Panasonic CgiTagMenu frameset — should still win it.
 	const canon = canonicalizeExisting(old as string);
 	const oldIsFloor = GENERIC_LABELS.has(canon);
 	if (
@@ -449,75 +435,13 @@ function decideWebcam(row: StoredRow, fp: FpResult | null): Decision {
 		((fp.tier === "high" && specificity(fp.product) >= specificity(canon)) ||
 			(oldIsFloor && specificity(fp.product) > specificity(canon)))
 	) {
-		return { ...base, next: fp.product, tier: fp.tier, method: fp.method, action: "upgrade" };
+		return { ...base, product: fp.product, tier: fp.tier, method: fp.method, action: "upgrade" };
 	}
-	if (canon !== old) return { ...base, next: canon, tier: "-", method: "canon", action: "normalize" };
-	return { ...base, next: old, tier: "-", method: "kept", action: "keep" };
+	if (canon !== old) return { ...base, product: canon, tier: "-", method: "canon", action: "normalize" };
+	return { ...base, product: old as string, tier: "-", method: "kept", action: "keep" };
 }
 
-// ── Favicon inheritance (rule 8) ──────────────────────────────────────────────────
-
-/**
- * Build a favicon-hash → dominant vendor map from the high-confidence decisions, then
- * label still-unknown rows that share a known hash. A camera model ships a fixed
- * favicon, so a hash that maps overwhelmingly to one vendor is a reliable tell. Kept
- * conservative: only a hash whose high-tier rows are ≥90% one vendor (min 3 rows) is
- * trusted, and only vendor-level (medium tier) is inferred, never a specific model.
- */
-function faviconInherit(rows: StoredRow[], byRef: Map<string, Decision>, faviconOf: Map<string, number>): number {
-	const tally = new Map<number, Map<string, number>>();
-	for (const r of rows) {
-		const ref = `${r.ip_str}:${r.port}`;
-		const d = byRef.get(ref);
-		const fav = faviconOf.get(ref);
-		if (fav == null || !d || d.action === "unknown" || d.vendor === "-" || d.vendor === "generic" || d.vendor === "rtsp") continue;
-		const inner = tally.get(fav) ?? new Map<string, number>();
-		inner.set(d.vendor, (inner.get(d.vendor) ?? 0) + 1);
-		tally.set(fav, inner);
-	}
-	// Resolve each hash to a trusted dominant vendor + a representative product label.
-	const dominant = new Map<number, { vendor: string; product: string }>();
-	const labelFor = new Map<string, string>([
-		["axis", "Axis"], ["panasonic", "Panasonic/i-PRO"], ["hikvision", "Hikvision IP Camera"],
-		["dahua", "Dahua-family"], ["xiongmai", "Xiongmai (uc-httpd)"], ["mobotix", "Mobotix"],
-		["canon", "Canon VB"], ["dlink", "D-Link"], ["dlink-airlink", "D-Link/Airlink IP camera"],
-		["vivotek-dlink", "Vivotek/D-Link-family"], ["trendnet", "Trendnet"], ["foscam", "Foscam"],
-		["uniview", "Uniview"], ["lilin", "LILIN"], ["bosch", "Bosch VideoJet"], ["intelbras", "Intelbras"],
-		["hi3510", "hi3510/INSTAR-family"],
-	]);
-	for (const [fav, inner] of tally) {
-		let total = 0;
-		let best = "";
-		let bestN = 0;
-		for (const [v, n] of inner) {
-			total += n;
-			if (n > bestN) { bestN = n; best = v; }
-		}
-		if (total >= 3 && bestN / total >= 0.9 && labelFor.has(best)) {
-			dominant.set(fav, { vendor: best, product: labelFor.get(best) as string });
-		}
-	}
-	// Apply to unknown rows sharing a trusted hash.
-	let applied = 0;
-	for (const r of rows) {
-		const ref = `${r.ip_str}:${r.port}`;
-		const d = byRef.get(ref);
-		if (!d || d.action !== "unknown") continue;
-		const fav = faviconOf.get(ref);
-		const dom = fav != null ? dominant.get(fav) : undefined;
-		if (!dom) continue;
-		d.next = dom.product;
-		d.tier = "medium";
-		d.method = "favicon";
-		d.vendor = dom.vendor;
-		d.evidence = `favicon ${fav}`;
-		d.action = isServerOrEmpty(d.old) && (d.old ?? "").trim() === "" ? "fill" : "fix-server";
-		applied++;
-	}
-	return applied;
-}
-
-// ── Make / model split for the tags-page breakdown ───────────────────────────────
+// ── Make / model split for the fingerprints-page breakdown ─────────────────────────
 
 /**
  * Known makes, matched as a case-insensitive prefix of a product label. Ordered so a
@@ -639,185 +563,3 @@ export function productBreakdown(entries: BreakdownEntry[]): ProductGroup[] {
 	});
 	return groups;
 }
-
-// ── CLI ────────────────────────────────────────────────────────────────────────
-
-function main(): void {
-	const apply = process.argv.includes("--apply");
-	const force = process.argv.includes("--force");
-
-	// Guard: never touch the production DB unless explicitly forced.
-	if (/(^|\/)camhunting\.sqlite$/.test(DB_PATH) && !force) {
-		console.error(`Refusing to run against the production DB (${DB_PATH}).`);
-		console.error(`Make a copy and set DB_PATH, e.g.:`);
-		console.error(`  cp camhunting.sqlite camhunting.fp.sqlite`);
-		console.error(`  DB_PATH=camhunting.fp.sqlite bun run fingerprint${apply ? " --apply" : ""}`);
-		console.error(`(or pass --force to override).`);
-		process.exit(1);
-	}
-
-	console.log(`\n── Fingerprint ${apply ? "APPLY" : "dry run"} · ${DB_PATH} ──`);
-	const db = openDb();
-	try {
-		db.run(AUDIT_SCHEMA);
-
-		// ── Webcams ──
-		const rows = allRows(db);
-		const decisions: Decision[] = [];
-		const byRef = new Map<string, Decision>();
-		const faviconOf = new Map<string, number>();
-		for (const r of rows) {
-			let fav: number | null = null;
-			try {
-				const raw = JSON.parse(r.raw_json) as Record<string, unknown>;
-				const f = (((raw.http ?? {}) as Record<string, unknown>).favicon ?? null) as Record<string, unknown> | null;
-				if (f && typeof f.hash === "number") fav = f.hash;
-			} catch {}
-			const d = decideWebcam(r, fingerprintWebcam(r.raw_json));
-			decisions.push(d);
-			byRef.set(d.ref, d);
-			if (fav != null) faviconOf.set(d.ref, fav);
-		}
-		const faviconApplied = faviconInherit(rows, byRef, faviconOf);
-
-		// Final floor: the whole table is screenshot.label:webcam, so any target still
-		// unidentified is a camera of unknown make. Label it honestly at the lowest tier
-		// (RTSP rows already floored to "RTSP camera (generic)"; RDP/VNC are not targets).
-		let floored = 0;
-		for (const d of decisions) {
-			if (d.action !== "unknown" || !isServerOrEmpty(d.old)) continue;
-			d.next = "Generic IP camera";
-			d.tier = "low";
-			d.method = "floor";
-			d.vendor = "generic";
-			d.evidence = "webcam-labeled screenshot; vendor unknown";
-			d.action = (d.old ?? "").trim() === "" ? "fill" : "fix-server";
-			floored++;
-		}
-		if (floored) console.log(`Floored ${floored} unidentified target(s) to "Generic IP camera" (low).`);
-
-		// ── Feed ──
-		const feed = allFeedRows(db);
-		const feedDecisions: Decision[] = [];
-		for (const t of feed) {
-			const fp = fingerprintFeed(t);
-			const old = (t.product ?? null) as string | null;
-			if (fp) {
-				feedDecisions.push({ kind: "feed", ref: t.id, old, next: fp.product, tier: fp.tier, method: fp.method, vendor: fp.vendor, evidence: fp.evidence, action: (old ?? "").trim() === "" ? "fill" : "upgrade" });
-			}
-		}
-
-		// ── Write audit (always; rebuilt each run) ──
-		db.run("DELETE FROM fingerprints");
-		const ins = db.query(
-			`INSERT OR REPLACE INTO fingerprints (kind, ref, tier, method, vendor, evidence)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-		);
-		db.transaction(() => {
-			for (const d of [...decisions, ...feedDecisions]) {
-				ins.run(d.kind, d.ref, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null);
-			}
-		})();
-
-		// ── Apply (optional) ──
-		// Both sources write the same column on the same table now: a Decision's `ref`
-		// IS the cams id ('ip:port' for cams, feed id for feeds), so one UPDATE covers both.
-		if (apply) {
-			const up = db.query("UPDATE cams SET product = ? WHERE id = ?");
-			const changedCam = db.transaction(() => {
-				let n = 0;
-				for (const d of decisions) {
-					if (d.action === "fill" || d.action === "fix-server" || d.action === "upgrade" || d.action === "normalize") {
-						up.run(d.next, d.ref);
-						n++;
-					}
-				}
-				return n;
-			})();
-			const changedFeeds = db.transaction(() => {
-				let n = 0;
-				for (const d of feedDecisions) {
-					up.run(d.next, d.ref);
-					n++;
-				}
-				return n;
-			})();
-			console.log(`Applied: ${changedCam} cam product update(s), ${changedFeeds} feed product write(s).`);
-		}
-
-		report(db, decisions, feedDecisions, faviconApplied, feed.length);
-		if (!apply) console.log(`\nDry run. Nothing written to product; review the fingerprints table, then re-run with --apply.`);
-	} finally {
-		closeDb(db);
-	}
-}
-
-/** Split an "ip:port" ref, keeping IPv6 colons intact (port is after the last colon). */
-function splitRef(ref: string): [string, string] {
-	const i = ref.lastIndexOf(":");
-	return [ref.slice(0, i), ref.slice(i + 1)];
-}
-
-// ── Reporting ─────────────────────────────────────────────────────────────────
-
-function report(db: Database, cam: Decision[], feed: Decision[], faviconApplied: number, feedTotal: number): void {
-	const targets = cam.filter((d) => isServerOrEmpty(d.old));
-	const solvedTargets = targets.filter((d) => d.action !== "unknown");
-	const unknown = targets.filter((d) => d.action === "unknown");
-
-	console.log(`\n=== WEBCAMS (${cam.length} rows) ===`);
-	console.log(`Targets (empty or server-name product): ${targets.length}`);
-	console.log(`  fingerprinted: ${solvedTargets.length} (${pct(solvedTargets.length, targets.length)})   [favicon-inherited: ${faviconApplied}]`);
-	console.log(`  still unknown: ${unknown.length}`);
-	console.log(byKey(cam, (d) => d.action, "\nby action:"));
-	console.log(byKey(cam.filter((d) => d.tier !== "-"), (d) => d.tier, "\nby tier (rows with a derived label):"));
-	console.log(byKey(solvedTargets, (d) => d.method, "\ntargets by method:"));
-	console.log(topKey(cam.filter((d) => d.next && d.action !== "keep"), (d) => d.next as string, 30, "\ntop resulting products:"));
-
-	// Single-IP concentration caveat (e.g. the AXIS M3027 decoy on one host).
-	const ipCount = new Map<string, number>();
-	for (const d of solvedTargets) {
-		const [ip] = splitRef(d.ref);
-		ipCount.set(ip, (ipCount.get(ip) ?? 0) + 1);
-	}
-	const topIps = [...ipCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-	console.log(`\ntop IPs by fingerprinted ports (watch for single-host inflation):`);
-	for (const [ip, n] of topIps) console.log(`  ${String(n).padStart(4)}  ${ip}`);
-
-	console.log(`\n=== FEEDS (${feedTotal} rows) ===`);
-	console.log(`  fingerprinted from live_url: ${feed.length}   (left NULL: ${feedTotal - feed.length}, operator networks)`);
-	console.log(topKey(feed, (d) => d.next as string, 15, "\nfeeds products:"));
-
-	// Regression guard: any existing good product that got a strictly less specific label.
-	const downgrades = cam.filter((d) => !isServerOrEmpty(d.old) && d.next && d.action === "upgrade" && specificity(d.next) < specificity(canonicalizeExisting(d.old as string)));
-	console.log(`\ndowngrades of existing products: ${downgrades.length} (must be 0)`);
-	for (const d of downgrades.slice(0, 10)) console.log(`  ${d.ref}: "${d.old}" -> "${d.next}"`);
-
-	console.log(`\nunsolved target sample (title | server | :port):`);
-	for (const d of unknown.slice(0, 20)) {
-		const row = db.query("SELECT json_extract(raw_json,'$.http.title') t, json_extract(raw_json,'$.http.server') s, port FROM cams WHERE id = ?").get(d.ref) as { t: string | null; s: string | null; port: number } | null;
-		if (row) console.log(`  ${(row.t ?? "(no title)").slice(0, 34).padEnd(34)} | ${(row.s ?? "-").slice(0, 22).padEnd(22)} | :${row.port}`);
-	}
-}
-
-function pct(n: number, d: number): string {
-	return d === 0 ? "0%" : `${((100 * n) / d).toFixed(1)}%`;
-}
-
-function byKey(rows: Decision[], key: (d: Decision) => string, heading: string): string {
-	const c = new Map<string, number>();
-	for (const r of rows) c.set(key(r), (c.get(key(r)) ?? 0) + 1);
-	const lines = [...c.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `  ${String(n).padStart(5)}  ${k}`);
-	return [heading, ...lines].join("\n");
-}
-
-function topKey(rows: Decision[], key: (d: Decision) => string, limit: number, heading: string): string {
-	const c = new Map<string, number>();
-	for (const r of rows) c.set(key(r), (c.get(key(r)) ?? 0) + 1);
-	const lines = [...c.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k, n]) => `  ${String(n).padStart(5)}  ${k}`);
-	return [heading, ...lines].join("\n");
-}
-
-// Direct run (`bun run fingerprint`) executes the backfill; importing (e.g. build.ts using
-// splitProduct/productBreakdown) must not, so guard on the entry-point check like build.ts.
-if (import.meta.main) main();

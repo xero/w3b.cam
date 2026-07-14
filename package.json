@@ -21,7 +21,7 @@
     "feature": "bun run src/feature.ts",
     "unfeature": "bun run src/unfeature.ts",
     "purge": "bun run src/purge.ts",
-    "fingerprint": "bun run src/fingerprint.ts",
+    "fingerprint": "bun run src/fingerprint-cli.ts",
     "sync": "bun run src/sync.ts",
     "merge": "bun run src/merge.ts",
     "bake": "bun run src/build.ts",

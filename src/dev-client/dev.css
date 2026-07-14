@@ -80,6 +80,7 @@ header nav .dev,
 .dev-msg {
 	padding: 0.25rem 0.5rem 0.5rem;
 	overflow-wrap: anywhere;
+	max-width: 400px;
 }
 
 .dev-row {

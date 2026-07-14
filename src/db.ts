@@ -2,6 +2,7 @@ import { Database, constants } from "bun:sqlite";
 import { DB_PATH } from "./config.ts";
 import type { CamRow, StoredRow, StoredFeedRow, StoredYtRow, FeedRow, WebcamMatch, YtRow } from "./types.ts";
 import { BLOCKED_PRODUCTS } from "./util.ts";
+import { decideCamProduct, fingerprintFeed, fingerprintWebcam } from "./fingerprint.ts";
 
 // ── Unified `cams` table ──────────────────────────────────────────────────────
 // One table for every camera, whatever its source. `kind` discriminates:
@@ -63,7 +64,9 @@ CREATE TABLE IF NOT EXISTS cams (
  * from a list survive a re-ingest by design:
  *   - `first_seen`/`last_seen`/`preferred` are never listed (managed by the upsert).
  *   - CAM omits `preferred` so a reorder pin survives re-scrape.
- *   - FEED omits `product` so a derived fingerprint survives re-ingest.
+ *   - FEED omits `product` so it is never overwritten by the upsert; the fingerprint hook
+ *     writes it via a separate UPDATE only when the URL matches a rule, so a derived (or
+ *     curated) product survives a re-ingest that matches nothing.
  *   - STREAM omits `lat`/`lng` so hand-assigned coords (bun run geo) survive.
  */
 const CAM_COLUMNS = [
@@ -136,6 +139,26 @@ CREATE TABLE IF NOT EXISTS meta (
 ) STRICT;
 `;
 
+/**
+ * Fingerprint audit table: one row per fingerprinted cam/feed recording which signal
+ * (method) at what confidence (tier) named which vendor, with the matched string
+ * (evidence). Written at ingest by the cam/feed upserters (see makeInserter /
+ * makeFeedInserter) and rebuilt wholesale by the catch-up backfill (src/fingerprint-cli.ts).
+ * The site reads only kind/ref/vendor (loadVendorRefs → the per-vendor galleries); the
+ * derived product itself lives on cams.product. `ref` equals cams.id.
+ */
+const AUDIT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS fingerprints (
+	kind      TEXT NOT NULL,   -- 'cam' | 'feed'
+	ref       TEXT NOT NULL,   -- cams.id: 'ip:port' for cams, feed id for feeds
+	tier      TEXT,
+	method    TEXT,
+	vendor    TEXT,
+	evidence  TEXT,
+	PRIMARY KEY (kind, ref)
+) STRICT;
+`;
+
 /** Which source a tag/featured `ref` points at. Matches the cam's `kind`. */
 export type TagKind = "cam" | "stream" | "feed";
 
@@ -191,6 +214,7 @@ export function openDb(path = DB_PATH): Database {
 	db.run("PRAGMA busy_timeout = 5000;");
 	db.run(CAMS_SCHEMA);
 	db.run(META_SCHEMA);
+	db.run(AUDIT_SCHEMA);
 	db.run(BLACKLIST_SCHEMA);
 	db.run(HOST_BLACKLIST_SCHEMA);
 	seedHostBlacklist(db);
@@ -240,7 +264,26 @@ const IMAGE_COLS = new Set(["ss_mime", "ss_hash", "ss_base64"]);
  */
 export const SS_PERMANENT = "9999-12-31 23:59:59";
 
-function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRow[]) => InsertResult {
+/** The pre-upsert snapshot of a row, handed to `afterUpsert` so it can decide against the
+ *  stored state (the prior product is the linchpin of the fingerprint anti-downgrade). */
+interface PriorRow {
+	h: string | null;
+	ls: string;
+	product: string | null;
+}
+
+/**
+ * Optional per-source ingest hook. `afterUpsert` runs synchronously INSIDE the transaction,
+ * right after `stmt.run(row)`, once per row, with the pre-upsert snapshot (`before`, null for
+ * a brand-new row) and the just-written `row`. Cams/feeds use it to derive `product` + write
+ * the `fingerprints` audit row at insert. It MUST stay synchronous — no Promise, no nested
+ * `db.transaction` — since the surrounding `db.transaction` commits when its callback returns.
+ */
+interface UpsertOpts {
+	afterUpsert?: (before: PriorRow | null, row: UpsertRow) => void;
+}
+
+function makeUpserter(db: Database, columns: readonly string[], opts: UpsertOpts = {}): (rows: UpsertRow[]) => InsertResult {
 	const placeholders = columns.map((c) => `$${c}`).join(", ");
 	// G5: never overwrite a stored image with a blank. On a refresh whose snapshot
 	// failed (a dead feed, or — the case that bit us — a rate-limited re-grab), the
@@ -269,15 +312,19 @@ function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRo
 	);
 	// ON CONFLICT DO UPDATE reports changes>0 for both inserts and updates, so we
 	// can't infer "new" from changes. Peek at the prior screenshot hash instead. We
-	// also read last_seen so a locked (permanent) row isn't miscounted as "changed".
-	const prior = db.query("SELECT ss_hash AS h, last_seen AS ls FROM cams WHERE id = ?");
+	// also read last_seen so a locked (permanent) row isn't miscounted as "changed",
+	// and the prior product so the fingerprint hook can decide against the stored value.
+	const prior = db.query("SELECT ss_hash AS h, last_seen AS ls, product AS product FROM cams WHERE id = ?");
+	const { afterUpsert } = opts;
 	return db.transaction((rows: UpsertRow[]): InsertResult => {
 		let added = 0;
 		let updated = 0;
 		let changed = 0;
 		for (const row of rows) {
-			const before = prior.get(row.id) as { h: string | null; ls: string } | null;
+			const before = prior.get(row.id) as PriorRow | null;
 			stmt.run(row);
+			// Fingerprint the row against its pre-upsert state (synchronous; runs in this txn).
+			afterUpsert?.(before, row);
 			if (before == null) {
 				added++;
 			} else {
@@ -292,19 +339,57 @@ function makeUpserter(db: Database, columns: readonly string[]): (rows: UpsertRo
 	});
 }
 
-/** Bulk upserter for Shodan cam rows (kind='cam'). */
-export function makeInserter(db: Database): (rows: CamRow[]) => InsertResult {
-	return makeUpserter(db, CAM_COLUMNS);
+/** Prepared statements the fingerprint hooks share: correct `product`, then record the audit row. */
+function fingerprintWriters(db: Database): { setProduct: ReturnType<Database["query"]>; recordFp: ReturnType<Database["query"]> } {
+	return {
+		setProduct: db.query("UPDATE cams SET product = ? WHERE id = ?"),
+		recordFp: db.query(
+			"INSERT OR REPLACE INTO fingerprints (kind, ref, tier, method, vendor, evidence) VALUES (?, ?, ?, ?, ?, ?)",
+		),
+	};
 }
 
-/** Bulk upserter for YouTube stream rows (kind='stream'). Mirrors makeInserter. */
+/**
+ * Bulk upserter for Shodan cam rows (kind='cam'). Fingerprints each row at insert: the cascade
+ * runs on the banner, decideCamProduct reconciles it against the prior stored product (empty or
+ * server-name → re-derive; a real product upgrades only on a safe hit; an unidentified target
+ * floors to "Generic IP camera"), and both cams.product and the fingerprints audit row are written
+ * in the same transaction. A brand-new row's "old" is the raw Shodan product toRow seeded; a
+ * re-ingest's is the previously-decided value, so a weaker re-scrape can't downgrade a good label.
+ */
+export function makeInserter(db: Database): (rows: CamRow[]) => InsertResult {
+	const { setProduct, recordFp } = fingerprintWriters(db);
+	return makeUpserter(db, CAM_COLUMNS, {
+		afterUpsert(before, row) {
+			const oldProduct = before?.product ?? ((row.product as string | null) ?? null);
+			const d = decideCamProduct(oldProduct, fingerprintWebcam(row.raw_json as string));
+			setProduct.run(d.product, row.id);
+			recordFp.run("cam", row.id, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null);
+		},
+	});
+}
+
+/** Bulk upserter for YouTube stream rows (kind='stream'). No fingerprinting (streams carry none). */
 export function makeYtInserter(db: Database): (rows: YtRow[]) => InsertResult {
 	return makeUpserter(db, STREAM_COLUMNS);
 }
 
-/** Bulk upserter for feed rows (kind='feed'). Mirrors makeInserter. */
+/**
+ * Bulk upserter for feed rows (kind='feed'). `FEED_COLUMNS` deliberately omits `product` (so the
+ * upsert never touches it); the hook writes product only when the live URL matches a fingerprint
+ * rule, mirroring the CLI — an operator-network feed with no match keeps whatever product it had,
+ * preserving the survives-re-ingest invariant.
+ */
 export function makeFeedInserter(db: Database): (rows: FeedRow[]) => InsertResult {
-	return makeUpserter(db, FEED_COLUMNS);
+	const { setProduct, recordFp } = fingerprintWriters(db);
+	return makeUpserter(db, FEED_COLUMNS, {
+		afterUpsert(_before, row) {
+			const fp = fingerprintFeed({ live_url: row.live_url as string | null, source: row.source as string | null });
+			if (!fp) return;
+			setProduct.run(fp.product, row.id);
+			recordFp.run("feed", row.id, fp.tier, fp.method, fp.vendor, fp.evidence || null);
+		},
+	});
 }
 
 // ── Counts + readers (one per kind) ──────────────────────────────────────────
@@ -665,10 +750,10 @@ export function setYtGeo(db: Database, videoId: string, lat: number, lng: number
  * for tagging each product occurrence in the breakdown with its vendor). NULL-vendor rows
  * are skipped; streams carry no fingerprints.
  *
- * Both are empty when the `fingerprints` table is absent. That table is created by
- * `bun run fingerprint --apply`, NEVER by openDb(), so a DB that was never fingerprinted
- * (or the empty CI bake) simply yields no vendor galleries. Guarding here keeps the build
- * from throwing on a fresh DB.
+ * The table is created by openDb() and populated at ingest (and rebuilt by the catch-up
+ * backfill), so it normally exists. The guard stays for safety — a DB opened by some other
+ * path, or one that has ingested nothing yet, simply yields no vendor galleries rather than
+ * throwing the build.
  */
 export function loadVendorRefs(db: Database): {
 	byVendor: Map<string, { hosts: Set<string>; feeds: Set<string> }>;
@@ -779,6 +864,7 @@ export function deleteWebcamsByHost(db: Database, host: string): { rows: number;
 		.query("SELECT id, ip_str, hostnames, domains FROM cams WHERE kind = 'cam'")
 		.all() as { id: string; ip_str: string | null; hostnames: string | null; domains: string | null }[];
 	const del = db.query("DELETE FROM cams WHERE id = ?");
+	const delFp = db.query("DELETE FROM fingerprints WHERE kind = 'cam' AND ref = ?");
 	return db.transaction(() => {
 		let n = 0;
 		const ips = new Set<string>();
@@ -786,6 +872,7 @@ export function deleteWebcamsByHost(db: Database, host: string): { rows: number;
 			const names = [...parseHostArray(r.hostnames ?? "[]"), ...parseHostArray(r.domains ?? "[]")];
 			if (names.some((name) => hostBlocked(name, hosts))) {
 				const c = del.run(r.id).changes;
+				delFp.run(r.id); // ref === cams.id for a cam
 				n += c;
 				if (c && r.ip_str) ips.add(r.ip_str);
 			}
@@ -794,8 +881,13 @@ export function deleteWebcamsByHost(db: Database, host: string): { rows: number;
 	})();
 }
 
-/** Delete every stored cam for one IP (all ports). Returns rows removed. No meta side effect. */
+/**
+ * Delete every stored cam for one IP (all ports) and its fingerprint audit rows. Returns cam
+ * rows removed. No meta side effect. The fingerprints ref for a cam is 'ip:port', so an
+ * `ip:%` LIKE clears all of the host's ports (the ':' after the IP prevents matching a longer IP).
+ */
 export function deleteWebcamsByIp(db: Database, ip: string): number {
+	db.query("DELETE FROM fingerprints WHERE kind = 'cam' AND ref LIKE ?").run(`${ip}:%`);
 	return db.query("DELETE FROM cams WHERE kind = 'cam' AND ip_str = ?").run(ip).changes;
 }
 
@@ -814,10 +906,15 @@ export function deleteEntityMeta(db: Database, kind: TagKind, ref: string): void
  */
 export function removeEntity(db: Database, kind: TagKind, ref: string): number {
 	return db.transaction(() => {
-		const changes =
-			kind === "cam"
-				? deleteWebcamsByIp(db, ref)
-				: db.query("DELETE FROM cams WHERE kind = ? AND id = ?").run(kind, ref).changes;
+		let changes: number;
+		if (kind === "cam") {
+			changes = deleteWebcamsByIp(db, ref); // also purges the host's fingerprint rows
+		} else {
+			// feed removes the single row (ref === cams.id); purge its fingerprint audit row too
+			// (streams carry none, so the delete is a harmless no-op there).
+			changes = db.query("DELETE FROM cams WHERE kind = ? AND id = ?").run(kind, ref).changes;
+			db.query("DELETE FROM fingerprints WHERE kind = ? AND ref = ?").run(kind, ref);
+		}
 		deleteEntityMeta(db, kind, ref);
 		return changes;
 	})();

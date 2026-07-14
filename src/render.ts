@@ -1124,7 +1124,7 @@ export function renderTagsMain(tags: TagCount[], slugForTag: (tag: string) => st
  */
 export function renderFingerprintsMain(groups: ProductGroup[], vendorsWithGallery: Set<string> = new Set()): string {
 	if (groups.length === 0) {
-		return `<p class="empty">No camera fingerprints yet. Run <code>bun run fingerprint --apply</code>, then re-bake.</p>`;
+		return `<p class="empty">No camera fingerprints yet. Ingest some cameras (they're fingerprinted on import), then re-bake.</p>`;
 	}
 	const totalCams = groups.reduce((n, g) => n + g.total, 0);
 	const fmt = (n: number) => n.toLocaleString();
@@ -1164,7 +1164,7 @@ export function renderFingerprintsMain(groups: ProductGroup[], vendorsWithGaller
 	return [
 		`<section class="breakdown">`,
 		`${T(1)}<h2>Device fingerprints</h2>`,
-		`${T(1)}<p class="bd-sub">${fmt(totalCams)} cameras across ${groups.length} makes, identified from Shodan banners and feed URLs.</p>`,
+		`${T(1)}<p class="bd-sub">${fmt(totalCams)} cameras identified across ${groups.length} makes, identified via banners and feed URLs.</p>`,
 		`${T(1)}<table class="bd-table">`,
 		`${T(2)}<thead><tr><th scope="col">Make</th><th scope="col">Model</th><th scope="col" class="bd-count">Cameras</th><th scope="col" class="bd-filter">filter</th></tr></thead>`,
 		`${T(2)}<tbody>`,
