@@ -28,12 +28,18 @@
     "bake": "bun run src/build.ts",
     "serve": "bun run src/serve.ts",
     "dev": "bun run src/dev.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun run tests/helpers/run-suite.ts",
+    "test:unit": "bun test tests/unit",
+    "test:integration": "bun test tests/integration",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "shodan-ts": "1.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "@types/bun": "latest",
     "hls.js": "^1.6.16",
     "htmx.org": "4.0.0-beta5",

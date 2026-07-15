@@ -5,9 +5,11 @@ out/
 in/
 node_modules/
 *.tsbuildinfo
-tests/
 test/
 test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 .DS_Store
 $RECYCLE.BIN/
 *.bak

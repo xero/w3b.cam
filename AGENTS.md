@@ -45,6 +45,21 @@ A task is complete when **all** are true:
 1. `bun typecheck` run, no errors remain
 2. Any public API addition, removal, or signature change has matching
    doc updates in the README.md
+3. `bun run test` passes. The suite self-isolates to temp dirs, but set throwaway
+   targets too so a stray default can never touch the real database or `out/`:
+
+   ```sh
+   DB_PATH="$(mktemp -d)/db.sqlite" OUT_DIR="$(mktemp -d)/out" bun run test
+   ```
+
+   For the browser layer run `bun run test:e2e` (first run needs
+   `bunx playwright install chromium`); it builds and serves a fixture site in a
+   temp dir. See `tests/README.md` for the layout.
+
+**Full paths note:** when running a single test file directly, pass its absolute path
+(`bun test "$PWD/tests/integration/foo.test.ts"`), not a relative one. A relative path
+can break subprocess spawning inside the test, so a script under test looks like it
+produced no output when it actually ran.
 
 ---
 

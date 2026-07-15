@@ -38,8 +38,8 @@ export const SITE_URL = "https://w3b.cam";
 /** Cameras listed in each syndication feed (rss.xml / atom.xml): the newest N by observed_at. */
 export const SYNDICATION_LIMIT = 50;
 
-/** Generated static site: root dir, wiped and recreated on every build. */
-export const OUT_DIR = "out";
+/** Generated static site: root dir, wiped and recreated on every build. Override with OUT_DIR to bake to a throwaway dir (tests/CI) without touching the real one. */
+export const OUT_DIR = process.env.OUT_DIR ?? "out";
 /** Extracted screenshot files, one per unique image, referenced by <img src>. */
 export const IMG_DIR = `${OUT_DIR}/img`;
 /** Image-URL manifest a full bake writes so `bun dev --index-only` can reuse the

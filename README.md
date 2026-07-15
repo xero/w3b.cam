@@ -1,9 +1,8 @@
-# Shodan Webcam Visualizer
+# https://w3b.cam
+## internet voyeurism
 
 > [!NOTE]
-> A handful of Bun scripts around a local SQLite database. One scrapes webcam screenshots from the Shodan REST API, another catalogs YouTube live cams from a curated list, and a third bakes a paginated static site from it all; the rest import, curate, and publish the data.
-
----
+> db and website gallery generator of open webcams, with tools for scraping and manual cam hunting
 
 > ### Table of Contents
 > - [Requirements](#requirements)
@@ -11,6 +10,7 @@
 > - [Getting the database](#getting-the-database)
 > - [Usage](#usage)
 > - [Editing locally](#editing-locally)
+> - [Testing](#testing)
 > - [How it works](#how-it-works)
 > - [Query credits](#query-credits)
 > - [Project layout](#project-layout)
@@ -217,6 +217,19 @@ bun merge camhunting.sqlite.prod camhunting.sqlite
 ```
 
 It diffs the source and target `cams` tables (the `kind='cam'` rows) by their `(ip_str, port)` and inserts only the cameras the target is missing, copied verbatim, including each camera's original `first_seen` and any pin. Rows the target already has are left untouched, so your own pins, tags, and curation survive. Only the target is written; the source is opened read-only. Pass `--dry-run` to preview the delta and write nothing, or `--yes` to skip the confirmation prompt.
+
+---
+
+## Testing
+
+The suite runs offline against a throwaway database seeded with a few entries per kind, so it never touches your real `camhunting.sqlite` or `out/`. See [tests/README.md](tests/README.md) for the layout and details.
+
+```sh
+bun run test       # unit + integration, then a coverage-gaps banner
+bun run test:e2e   # Playwright over the built site (first run: bunx playwright install chromium)
+```
+
+`bun run test` covers the pure modules, the database layer, and every `package.json` script (each run as a subprocess against a temp database), plus `bake` and `serve`. The network-bound scripts (`scrape`, `preflight`, `sync`, `osiris`, and the non-Shodan imports) are covered at the argument and error level only, since running them for real needs credentials, ffmpeg, or live services. The run ends with a banner naming any missing capability (`SHODANTOKEN`, `YOUTUBE_API_KEY`, `ffmpeg`, network) so you know what was not exercised end to end, and it never fails the run for that. `bun run test:e2e` bakes the fixture site and drives it in a browser: navigation, the htmx swaps, the no-JS fallback, a broken-link crawl, and the pager. `bun typecheck` stays the fast pre-commit gate.
 
 ---
 

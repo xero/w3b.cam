@@ -21,6 +21,7 @@ import {
 	MANIFEST,
 	OUT_DIR,
 	PAGE_SIZE,
+	SITE_URL,
 	SYNDICATION_LIMIT,
 	TAG_PAGE_SIZE,
 	FEED_PAGE_SIZE,
@@ -202,13 +203,23 @@ async function extractImages<T>(
 	return byKey;
 }
 
+/** One Unix-seconds stamp per build, appended as ?x=<EPOCH> to OG image URLs so social
+ *  scrapers re-fetch an updated screenshot instead of serving a stale cached preview. */
+const EPOCH = Math.floor(Date.now() / 1000);
+
 /**
  * Write one page: the full document to OUT_DIR/<route>/index.html and its co-located
  * snippet to OUT_DIR/<route>/index.snippet.html (root route -> OUT_DIR/index.html and
  * index.snippet.html). Both come from the same `mainInner`, so they never drift.
+ *
+ * `opts.thumb` is a page's site-relative OG preview image (e.g. "/img/<hash>.jpg"), made
+ * absolute + cache-busted here; every caller resolves it to a real image (see the pickers
+ * in build()), so the social card always has a picture.
  */
-async function writePage(route: string, mainInner: string, title: string, stats: SiteStats, opts: { dev?: boolean } = {}): Promise<void> {
-	await Bun.write(`${OUT_DIR}/${diskOf(route)}`, renderShell({ title, stats, mainInner, dev: opts.dev }));
+async function writePage(route: string, mainInner: string, title: string, stats: SiteStats, opts: { dev?: boolean; thumb?: string } = {}): Promise<void> {
+	const ogImage = opts.thumb ? `${SITE_URL}${opts.thumb}?x=${EPOCH}` : "";
+	const ogUrl = `${SITE_URL}${urlOf(route)}`;
+	await Bun.write(`${OUT_DIR}/${diskOf(route)}`, renderShell({ title, stats, mainInner, dev: opts.dev, ogImage, ogUrl }));
 	await Bun.write(`${OUT_DIR}/${snipDiskOf(route)}`, `${mainInner}\n`);
 }
 
@@ -476,6 +487,38 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 
 	const feedById = new Map(feedCams.map((c) => [c.id, c]));
 
+	// ── OG social-preview image pickers ──────────────────────────────────────────────
+	// Every page's <head> carries an og:image resolved to a real, on-disk screenshot. The
+	// fallback chain is: the page's own image -> a random featured image -> any screenshot ->
+	// an icon asset (only if the DB is completely black). All hrefs here are site-relative;
+	// writePage makes them absolute + cache-busted.
+	const ICON_FALLBACK = "/web-app-manifest-512x512.png"; // copied to out/ root; last resort
+	const featSet = {
+		cam: new Set(featured.cams),
+		stream: new Set(featured.streams),
+		feed: new Set(featured.feeds),
+	};
+	const featuredThumbs = [
+		...featured.cams.map((ip) => camByIp.get(ip)?.thumbHref),
+		...featured.streams.map((id) => streamByVideo.get(id)?.thumbHref),
+		...featured.feeds.map((id) => feedById.get(id)?.thumbHref),
+	].filter((h): h is string => !!h);
+	const anyThumbs = [...hosts, ...streams, ...feedCams].map((x) => x.thumbHref).filter((h) => !!h);
+	// A fresh random featured image per call, so image-less pages don't all share one.
+	const randomFeatured = (): string => pickRandom(featuredThumbs, 1)[0] ?? pickRandom(anyThumbs, 1)[0] ?? ICON_FALLBACK;
+	// A blended-gallery card -> { is its entity featured, its image }, dispatched on kind.
+	const candOf = (it: TagItem): { featured: boolean; thumb: string } =>
+		it.kind === "cam"
+			? { featured: featSet.cam.has(it.host.ip), thumb: it.host.thumbHref }
+			: it.kind === "stream"
+				? { featured: featSet.stream.has(it.stream.videoId), thumb: it.stream.thumbHref }
+				: { featured: featSet.feed.has(it.cam.id), thumb: it.cam.thumbHref };
+	// Paginated pick: first featured card with an image, else the first card with an image.
+	const pickThumb = (cands: { featured: boolean; thumb: string }[]): string => {
+		const withImg = cands.filter((c) => c.thumb);
+		return (withImg.find((c) => c.featured) ?? withImg[0])?.thumb ?? randomFeatured();
+	};
+
 	// Super-feature groups: resolve each event key's member ids to live feed view models
 	// (skipping any whose row is gone/screenshotless); the first is the primary. Members are
 	// pulled from the normal homepage feeds row (below) so they don't show twice, but stay in
@@ -534,7 +577,19 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		? { title: primaryGroup.members[0]!.name, posterHref: primaryGroup.members[0]!.thumbHref, route: eventRoute(primaryGroup.key) }
 		: null;
 	const homeExtras = { topTags, topMakes, slugForTag, vendorsWithGallery, superFeature };
-	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, homeExtras, { dev }), TITLE, stats, { dev });
+	// Homepage OG image: the super-feature poster if one is live, else a random "pretty"-tagged
+	// image, else the shared fallback.
+	const prettyThumbs = (tagIndex.get("pretty") ?? autoTagIndex.get("pretty") ?? [])
+		.map((e) =>
+			e.kind === "cam"
+				? camByIp.get(e.ref)?.thumbHref
+				: e.kind === "stream"
+					? streamByVideo.get(e.ref)?.thumbHref
+					: feedById.get(e.ref)?.thumbHref,
+		)
+		.filter((h): h is string => !!h);
+	const homeThumb = superFeature?.posterHref || pickRandom(prettyThumbs, 1)[0] || randomFeatured();
+	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, homeExtras, { dev }), TITLE, stats, { dev, thumb: homeThumb });
 
 	// --index-only stops here: index.html is fresh, and every other page + image is reused
 	// from the last full bake's out/.
@@ -549,15 +604,16 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	for (let p = 1; p <= totalPages; p++) {
 		const pageHosts = hosts.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
 		const mainInner = renderIndexMain(pageHosts, p, totalPages, { dev });
-		await writePage(hostsPage(p), mainInner, `hosts | ${TITLE}`, stats, { dev });
-		if (p === 1) await writePage(HOSTS, mainInner, `hosts | ${TITLE}`, stats, { dev });
+		const thumb = pickThumb(pageHosts.map((h) => ({ featured: featSet.cam.has(h.ip), thumb: h.thumbHref })));
+		await writePage(hostsPage(p), mainInner, `hosts | ${TITLE}`, stats, { dev, thumb });
+		if (p === 1) await writePage(HOSTS, mainInner, `hosts | ${TITLE}`, stats, { dev, thumb });
 	}
 
 	// ── Per-host pages ─────────────────────────────────────────────────────────────
 
 	for (const host of hosts) {
 		const mainInner = renderHostMain(host, { dev, slugForTag });
-		await writePage(hostRoute(host.slug), mainInner, `${host.displayName} | ${TITLE}`, stats, { dev });
+		await writePage(hostRoute(host.slug), mainInner, `${host.displayName} | ${TITLE}`, stats, { dev, thumb: host.thumbHref || randomFeatured() });
 	}
 
 	// ── Syndication feeds: the newest cameras as RSS + Atom ───────────────────────────
@@ -577,14 +633,15 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	for (let p = 1; p <= ytTotalPages; p++) {
 		const pageStreams = streams.slice((p - 1) * YT_PAGE_SIZE, p * YT_PAGE_SIZE);
 		const mainInner = renderYtMain(pageStreams, p, ytTotalPages, { dev });
-		await writePage(streamsPage(p), mainInner, `streams | ${TITLE}`, stats, { dev });
-		if (p === 1) await writePage(STREAMS, mainInner, `streams | ${TITLE}`, stats, { dev });
+		const thumb = pickThumb(pageStreams.map((s) => ({ featured: featSet.stream.has(s.videoId), thumb: s.thumbHref })));
+		await writePage(streamsPage(p), mainInner, `streams | ${TITLE}`, stats, { dev, thumb });
+		if (p === 1) await writePage(STREAMS, mainInner, `streams | ${TITLE}`, stats, { dev, thumb });
 	}
 
 	for (const s of streams) {
 		const siblings = s.channelId ? (streamsByChannel.get(s.channelId) ?? [s]) : [s];
 		const mainInner = renderYtDetail(s, siblings, { dev, slugForTag });
-		await writePage(streamRoute(s.slug), mainInner, `${s.label} | ${TITLE}`, stats, { dev });
+		await writePage(streamRoute(s.slug), mainInner, `${s.label} | ${TITLE}`, stats, { dev, thumb: s.thumbHref || randomFeatured() });
 	}
 
 	// ── Feeds gallery (page 1 mirrors /feeds) + per-feed detail pages ─────────────────
@@ -593,24 +650,25 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	for (let p = 1; p <= feedTotalPages; p++) {
 		const pageCams = feedCams.slice((p - 1) * FEED_PAGE_SIZE, p * FEED_PAGE_SIZE);
 		const mainInner = renderFeedMain(pageCams, p, feedTotalPages, { dev });
-		await writePage(feedsPage(p), mainInner, `feeds | ${TITLE}`, stats, { dev });
-		if (p === 1) await writePage(FEEDS, mainInner, `feeds | ${TITLE}`, stats, { dev });
+		const thumb = pickThumb(pageCams.map((c) => ({ featured: featSet.feed.has(c.id), thumb: c.thumbHref })));
+		await writePage(feedsPage(p), mainInner, `feeds | ${TITLE}`, stats, { dev, thumb });
+		if (p === 1) await writePage(FEEDS, mainInner, `feeds | ${TITLE}`, stats, { dev, thumb });
 	}
 
 	for (const cam of feedCams) {
 		const mainInner = renderFeedDetail(cam, { dev, slugForTag });
-		await writePage(feedRoute(cam.slug), mainInner, `${cam.name} | ${TITLE}`, stats, { dev });
+		await writePage(feedRoute(cam.slug), mainInner, `${cam.name} | ${TITLE}`, stats, { dev, thumb: cam.thumbHref || randomFeatured() });
 	}
 
 	// ── Super-feature combined event pages (both correlated feeds + merged metadata) ──
 	for (const g of superGroups) {
 		const mainInner = renderEventDetail(g.members, { dev, slugForTag });
-		await writePage(eventRoute(g.key), mainInner, `${g.members[0]!.name} | ${TITLE}`, stats, { dev });
+		await writePage(eventRoute(g.key), mainInner, `${g.members[0]!.name} | ${TITLE}`, stats, { dev, thumb: g.members[0]!.thumbHref || randomFeatured() });
 	}
 
 	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────
 
-	await writePage(TAGS, renderTagsMain(cloudTags, slugForTag), `tags | ${TITLE}`, stats, { dev });
+	await writePage(TAGS, renderTagsMain(cloudTags, slugForTag), `tags | ${TITLE}`, stats, { dev, thumb: randomFeatured() });
 
 	// ── Tag browse pages: one paginated, blended gallery per tag ─────────────────────
 	// Resolve each tagged (kind, ref) against the in-memory view models via the maps
@@ -633,8 +691,9 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		for (let p = 1; p <= tagTotalPages; p++) {
 			const pageItems = items.slice((p - 1) * TAG_PAGE_SIZE, p * TAG_PAGE_SIZE);
 			const mainInner = renderTagBrowseMain(tag, pageItems, p, tagTotalPages, slug, { dev, slugForTag });
-			await writePage(tagPage(slug, p), mainInner, `#${tag} | ${TITLE}`, stats, { dev });
-			if (p === 1) await writePage(tagRoute(slug), mainInner, `#${tag} | ${TITLE}`, stats, { dev });
+			const thumb = pickThumb(pageItems.map(candOf));
+			await writePage(tagPage(slug, p), mainInner, `#${tag} | ${TITLE}`, stats, { dev, thumb });
+			if (p === 1) await writePage(tagRoute(slug), mainInner, `#${tag} | ${TITLE}`, stats, { dev, thumb });
 			tagPagesWritten++;
 		}
 	}
@@ -660,8 +719,9 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	for (let p = 1; p <= galleryTotalPages; p++) {
 		const pageItems = galleryItems.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
 		const mainInner = renderGalleryMain(pageItems, p, galleryTotalPages, { dev });
-		await writePage(galleryPage(p), mainInner, `gallery | ${TITLE}`, stats, { dev });
-		if (p === 1) await writePage(GALLERY, mainInner, `gallery | ${TITLE}`, stats, { dev });
+		const thumb = pickThumb(pageItems.map(candOf));
+		await writePage(galleryPage(p), mainInner, `gallery | ${TITLE}`, stats, { dev, thumb });
+		if (p === 1) await writePage(GALLERY, mainInner, `gallery | ${TITLE}`, stats, { dev, thumb });
 	}
 
 	// Per-vendor galleries: the cam hosts + feeds whose fingerprint vendor matches, blended by
@@ -682,8 +742,9 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		for (let p = 1; p <= vTotalPages; p++) {
 			const pageItems = items.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
 			const mainInner = renderVendorMain(vendor, pageItems, p, vTotalPages, { dev });
-			await writePage(vendorPage(vendor, p), mainInner, `${vendor} | ${TITLE}`, stats, { dev });
-			if (p === 1) await writePage(vendorRoute(vendor), mainInner, `${vendor} | ${TITLE}`, stats, { dev });
+			const thumb = pickThumb(pageItems.map(candOf));
+			await writePage(vendorPage(vendor, p), mainInner, `${vendor} | ${TITLE}`, stats, { dev, thumb });
+			if (p === 1) await writePage(vendorRoute(vendor), mainInner, `${vendor} | ${TITLE}`, stats, { dev, thumb });
 			vendorPagesWritten++;
 		}
 	}
@@ -692,10 +753,10 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	// `breakdown` and `vendorsWithGallery` were both computed above for the homepage columns
 	// (breakdown from cams.product across both device sources, tagged with each row's vendor);
 	// reuse them here so the make → model → count table and its "filter" links stay in sync.
-	await writePage(FINGERPRINTS, renderFingerprintsMain(breakdown, vendorsWithGallery), `fingerprints | ${TITLE}`, stats, { dev });
+	await writePage(FINGERPRINTS, renderFingerprintsMain(breakdown, vendorsWithGallery), `fingerprints | ${TITLE}`, stats, { dev, thumb: randomFeatured() });
 
 	// ── Tips: a single static standalone page (content baked from tips.md) ────────────
-	await writePage(TIPS, renderTipsMain(), `tips | ${TITLE}`, stats, { dev });
+	await writePage(TIPS, renderTipsMain(), `tips | ${TITLE}`, stats, { dev, thumb: randomFeatured() });
 
 	// ── Import (DEV-ONLY): add cams from the browser instead of the CLI ───────────────
 	// Baked only under `bun dev`; a production bake emits none of it, and the nav button
@@ -703,7 +764,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	// (the type buttons hx-get them into #import-form; nothing navigates to them as a
 	// page), so they skip writePage and go straight to their co-located snippet path.
 	if (dev) {
-		await writePage(IMPORT, renderImportMain(), `import | ${TITLE}`, stats, { dev });
+		await writePage(IMPORT, renderImportMain(), `import | ${TITLE}`, stats, { dev, thumb: randomFeatured() });
 		for (const t of ["shodan", "youtube", "mjpeg"] as const) {
 			await Bun.write(`${OUT_DIR}/${importFormSnippetDisk(t)}`, `${renderImportForm(t)}\n`);
 		}
@@ -735,7 +796,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		const route = streamRoute(s.slug);
 		mapPoints.push({ x, y, href: urlOf(route), snip: snipUrlOf(route), title: s.label });
 	}
-	await writePage(MAP, renderMapMain(mapPoints, mapPoints.length), `map | ${TITLE}`, stats, { dev });
+	await writePage(MAP, renderMapMain(mapPoints, mapPoints.length), `map | ${TITLE}`, stats, { dev, thumb: randomFeatured() });
 
 	const images = written.size;
 	console.log(

@@ -38,6 +38,8 @@ import {
 
 export const TITLE = "w3b.cam";
 const THEME_COLOR = "#667eea";
+/** Site-wide copy for <meta name="description"> and the OG/Twitter description cards. */
+const SITE_DESCRIPTION = "internet voyeurism, cam hunters anonymous";
 
 /** Map viewBox size. The world outlines in worldmap.ts are pre-projected into this space. */
 const MAP_W = 1000;
@@ -1477,10 +1479,14 @@ interface ShellOpts {
 	mainInner: string;
 	/** Dev mode: link /__dev/dev.css and load /__dev/dev.js (both served by src/dev.ts). */
 	dev?: boolean;
+	/** Absolute, cache-busted OG/Twitter preview image URL; "" omits the image tags. */
+	ogImage?: string;
+	/** Absolute canonical page URL for og:url; "" omits the tag. */
+	ogUrl?: string;
 }
 
 /** Wrap inner-<main> content in the full HTML document. */
-export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts): string {
+export function renderShell({ title, stats, mainInner, dev = false, ogImage = "", ogUrl = "" }: ShellOpts): string {
 	// Header links (brand + nav + the discovered-count link) live outside <main>, so they
 	// can't inherit its hx-target:inherited / hx-swap:inherited. Without a resolvable
 	// target htmx falls back to a full-page navigation on the href, which loads the whole
@@ -1509,6 +1515,17 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(2)}<meta name="viewport" content="width=device-width, initial-scale=1" />`,
 		`${T(2)}<meta name="theme-color" content="${THEME_COLOR}" />`,
 		`${T(2)}<title>${escapeHtml(title)}</title>`,
+		`${T(2)}<meta name="description" content="${escapeHtml(SITE_DESCRIPTION)}" />`,
+		`${T(2)}<meta property="og:title" content="${escapeHtml(title)}" />`,
+		`${T(2)}<meta property="og:type" content="website" />`,
+		`${T(2)}<meta property="og:site_name" content="${escapeHtml(TITLE)}" />`,
+		`${T(2)}<meta property="og:description" content="${escapeHtml(SITE_DESCRIPTION)}" />`,
+		...(ogUrl ? [`${T(2)}<meta property="og:url" content="${escapeHtml(ogUrl)}" />`] : []),
+		...(ogImage ? [`${T(2)}<meta property="og:image" content="${escapeHtml(ogImage)}" />`] : []),
+		`${T(2)}<meta name="twitter:card" content="summary_large_image" />`,
+		`${T(2)}<meta name="twitter:title" content="${escapeHtml(title)}" />`,
+		`${T(2)}<meta name="twitter:description" content="${escapeHtml(SITE_DESCRIPTION)}" />`,
+		...(ogImage ? [`${T(2)}<meta name="twitter:image" content="${escapeHtml(ogImage)}" />`] : []),
 		`${T(2)}<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />`,
 		`${T(2)}<link rel="icon" type="image/svg+xml" href="/favicon.svg" />`,
 		`${T(2)}<link rel="shortcut icon" href="/favicon.ico" />`,
