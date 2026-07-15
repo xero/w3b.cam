@@ -13,7 +13,7 @@ import {
 	tagSlug,
 	urlOf,
 	ytSlug,
-} from "../../src/urls.ts";
+} from "../../src/site/urls.ts";
 
 describe("route -> artifact mapping", () => {
 	it("maps the homepage (empty route) specially", () => {

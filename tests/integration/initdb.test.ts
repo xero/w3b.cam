@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
-import { closeDb, countFeedRows, countRows, countYtRows, openDb } from "../../src/db.ts";
+import { closeDb, countFeedRows, countRows, countYtRows, openDb } from "../../src/db/db.ts";
 import { runScript } from "../helpers/run.ts";
 import { cleanTmpDir, makeTmpSpace, type TmpSpace } from "../helpers/tmp.ts";
 

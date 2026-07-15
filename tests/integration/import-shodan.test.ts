@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { closeDb, countRows, hasHost, openDb } from "../../src/db.ts";
+import { closeDb, countRows, hasHost, openDb } from "../../src/db/db.ts";
 import { SHODAN_FIXTURE_DIR } from "../helpers/fixture.ts";
 import { runScript } from "../helpers/run.ts";
 import { cleanTmpDir, makeTmpSpace, type TmpSpace } from "../helpers/tmp.ts";

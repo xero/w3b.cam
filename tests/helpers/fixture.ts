@@ -13,8 +13,8 @@ import {
 	makeFeedInserter,
 	makeYtInserter,
 	openDb,
-} from "../../src/db.ts";
-import { ingestShodanDir } from "../../src/ingest.ts";
+} from "../../src/db/db.ts";
+import { ingestShodanDir } from "../../src/ingest/ingest.ts";
 import { FEED_FIXTURES, STREAM_FIXTURES } from "../fixtures/rows.ts";
 
 /** Directory holding the committed Shodan fixture JSON (scanned like `in/`). */

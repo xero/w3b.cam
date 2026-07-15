@@ -1,6 +1,6 @@
 import type { Subprocess } from "bun";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { serveStatic } from "../../src/serve.ts";
+import { serveStatic } from "../../src/server/serve.ts";
 import { prepFixtureDb } from "../helpers/fixture.ts";
 import { resolveCommand, runScript } from "../helpers/run.ts";
 import { cleanTmpDir, makeTmpSpace, type TmpSpace } from "../helpers/tmp.ts";

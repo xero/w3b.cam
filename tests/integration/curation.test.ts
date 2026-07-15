@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { closeDb, entityTags, hasHost, isFeatured, loadYtGeo, openDb } from "../../src/db.ts";
+import { closeDb, entityTags, hasHost, isFeatured, loadYtGeo, openDb } from "../../src/db/db.ts";
 import { prepFixtureDb, SHODAN_FIXTURE_DIR } from "../helpers/fixture.ts";
 import { runScript } from "../helpers/run.ts";
 import { cleanTmpDir, makeTmpSpace, type TmpSpace } from "../helpers/tmp.ts";

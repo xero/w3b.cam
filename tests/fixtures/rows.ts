@@ -4,10 +4,10 @@
 // which do zero IO. Every row carries a screenshot so the baked site actually renders it
 // (bake only emits rows with ss_base64).
 //
-// Stream ids Yw8CZCEOdXE / UNbOvsRAx9U match FEATURED_SEED in src/db.ts, so a fresh DB
+// Stream ids Yw8CZCEOdXE / UNbOvsRAx9U match FEATURED_SEED in src/db/db.ts, so a fresh DB
 // pins them on the homepage for free.
 
-import type { FeedRow, YtRow } from "../../src/types.ts";
+import type { FeedRow, YtRow } from "../../src/core/types.ts";
 import { TINY_PNG_B64, TINY_PNG_HASH, TINY_PNG_MIME } from "./tinyimg.ts";
 
 const img = { ss_mime: TINY_PNG_MIME, ss_hash: TINY_PNG_HASH, ss_base64: TINY_PNG_B64 };

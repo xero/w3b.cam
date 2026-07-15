@@ -1,6 +1,6 @@
 // Run a package.json script as a subprocess and capture its result. We resolve the
 // script's actual command from package.json and spawn it directly (e.g. `bun run
-// src/tag.ts`) rather than `bun run <name>`: the latter double-spawns (a `bun run` that
+// src/curate/tag.ts`) rather than `bun run <name>`: the latter double-spawns (a `bun run` that
 // spawns another `bun run`), and under `bun test` the grandchild's piped stdout is
 // captured unreliably. Resolving the command still faithfully exercises what the script
 // declares (and asserts the script exists). Callers pass DB_PATH / OUT_DIR (and, for the

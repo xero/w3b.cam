@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { WebcamMatch } from "../../src/types.ts";
-import { escapeHtml, getScreenshot, isBlockedProduct, num, toRow } from "../../src/util.ts";
+import type { WebcamMatch } from "../../src/core/types.ts";
+import { escapeHtml, getScreenshot, isBlockedProduct, num, toRow } from "../../src/core/util.ts";
 
 describe("escapeHtml", () => {
 	it("escapes the five HTML-significant characters", () => {

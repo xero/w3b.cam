@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { closeDb, countRows, openDb } from "../../src/db.ts";
+import { closeDb, countRows, openDb } from "../../src/db/db.ts";
 import { prepFixtureDb } from "../helpers/fixture.ts";
 import { runScript } from "../helpers/run.ts";
 import { cleanTmpDir, makeTmpSpace, type TmpSpace } from "../helpers/tmp.ts";

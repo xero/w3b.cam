@@ -1,6 +1,8 @@
 # https://w3b.cam
 ## internet voyeurism
 
+[![scrape](https://github.com/xero/w3b.cam/actions/workflows/scrape.yml/badge.svg)](https://github.com/xero/w3b.cam/actions/workflows/scrape.yml)
+
 > [!NOTE]
 > db and website gallery generator of open webcams, with tools for scraping and manual cam hunting
 
@@ -270,43 +272,60 @@ A few details worth knowing:
 
 ```
 src/
-  initdb.ts       create and seed an empty database
-  config.ts       query and tuning constants
-  types.ts        screenshot, match, and row interfaces
-  util.ts         escaping, screenshot extraction, row mapping
-  shodan.ts       client factory and retry/backoff wrapper
-  yt-api.ts       YouTube Data API client, youtube.md parser, thumbnail fetch
-  db.ts           schema, open/close, and inserts
-  scraper.ts      fetch cameras from the Shodan API, dedupe, store
-  preflight.ts    CI credit precheck: skip a scrape when no query credits remain
-  import.ts       unified importer CLI: --shodan | --youtube | --mjpeg | --hls
-  ingest.ts       shared ingest core (bulk + single-record), CLI and web
-  shodan-source.ts normalize and filter raw Shodan JSON banners into rows
-  mjpeg-source.ts classify an MJPEG cam URL by vendor (endpoint fingerprints)
-  hls-source.ts   ingest a curated .m3u8 list as vendor-agnostic hls feed rows
-  osiris-source.ts classify + snapshot Osiris cams; shared feed row builder
-  osiris.ts       internal: re-ingest the one-off Osiris dump into feed
-  fingerprint.ts  derive camera make/model from a banner into the product field
-  blacklist.ts    drop a host and record it so scrapes skip it
-  unblacklist.ts  reverse a blacklist entry
-  reorder.ts      pin a host's card image to one port
-  tag.ts          attach a free-form label to a cam, stream, or feed cam
-  untag.ts        remove a tag from a cam, stream, or feed cam
-  feature.ts      add a cam or stream to the homepage featured set
-  unfeature.ts    remove a cam or stream from the featured set
-  geo.ts          assign a YouTube stream's map coordinates (cams.lat/lng)
-  purge.ts        remove stored RDP/VNC rows that predate the ingest filter
-  urls.ts         the route layer: one place that decides every site path
-  render.ts       pure HTML rendering (grouping, pager, pages, shell)
-  syndication.ts  render the newest hosts as rss.xml / atom.xml feeds
-  tips.ts         the cam-hunting guide as pre-rendered HTML for the tips page
-  worldmap.ts     pre-projected world-country outlines for the map page
-  build.ts        database to static site (orchestrator)
-  serve.ts        static file server for out/
-  dev.ts          local dev server with right-click blacklist/reorder/tag
-  dev-client/     browser editing UI (js and css), served from source
-  sync.ts         pull, push, or merge the database with the db-store release
-  merge.ts        merge new webcam rows from one database into another
+  core/           shared foundation, imported everywhere
+    config.ts       query and tuning constants
+    types.ts        screenshot, match, and row interfaces
+    util.ts         escaping, screenshot extraction, row mapping
+    cli.ts          shared argument parsing for the small curation CLIs
+  db/             schema, inserts, and database-lifecycle commands
+    db.ts           barrel re-exporting store/*
+    store/          schema, inserts, reads, tags, featured, ytgeo, moderation
+    initdb.ts       create and seed an empty database
+    sync.ts         pull, push, or merge the database with the db-store release
+    merge.ts        merge new webcam rows from one database into another
+  scrape/         Shodan API acquisition
+    shodan.ts       client factory and retry/backoff wrapper
+    scraper.ts      fetch cameras from the Shodan API, dedupe, store
+    preflight.ts    CI credit precheck: skip a scrape when no query credits remain
+  ingest/         parse external inputs into rows
+    ingest.ts       barrel re-exporting core/*, the shared ingest surface
+    core/           per-source ingest: shared, shodan, youtube, mjpeg, hls, osiris
+    shodan-source.ts normalize and filter raw Shodan JSON banners into rows
+    mjpeg-source.ts classify an MJPEG cam URL by vendor (endpoint fingerprints)
+    hls-source.ts   ingest a curated .m3u8 list as vendor-agnostic hls feed rows
+    osiris-source.ts classify + snapshot Osiris cams; shared feed row builder
+    yt-api.ts       YouTube Data API client, youtube.md parser, thumbnail fetch
+    import.ts       unified importer CLI: --shodan | --youtube | --mjpeg | --hls
+    osiris.ts       internal: re-ingest the one-off Osiris dump into feed
+  fingerprint/    camera make/model derivation
+    fingerprint.ts  derive camera make/model from a banner into the product field
+    fingerprint-cli.ts  catch-up backfill that rebuilds the fingerprint table on demand
+  curate/         database-editing commands
+    blacklist.ts    drop a host and record it so scrapes skip it
+    unblacklist.ts  reverse a blacklist entry
+    remove.ts       delete a stored entry without blacklisting it
+    reorder.ts      pin a host's card image to one port
+    tag.ts          attach a free-form label to a cam, stream, or feed cam
+    untag.ts        remove a tag from a cam, stream, or feed cam
+    geo.ts          assign a YouTube stream's map coordinates (cams.lat/lng)
+    feature.ts      add a cam or stream to the homepage featured set
+    unfeature.ts    remove a cam or stream from the featured set
+    superfeature.ts group feed cams into a one-off homepage event banner
+    purge.ts        remove stored RDP/VNC rows that predate the ingest filter
+  site/           database to static site
+    render.ts       barrel re-exporting render/*
+    render/         primitives, pager, shared, host, stream, feed, tags, map, pages, shell
+    build.ts        orchestrator; build/* holds the image, meta, home, and page helpers
+    build/          images, meta, home, pages
+    urls.ts         the route layer: one place that decides every site path
+    syndication.ts  render the newest hosts as rss.xml / atom.xml feeds
+    tips.ts         the cam-hunting guide as pre-rendered HTML for the tips page
+    worldmap.ts     pre-projected world-country outlines for the map page
+    autotags.ts     derived auto-tags (transport kind, http) for the tag cloud
+  server/         static and dev servers
+    serve.ts        static file server for out/
+    dev.ts          local dev server with right-click blacklist/reorder/tag
+    dev-client/     browser editing UI (js and css), served from source
 in/                curated inputs (gitignored)
   youtube.md       YouTube live-stream list, source for `bun import --youtube`
   mjpeg.md         MJPEG camera URL list, source for `bun import --mjpeg`
@@ -329,7 +348,7 @@ out/               generated site (gitignored). Clean folder URLs: every page is
   tags/               tag cloud, links to per-tag browse pages
   tags/<slug>/{n}/    one paginated browse page per tag
   map/                world map of every geolocated camera
-  tips/               cam-hunting guide (baked from src/tips.ts, served at w3b.cam/tips)
+  tips/               cam-hunting guide (baked from src/site/tips.ts, served at w3b.cam/tips)
   rss.xml             RSS 2.0 feed of the 50 newest discovered hosts
   atom.xml            Atom 1.0 feed of the same
   img/                extracted screenshots and thumbnails

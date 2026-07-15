@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { join } from "node:path";
-import { closeDb, openDb } from "../../src/db.ts";
+import { closeDb, openDb } from "../../src/db/db.ts";
 import { prepFixtureDb } from "../helpers/fixture.ts";
 import { runScript } from "../helpers/run.ts";
 import { cleanTmpDir, makeTmpSpace, type TmpSpace } from "../helpers/tmp.ts";
