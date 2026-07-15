@@ -139,6 +139,15 @@ function confirm(): boolean {
 }
 
 // ── Directions ────────────────────────────────────────────────────────────────
+/** Drop SQLite's stale -wal/-shm sidecars beside `path` (best-effort; a missing one is fine). */
+function dropSidecars(path: string): void {
+  for (const ext of ["-wal", "-shm"]) {
+    try {
+      unlinkSync(`${path}${ext}`);
+    } catch {}
+  }
+}
+
 /**
  * Download the store asset to `dest`, then drop the stale -wal/-shm sidecars left
  * beside it — SQLite would otherwise replay old writes over the fresh file and
@@ -147,11 +156,7 @@ function confirm(): boolean {
  */
 async function downloadStore(dest: string): Promise<void> {
   await $`gh release download ${RELEASE} --pattern ${ASSET} -O ${dest} --clobber`;
-  for (const ext of ["-wal", "-shm"]) {
-    try {
-      unlinkSync(`${dest}${ext}`);
-    } catch {}
-  }
+  dropSidecars(dest);
 }
 
 async function doPush(): Promise<void> {
@@ -248,11 +253,7 @@ async function doMerge(): Promise<void> {
 
     // Atomically swap the merged copy in as the live DB, then drop its stale sidecars.
     renameSync(localPath, DB_PATH);
-    for (const ext of ["-wal", "-shm"]) {
-      try {
-        unlinkSync(`${DB_PATH}${ext}`);
-      } catch {}
-    }
+    dropSidecars(DB_PATH);
   } finally {
     // Drop the prod scratch (+ any sidecars) and, on failure, the leftover working copy.
     // On success localPath was renamed away, so its unlink no-ops. The .bak is kept.

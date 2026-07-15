@@ -359,6 +359,15 @@ main {
 	}
 }
 
+/* A live feed that failed to load: the JS has fallen back to the baked still (the
+   "View live" link is always the escape hatch). Desaturate and dim it, with a
+   warn-colored ring, so a dead feed reads as intentional rather than broken. */
+.feed-error {
+	filter: grayscale(1) brightness(0.8);
+	outline: 2px solid var(--warn);
+	outline-offset: -2px;
+}
+
 .btn {
 	--btn-face: var(--accent);
 	--btn-edge: color-mix(in srgb, var(--btn-face) 70%, #000);

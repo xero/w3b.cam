@@ -41,10 +41,13 @@ export const EVENT = "event";
 
 // ── Paginated routes (numbered; the pager links these, page 1 included) ─────────
 
-export const galleryPage = (p: number): string => `${GALLERY}/${p}`;
-export const hostsPage = (p: number): string => `${HOSTS}/${p}`;
-export const feedsPage = (p: number): string => `${FEEDS}/${p}`;
-export const streamsPage = (p: number): string => `${STREAMS}/${p}`;
+/** `${base}/${part}` builder — the shared shape of every section page and detail route. */
+const seg = (base: string) => (part: string | number): string => `${base}/${part}`;
+
+export const galleryPage = seg(GALLERY);
+export const hostsPage = seg(HOSTS);
+export const feedsPage = seg(FEEDS);
+export const streamsPage = seg(STREAMS);
 /** Bare per-tag landing (linked from the cloud; mirrors page 1). */
 export const tagRoute = (slug: string): string => `${TAGS}/${slug}`;
 /** Numbered per-tag page (the pager links these). */
@@ -56,9 +59,9 @@ export const vendorPage = (vendor: string, p: number): string => `${FINGERPRINTS
 
 // ── Detail routes ───────────────────────────────────────────────────────────────
 
-export const hostRoute = (slug: string): string => `${HOSTS}/${slug}`;
-export const feedRoute = (slug: string): string => `${FEEDS}/${slug}`;
-export const streamRoute = (slug: string): string => `${STREAMS}/${slug}`;
+export const hostRoute = seg(HOSTS);
+export const feedRoute = seg(FEEDS);
+export const streamRoute = seg(STREAMS);
 /** Combined page for a super-feature event group (both correlated feeds on one page). */
 export const eventRoute = (key: string): string => `${EVENT}/${eventSlug(key)}`;
 
