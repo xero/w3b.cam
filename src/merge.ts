@@ -20,6 +20,7 @@ import { parseArgs } from "node:util";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { closeDb, countRows } from "./db.ts";
+import { promptYesNo } from "./util.ts";
 
 const USAGE = "Usage: bun run merge <source-db> <target-db> [--dry-run] [--yes]";
 
@@ -64,12 +65,6 @@ function openReadonly(path: string): Database {
     db?.close();
     return new Database(`file:${resolve(path)}?immutable=1`, { readonly: true, strict: true });
   }
-}
-
-/** Prompt y/N (default No). A non-TTY stdin reads as No. Mirrors sync.ts. */
-function promptYesNo(): boolean {
-  const answer = prompt("Proceed? [y/N]");
-  return answer != null && /^y(es)?$/i.test(answer.trim());
 }
 
 // ── Merge ─────────────────────────────────────────────────────────────────────

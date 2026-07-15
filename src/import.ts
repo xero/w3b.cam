@@ -20,7 +20,7 @@ import { parseArgs } from "node:util";
 import { IN_DIR, MJPEG_MD, STREAMS_MD, YOUTUBE_MD } from "./config.ts";
 import { closeDb, openDb } from "./db.ts";
 import { ingestHlsFile, ingestMjpegFile, ingestShodanDir, ingestYoutube } from "./ingest.ts";
-import { mustEnv } from "./util.ts";
+import { mustEnv, num } from "./util.ts";
 
 const { values, positionals } = parseArgs({
   args: Bun.argv.slice(2),
@@ -52,9 +52,6 @@ if (picked.length !== 1) {
   process.exit(1);
 }
 const type = picked[0]!;
-
-/** Parse a positive-int flag, or 0 (meaning "no limit / use the default") when absent/invalid. */
-const num = (s?: string): number => (s ? Math.max(1, Number.parseInt(s, 10) || 0) : 0);
 
 // Resolve the YouTube key before opening the DB so a missing key exits cleanly
 // (mustEnv → process.exit) without leaking an open handle.

@@ -34,6 +34,15 @@ export function pickRandom<T>(arr: readonly T[], n: number): T[] {
   return a.slice(0, k);
 }
 
+/** Parse a positive-int flag, or 0 (meaning "no limit / use the default") when absent/invalid. */
+export const num = (s?: string): number => (s ? Math.max(1, Number.parseInt(s, 10) || 0) : 0);
+
+/** Prompt y/N (default No). A non-TTY stdin reads as No. */
+export function promptYesNo(): boolean {
+  const answer = prompt("Proceed? [y/N]");
+  return answer != null && /^y(es)?$/i.test(answer.trim());
+}
+
 /** Read a required env var or exit with a clear message. */
 export function mustEnv(name: string): string {
   const value = process.env[name];
@@ -80,7 +89,7 @@ export function escapeHtml(value: unknown): string {
 export const asMatch = (raw: unknown): WebcamMatch => raw as WebcamMatch;
 
 /** Pull the per-banner UUID out of the untyped `_shodan` object. */
-export function shodanId(m: WebcamMatch): string | null {
+function shodanId(m: WebcamMatch): string | null {
   const sh = m._shodan;
   if (sh && typeof sh === "object" && "id" in sh) {
     const id = (sh as { id?: unknown }).id;
@@ -128,7 +137,7 @@ const isBadHost = (h: string): boolean => {
   return t === "" || t === "localhost" || t === "localhost.";
 };
 
-export interface DisplayParts {
+interface DisplayParts {
   /** First real domain/hostname, or null when only the host:ports should show. */
   name: string | null;
   /** IP, IPv6 bracketed so `host:port` stays unambiguous. */

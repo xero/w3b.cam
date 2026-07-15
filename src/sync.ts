@@ -20,6 +20,7 @@ import { copyFileSync, renameSync, unlinkSync } from "node:fs";
 import { DB_PATH } from "./config.ts";
 import { closeDb, openDb } from "./db.ts";
 import { mergeDbs } from "./merge.ts";
+import { promptYesNo } from "./util.ts";
 
 const RELEASE = "db-store";
 const ASSET = DB_PATH; // "camhunting.sqlite"
@@ -134,9 +135,7 @@ function printComparison(local: Meta | null, remote: Meta | null): void {
 
 /** Prompt y/N (default No). Bypassed by --yes; a non-TTY stdin reads as No. */
 function confirm(): boolean {
-  if (wantYes) return true;
-  const answer = prompt("Proceed? [y/N]");
-  return answer != null && /^y(es)?$/i.test(answer.trim());
+  return wantYes || promptYesNo();
 }
 
 // ── Directions ────────────────────────────────────────────────────────────────

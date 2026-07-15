@@ -21,7 +21,7 @@ export function toBanners(parsed: unknown): WebcamMatch[] | null {
 }
 
 /** Insertable rows plus a per-list tally (the counts the import summary reports). */
-export interface ShodanScan {
+interface ShodanScan {
   rows: CamRow[];
   banners: number;
   /** Banners kept: passed the blacklist, carry a screenshot, and aren't RDP/VNC. */

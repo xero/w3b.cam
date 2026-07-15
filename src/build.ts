@@ -27,7 +27,7 @@ import {
 	YT_PAGE_SIZE,
 } from "./config.ts";
 import { computeAutoTags } from "./autotags.ts";
-import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb, type TagKind } from "./db.ts";
+import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadSuperFeatures, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb, type TagKind } from "./db.ts";
 import { productBreakdown } from "./fingerprint.ts";
 import { isBlockedProduct, pickRandom } from "./util.ts";
 import {
@@ -46,6 +46,7 @@ import {
 	renderTagBrowseMain,
 	renderTagsMain,
 	renderTipsMain,
+	renderEventDetail,
 	renderFeedDetail,
 	renderFeedMain,
 	renderVendorMain,
@@ -77,6 +78,7 @@ import {
 	STREAMS,
 	TAGS,
 	TIPS,
+	eventRoute,
 	feedRoute,
 	feedSlug,
 	feedsPage,
@@ -301,6 +303,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	let ytGeo: Map<string, { lat: number; lng: number }>;
 	let feedRows: StoredFeedRow[];
 	let featured: { cams: string[]; streams: string[]; feeds: string[] };
+	let superFeatures: Map<string, string[]>;
 	let vendorRefs: { byVendor: Map<string, { hosts: Set<string>; feeds: Set<string> }>; byRef: Map<string, string> };
 	try {
 		// The site never renders a blank card, whatever the DB holds, so every kind is
@@ -319,6 +322,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		ytGeo = loadYtGeo(db);
 		feedRows = (indexOnly ? allFeedRowsMeta(db) : allFeedRows(db)).filter((r) => r.ss_base64);
 		featured = loadFeatured(db);
+		superFeatures = loadSuperFeatures(db);
 		vendorRefs = loadVendorRefs(db);
 	} finally {
 		closeDb(db);
@@ -471,6 +475,16 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		.filter((s): s is YtStream => s !== undefined);
 
 	const feedById = new Map(feedCams.map((c) => [c.id, c]));
+
+	// Super-feature groups: resolve each event key's member ids to live feed view models
+	// (skipping any whose row is gone/screenshotless); the first is the primary. Members are
+	// pulled from the normal homepage feeds row (below) so they don't show twice, but stay in
+	// the /feeds gallery and their own pages. Each group gets a combined /event page + a banner.
+	const superGroups = [...superFeatures]
+		.map(([key, ids]) => ({ key, members: ids.map((id) => feedById.get(id)).filter((c): c is FeedCam => c !== undefined) }))
+		.filter((g) => g.members.length > 0);
+	const superFeatureIds = new Set(superGroups.flatMap((g) => g.members.map((c) => c.id)));
+
 	const newestFeeds = [...feedRows]
 		.sort((a, b) => {
 			// Cams with a baked thumbnail first, so the homepage never leads with black tiles.
@@ -489,13 +503,15 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	const fillCount = HOME_PER_KIND - HOME_FEATURED_PER_KIND;
 	const topCamIps = new Set(hosts.slice(0, fillCount).map((h) => h.ip));
 	const topStreamIds = new Set(newestStreams.slice(0, fillCount).map((s) => s.videoId));
-	const topFeedIds = new Set(newestFeeds.slice(0, fillCount).map((c) => c.id));
+	// Super-feature members are promoted to the banner, so drop them from the normal feeds row.
+	const newestFeedsHome = newestFeeds.filter((c) => !superFeatureIds.has(c.id));
+	const topFeedIds = new Set(newestFeedsHome.slice(0, fillCount).map((c) => c.id));
 	const liveCamRefs = featured.cams.filter((ip) => camByIp.has(ip) && !topCamIps.has(ip));
 	const liveStreamRefs = featured.streams.filter((id) => streamByVideo.has(id) && !topStreamIds.has(id));
-	const liveFeedRefs = featured.feeds.filter((id) => feedById.has(id) && !topFeedIds.has(id));
+	const liveFeedRefs = featured.feeds.filter((id) => feedById.has(id) && !topFeedIds.has(id) && !superFeatureIds.has(id));
 	const homeCams = pickHome(pickRandom(liveCamRefs, HOME_FEATURED_PER_KIND), camByIp, hosts, (h) => h.ip, HOME_PER_KIND);
 	const homeStreams = pickHome(pickRandom(liveStreamRefs, HOME_FEATURED_PER_KIND), streamByVideo, newestStreams, (s) => s.videoId, HOME_PER_KIND);
-	const homeFeeds = pickHome(pickRandom(liveFeedRefs, HOME_FEATURED_PER_KIND), feedById, newestFeeds, (c) => c.id, HOME_PER_KIND);
+	const homeFeeds = pickHome(pickRandom(liveFeedRefs, HOME_FEATURED_PER_KIND), feedById, newestFeedsHome, (c) => c.id, HOME_PER_KIND);
 
 	// Homepage "top N" columns. Both feed off aggregations that are also used later (the tags
 	// cloud and the fingerprints breakdown), but the homepage needs them before the
@@ -512,7 +528,12 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	// Drop the catch-all "Unidentified"/"Other" makes: the front page features what we've
 	// actually identified. breakdown is already total-descending, so slice the top N.
 	const topMakes = breakdown.filter((g) => g.make !== "Unidentified" && g.make !== "Other").slice(0, HOME_TOP_N);
-	const homeExtras = { topTags, topMakes, slugForTag, vendorsWithGallery };
+	// One super-feature banner (the first group's primary member drives its image + title).
+	const primaryGroup = superGroups[0];
+	const superFeature = primaryGroup
+		? { title: primaryGroup.members[0]!.name, posterHref: primaryGroup.members[0]!.thumbHref, route: eventRoute(primaryGroup.key) }
+		: null;
+	const homeExtras = { topTags, topMakes, slugForTag, vendorsWithGallery, superFeature };
 	await writePage(HOME, renderHomeMain(homeCams, homeStreams, homeFeeds, homeExtras, { dev }), TITLE, stats, { dev });
 
 	// --index-only stops here: index.html is fresh, and every other page + image is reused
@@ -579,6 +600,12 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	for (const cam of feedCams) {
 		const mainInner = renderFeedDetail(cam, { dev, slugForTag });
 		await writePage(feedRoute(cam.slug), mainInner, `${cam.name} | ${TITLE}`, stats, { dev });
+	}
+
+	// ── Super-feature combined event pages (both correlated feeds + merged metadata) ──
+	for (const g of superGroups) {
+		const mainInner = renderEventDetail(g.members, { dev, slugForTag });
+		await writePage(eventRoute(g.key), mainInner, `${g.members[0]!.name} | ${TITLE}`, stats, { dev });
 	}
 
 	// ── Tags cloud (linked from the nav; each tag links to its browse page below) ────

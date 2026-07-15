@@ -15,7 +15,7 @@
 import type { Classified, FeedKind, OsirisCamera } from "./types.ts";
 
 /** Pre-embed category, kept for the ingest summary tally. */
-export type MjpegCategory = "mjpeg-stream" | "jpg-snapshot" | "viewer-page";
+type MjpegCategory = "mjpeg-stream" | "jpg-snapshot" | "viewer-page";
 
 /** A classified MJPEG cam: a `Classified` (feed_kind/live_url/external_url) plus the
  *  routing metadata the ingester needs. `grabUrl` is the media URL the thumbnail is
@@ -29,7 +29,7 @@ export interface MjpegClassified extends Classified {
 }
 
 /** One line of the curated list: the URL and any curated label before it. */
-export interface MjpegEntry {
+interface MjpegEntry {
   url: string;
   label: string;
 }

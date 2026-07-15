@@ -9,7 +9,7 @@
 import type { OsirisCamera } from "./types.ts";
 
 /** One line of a curated HLS list: the URL and any curated label before it. */
-export interface HlsEntry {
+interface HlsEntry {
   url: string;
   label: string;
 }
@@ -18,7 +18,7 @@ export interface HlsEntry {
 const M3U8_EXT = /\.m3u8(?:$|[?#])/i;
 
 /** True when a URL is an http(s) HLS playlist. */
-export function isHlsUrl(raw: string): boolean {
+function isHlsUrl(raw: string): boolean {
   try {
     const u = new URL(raw.trim());
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;

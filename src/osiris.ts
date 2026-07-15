@@ -17,6 +17,7 @@ import { parseArgs } from "node:util";
 import { OSIRIS_JSON } from "./config.ts";
 import { closeDb, openDb } from "./db.ts";
 import { ingestOsirisFile } from "./ingest.ts";
+import { num } from "./util.ts";
 
 const { values, positionals } = parseArgs({
   args: Bun.argv.slice(2),
@@ -31,7 +32,6 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
 });
 
-const num = (s?: string): number => (s ? Math.max(1, Number.parseInt(s, 10) || 0) : 0);
 const ytKey = process.env.YOUTUBE_API_KEY?.trim() || undefined;
 
 const db = openDb();

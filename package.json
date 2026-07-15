@@ -20,6 +20,7 @@
     "geo": "bun run src/geo.ts",
     "feature": "bun run src/feature.ts",
     "unfeature": "bun run src/unfeature.ts",
+    "superfeature": "bun run src/superfeature.ts",
     "purge": "bun run src/purge.ts",
     "fingerprint": "bun run src/fingerprint-cli.ts",
     "sync": "bun run src/sync.ts",

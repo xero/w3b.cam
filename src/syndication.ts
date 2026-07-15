@@ -14,7 +14,7 @@ const FEED_TITLE = `${TITLE} live feed`;
 const FEED_DESCRIPTION = "most recently discovered cameras";
 
 /** One syndication entry, resolved from a host (build.ts supplies the enclosure byte length). */
-export interface FeedItem {
+interface FeedItem {
 	/** e.g. `160.218.97.98:8080 (o2.cz)` */
 	title: string;
 	/** Absolute permalink to the host page. */

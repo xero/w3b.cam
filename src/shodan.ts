@@ -2,7 +2,7 @@ import { createShodanClient, ShodanApiError } from "shodan-ts";
 import { BACKOFF_BASE_MS, CLIENT_OPTS, MAX_RETRIES } from "./config.ts";
 import { sleep } from "./util.ts";
 
-export type ShodanClient = ReturnType<typeof createShodanClient>;
+type ShodanClient = ReturnType<typeof createShodanClient>;
 
 export function makeClient(token: string): ShodanClient {
   return createShodanClient(token, CLIENT_OPTS);

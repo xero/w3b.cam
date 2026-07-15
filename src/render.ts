@@ -37,11 +37,11 @@ import {
 } from "./urls.ts";
 
 export const TITLE = "w3b.cam";
-export const THEME_COLOR = "#667eea";
+const THEME_COLOR = "#667eea";
 
 /** Map viewBox size. The world outlines in worldmap.ts are pre-projected into this space. */
-export const MAP_W = 1000;
-export const MAP_H = 500;
+const MAP_W = 1000;
+const MAP_H = 500;
 
 /** Equirectangular projection of a coordinate into the map viewBox (must match worldmap.ts). */
 export function project(lat: number, lng: number): { x: number; y: number } {
@@ -52,7 +52,7 @@ export function project(lat: number, lng: number): { x: number; y: number } {
 export const T = (n: number): string => "\t".repeat(n);
 
 /** Prefix every non-empty line of a block with `level` tabs. */
-export function indentBlock(text: string, level: number): string {
+function indentBlock(text: string, level: number): string {
 	const pad = T(level);
 	return text
 		.split("\n")
@@ -60,7 +60,7 @@ export function indentBlock(text: string, level: number): string {
 		.join("\n");
 }
 
-export function safeParseArray(json: string): string[] {
+function safeParseArray(json: string): string[] {
 	try {
 		const v: unknown = JSON.parse(json);
 		return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
@@ -96,7 +96,7 @@ export const isSafeImageMime = (mime: string): boolean => SAFE_MIME.test(mime);
  * are bracketed; scheme-default ports are dropped for clean URLs. 443 -> https, 554
  * -> rtsp, 80 -> bare http, everything else -> http on the explicit port.
  */
-export function liveUrl(ip: string, port: number): string {
+function liveUrl(ip: string, port: number): string {
 	const host = ip.includes(":") ? `[${ip}]` : ip;
 	switch (port) {
 		case 443:
@@ -112,7 +112,7 @@ export function liveUrl(ip: string, port: number): string {
 
 // ── Grouped model ────────────────────────────────────────────────────────────
 
-export interface Shot {
+interface Shot {
 	port: number;
 	product: string | null;
 	timestamp: string | null;
@@ -284,7 +284,7 @@ export function groupByIp(
 // ── Pagination ───────────────────────────────────────────────────────────────
 
 /** Windowed page set: fixed width of 2·span+5 slots, with "…" filling gaps. */
-export function pageWindow(cur: number, total: number, span = 2): (number | "…")[] {
+function pageWindow(cur: number, total: number, span = 2): (number | "…")[] {
 	const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 	if (total <= 2 * span + 5) return range(1, total);
 	if (cur <= span + 2) return [...range(1, 2 * span + 3), "…", total];
@@ -369,19 +369,19 @@ const sectionPager = (route: (p: number) => string) => (cur: number, total: numb
 	renderPagerWith(cur, total, (p) => urlOf(route(p)), (p) => snipUrlOf(route(p)));
 
 /** Numbered pager for the hosts (cams) gallery. */
-export const renderPager = sectionPager(hostsPage);
+const renderPager = sectionPager(hostsPage);
 
 /** Numbered pager for the all-kinds gallery. */
-export const renderGalleryPager = sectionPager(galleryPage);
+const renderGalleryPager = sectionPager(galleryPage);
 
 /** Numbered pager for the YouTube streams gallery. */
-export const renderStreamsPager = sectionPager(streamsPage);
+const renderStreamsPager = sectionPager(streamsPage);
 
 /** Numbered pager for the feeds gallery. */
-export const renderFeedPager = sectionPager(feedsPage);
+const renderFeedPager = sectionPager(feedsPage);
 
 /** Numbered pager for a per-vendor fingerprint gallery. */
-export const renderVendorPager = (cur: number, total: number, vendor: string): string =>
+const renderVendorPager = (cur: number, total: number, vendor: string): string =>
 	sectionPager((p) => vendorPage(vendor, p))(cur, total);
 
 // ── Index cards ──────────────────────────────────────────────────────────────
@@ -393,7 +393,7 @@ export const renderVendorPager = (cur: number, total: number, vendor: string): s
  * detail-page "Tags" row can link each tag; absent (production galleries never need
  * it) means tags render as plain text.
  */
-export interface RenderOpts {
+interface RenderOpts {
 	dev?: boolean;
 	slugForTag?: (tag: string) => string;
 }
@@ -439,7 +439,7 @@ function renderHostName(host: Host): string {
  * (`ip:ports` then `(hostname)`) so every card occupies the same height even when a
  * host has no hostname; location follows on a third line.
  */
-export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
+function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 	const badge =
 		host.count > 1
 			? `\n${T(2)}<span class="badge">${host.count} angles</span>`
@@ -466,6 +466,22 @@ export function renderHostCard(host: Host, opts: RenderOpts = {}): string {
 	].join("\n");
 }
 
+/**
+ * The shared paginated-gallery body: a `<section class="gallery">` card grid followed by
+ * the pager, with optional markup spliced before (a heading) or after (a back link).
+ * Callers build the `cards` string and `pager`; an empty pager is dropped.
+ */
+function galleryBody(cards: string, pager: string, opts: { before?: string; after?: string } = {}): string {
+	return [
+		...(opts.before ? [opts.before] : []),
+		`<section class="gallery">`,
+		cards,
+		`</section>`,
+		...(pager ? [pager] : []),
+		...(opts.after ? [opts.after] : []),
+	].join("\n");
+}
+
 /** Inner-<main> content for an index page: the card grid plus the pager. */
 export function renderIndexMain(hosts: Host[], page: number, totalPages: number, opts: RenderOpts = {}): string {
 	if (hosts.length === 0) {
@@ -473,12 +489,7 @@ export function renderIndexMain(hosts: Host[], page: number, totalPages: number,
 	}
 	const cards = hosts.map((h) => indentBlock(renderHostCard(h, opts), 1)).join("\n");
 	const pager = renderPager(page, totalPages);
-	return [
-		`<section class="gallery">`,
-		cards,
-		`</section>`,
-		...(pager ? [pager] : []),
-	].join("\n");
+	return galleryBody(cards, pager);
 }
 
 // ── Homepage ─────────────────────────────────────────────────────────────────
@@ -489,11 +500,13 @@ export function renderIndexMain(hosts: Host[], page: number, totalPages: number,
  * from build.ts; `slugForTag` maps a tag to its browse-page slug, and `vendorsWithGallery`
  * gates which makes link to a `/fingerprints/<vendor>` gallery (the rest are plain text).
  */
-export interface HomeExtras {
+interface HomeExtras {
 	topTags: { tag: string; count: number }[];
 	topMakes: ProductGroup[];
 	slugForTag: (tag: string) => string;
 	vendorsWithGallery: Set<string>;
+	/** One-off event promoted above everything: a banner linking to the combined /event page. */
+	superFeature?: { title: string; posterHref: string; route: string } | null;
 }
 
 /**
@@ -541,6 +554,26 @@ export function renderHomeMain(cams: Host[], streams: YtStream[], feeds: FeedCam
 		].join("\n");
 
 	const parts: string[] = [];
+
+	// A super-feature (one-off event) is promoted above everything: a full-width banner with
+	// the primary member's image + title, linking to the combined /event page (both live views).
+	const sf = extras.superFeature;
+	if (sf) {
+		const bg = sf.posterHref ? ` style="background-image:url('${escapeHtml(sf.posterHref)}')"` : "";
+		parts.push(
+			[
+				`<a class="super-feature" href="${urlOf(sf.route)}" hx-get="${snipUrlOf(sf.route)}" hx-push-url="${urlOf(sf.route)}">`,
+				`${T(1)}<div class="sf-thumb"${bg} role="img" aria-label="${escapeHtml(sf.title)}"></div>`,
+				`${T(1)}<div class="sf-body">`,
+				`${T(2)}<span class="sf-tag">Live event</span>`,
+				`${T(2)}<h2 class="sf-title">${escapeHtml(sf.title)}</h2>`,
+				`${T(2)}<span class="sf-more">View event &rarr;</span>`,
+				`${T(1)}</div>`,
+				`</a>`,
+			].join("\n"),
+		);
+	}
+
 	if (cams.length) {
 		const cards = cams.map((h) => indentBlock(renderHostCard(h, opts), 1)).join("\n");
 		parts.push(section("cams", cards, urlOf(HOSTS), snipUrlOf(HOSTS), "all cams"));
@@ -593,6 +626,42 @@ function metaRow(label: string, valueHtml: string): string {
 	].join("\n");
 }
 
+/** Append a metadata table row when `value` is non-empty (the value is escaped). */
+function pushMetaRow(rows: string[], label: string, value: string | null | undefined): void {
+	if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
+}
+
+/**
+ * The shared detail-page shell for host, stream, and feed pages: an <article> with a
+ * heading, a `.shots` figure block, one `.meta` table, an optional extra section (stream
+ * pages splice in sibling streams here), and a back link. `headingHtml`, `shotsInner`, and
+ * `extra` are already-final HTML; `rows` are metaRow() strings.
+ */
+function detailArticle(opts: {
+	headingHtml: string;
+	shotsInner: string;
+	rows: string[];
+	extra?: string;
+	backRoute: string;
+	backLabel: string;
+}): string {
+	return [
+		`<article class="host">`,
+		`${T(1)}<h2>${opts.headingHtml}</h2>`,
+		`${T(1)}<div class="shots">`,
+		indentBlock(opts.shotsInner, 1),
+		`${T(1)}</div>`,
+		`${T(1)}<table class="meta">`,
+		`${T(2)}<tbody>`,
+		indentBlock(opts.rows.join("\n"), 3),
+		`${T(2)}</tbody>`,
+		`${T(1)}</table>`,
+		...(opts.extra ? [indentBlock(opts.extra, 1)] : []),
+		`${T(1)}<a class="back" href="${urlOf(opts.backRoute)}" hx-get="${snipUrlOf(opts.backRoute)}" hx-push-url="${urlOf(opts.backRoute)}">&larr; Back to ${opts.backLabel}</a>`,
+		`</article>`,
+	].join("\n");
+}
+
 /**
  * The comma-joined value for a "Tags" meta row. With `slugForTag` each tag is an
  * anchor to its browse page (real href + hx-get so it works with no JS); without it
@@ -635,39 +704,29 @@ export function renderHostMain(host: Host, opts: RenderOpts = {}): string {
 	const shots = host.shots.map((s) => shotFigure(s, host.ip, opts)).join("\n");
 
 	const rows: string[] = [];
-	const push = (label: string, value: string | null | undefined): void => {
-		if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
-	};
-	push("Title", host.httpTitle);
-	push("Fingerprint", host.product);
-	if (host.hostnames.length) push("Hostnames", host.hostnames.join(", "));
-	if (host.domains.length) push("Domains", host.domains.join(", "));
-	push("Country", host.country_name);
-	push("City", host.city);
-	push("Region", host.region_code);
-	push("Organization", host.org);
-	push("ISP", host.isp);
-	push("ASN", host.asn);
+	pushMetaRow(rows, "Title", host.httpTitle);
+	pushMetaRow(rows, "Fingerprint", host.product);
+	if (host.hostnames.length) pushMetaRow(rows, "Hostnames", host.hostnames.join(", "));
+	if (host.domains.length) pushMetaRow(rows, "Domains", host.domains.join(", "));
+	pushMetaRow(rows, "Country", host.country_name);
+	pushMetaRow(rows, "City", host.city);
+	pushMetaRow(rows, "Region", host.region_code);
+	pushMetaRow(rows, "Organization", host.org);
+	pushMetaRow(rows, "ISP", host.isp);
+	pushMetaRow(rows, "ASN", host.asn);
 	rows.push(metaRow("Ports", escapeHtml(host.shots.map((s) => s.port).join(", "))));
 	if (host.tags.length) rows.push(metaRow("Tags", renderTagLinks(host.tags, opts.slugForTag)));
 
 	const nameHtml = renderHostName(host);
 	const heading = nameHtml ? `${renderHostPort(host)} ${nameHtml}` : renderHostPort(host);
 
-	return [
-		`<article class="host">`,
-		`${T(1)}<h2>${heading}</h2>`,
-		`${T(1)}<div class="shots">`,
-		indentBlock(shots, 1),
-		`${T(1)}</div>`,
-		`${T(1)}<table class="meta">`,
-		`${T(2)}<tbody>`,
-		indentBlock(rows.join("\n"), 3),
-		`${T(2)}</tbody>`,
-		`${T(1)}</table>`,
-		`${T(1)}<a class="back" href="${urlOf(HOSTS)}" hx-get="${snipUrlOf(HOSTS)}" hx-push-url="${urlOf(HOSTS)}">&larr; Back to hosts</a>`,
-		`</article>`,
-	].join("\n");
+	return detailArticle({
+		headingHtml: heading,
+		shotsInner: shots,
+		rows,
+		backRoute: HOSTS,
+		backLabel: "hosts",
+	});
 }
 
 // ── YouTube streams ────────────────────────────────────────────────────────────
@@ -736,7 +795,7 @@ function liveStatusText(liveContent: string | null): string | null {
  * galleries render identically; here the title is the stream label and the
  * subtitle is the channel.
  */
-export function renderYtCard(stream: YtStream, opts: RenderOpts = {}): string {
+function renderYtCard(stream: YtStream, opts: RenderOpts = {}): string {
 	const channel = stream.channelTitle
 		? `\n${T(1)}<p class="loc">${escapeHtml(stream.channelTitle)}</p>`
 		: "";
@@ -760,12 +819,7 @@ export function renderYtMain(streams: YtStream[], page: number, totalPages: numb
 	}
 	const cards = streams.map((s) => indentBlock(renderYtCard(s, opts), 1)).join("\n");
 	const pager = renderStreamsPager(page, totalPages);
-	return [
-		`<section class="gallery">`,
-		cards,
-		`</section>`,
-		...(pager ? [pager] : []),
-	].join("\n");
+	return galleryBody(cards, pager);
 }
 
 /** "More from {channel}" section: sibling streams on the same channel, as cards. Empty when there are none. */
@@ -803,33 +857,21 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[], opts: Ren
 	].join("\n");
 
 	const rows: string[] = [];
-	const push = (label: string, value: string | null | undefined): void => {
-		if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
-	};
-	push("Channel", stream.channelTitle);
-	push("Status", liveStatusText(stream.liveContent));
-	push("Published", stream.publishedAt);
-	push("Scheduled", stream.scheduledStart);
-	push("Started", stream.actualStart);
+	pushMetaRow(rows, "Channel", stream.channelTitle);
+	pushMetaRow(rows, "Status", liveStatusText(stream.liveContent));
+	pushMetaRow(rows, "Published", stream.publishedAt);
+	pushMetaRow(rows, "Scheduled", stream.scheduledStart);
+	pushMetaRow(rows, "Started", stream.actualStart);
 	if (stream.tags.length) rows.push(metaRow("Tags", renderTagLinks(stream.tags, opts.slugForTag)));
 
-	const siblingSection = renderSiblings(stream, siblings, opts);
-
-	return [
-		`<article class="host">`,
-		`${T(1)}<h2>${escapeHtml(stream.label)}</h2>`,
-		`${T(1)}<div class="shots">`,
-		indentBlock(figure, 1),
-		`${T(1)}</div>`,
-		`${T(1)}<table class="meta">`,
-		`${T(2)}<tbody>`,
-		indentBlock(rows.join("\n"), 3),
-		`${T(2)}</tbody>`,
-		`${T(1)}</table>`,
-		...(siblingSection ? [indentBlock(siblingSection, 1)] : []),
-		`${T(1)}<a class="back" href="${urlOf(STREAMS)}" hx-get="${snipUrlOf(STREAMS)}" hx-push-url="${urlOf(STREAMS)}">&larr; Back to streams</a>`,
-		`</article>`,
-	].join("\n");
+	return detailArticle({
+		headingHtml: escapeHtml(stream.label),
+		shotsInner: figure,
+		rows,
+		extra: renderSiblings(stream, siblings, opts),
+		backRoute: STREAMS,
+		backLabel: "streams",
+	});
 }
 
 /**
@@ -932,7 +974,7 @@ function feedKindLabel(kind: FeedKind): string {
  * is its location. A cam with no captured thumbnail (link cams, dead feeds) shows the
  * plain black figure.
  */
-export function renderFeedCard(cam: FeedCam, opts: RenderOpts = {}): string {
+function renderFeedCard(cam: FeedCam, opts: RenderOpts = {}): string {
 	const loc = escapeHtml(feedLoc(cam));
 	const locLine = loc ? `\n${T(1)}<p class="loc">${loc}</p>` : "";
 	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
@@ -962,7 +1004,7 @@ export function renderFeedMain(cams: FeedCam[], page: number, totalPages: number
 	}
 	const cards = cams.map((c) => indentBlock(renderFeedCard(c, opts), 1)).join("\n");
 	const pager = renderFeedPager(page, totalPages);
-	return [`<section class="gallery">`, cards, `</section>`, ...(pager ? [pager] : [])].join("\n");
+	return galleryBody(cards, pager);
 }
 
 /**
@@ -1019,30 +1061,67 @@ export function renderFeedDetail(cam: FeedCam, opts: RenderOpts = {}): string {
 	].join("\n");
 
 	const rows: string[] = [];
-	const push = (label: string, value: string | null | undefined): void => {
-		if (value && String(value).trim() !== "") rows.push(metaRow(label, escapeHtml(value)));
-	};
-	push("Source", cam.source);
-	push("Fingerprint", cam.product);
-	push("Location", feedLoc(cam));
-	if (cam.lat != null && cam.lng != null) push("Coordinates", `${cam.lat}, ${cam.lng}`);
-	push("Type", feedKindLabel(cam.feedKind));
+	pushMetaRow(rows, "Source", cam.source);
+	pushMetaRow(rows, "Fingerprint", cam.product);
+	pushMetaRow(rows, "Location", feedLoc(cam));
+	if (cam.lat != null && cam.lng != null) pushMetaRow(rows, "Coordinates", `${cam.lat}, ${cam.lng}`);
+	pushMetaRow(rows, "Type", feedKindLabel(cam.feedKind));
 	if (cam.tags.length) rows.push(metaRow("Tags", renderTagLinks(cam.tags, opts.slugForTag)));
 
-	return [
-		`<article class="host">`,
-		`${T(1)}<h2>${escapeHtml(cam.name)}</h2>`,
-		`${T(1)}<div class="shots">`,
-		indentBlock(figure, 1),
-		`${T(1)}</div>`,
-		`${T(1)}<table class="meta">`,
-		`${T(2)}<tbody>`,
-		indentBlock(rows.join("\n"), 3),
-		`${T(2)}</tbody>`,
-		`${T(1)}</table>`,
-		`${T(1)}<a class="back" href="${urlOf(FEEDS)}" hx-get="${snipUrlOf(FEEDS)}" hx-push-url="${urlOf(FEEDS)}">&larr; Back to feeds</a>`,
-		`</article>`,
-	].join("\n");
+	return detailArticle({
+		headingHtml: escapeHtml(cam.name),
+		shotsInner: figure,
+		rows,
+		backRoute: FEEDS,
+		backLabel: "feeds",
+	});
+}
+
+/**
+ * Combined detail page for a super-feature event group: every correlated feed's live view
+ * stacked together (each labeled with its source + kind), then one merged metadata table.
+ * Each single-value field shows the first member that has it (the pacast stream carries less
+ * metadata than the 511PA jpg, so this fills gaps); Source, Feeds, and Tags show the union.
+ * The first feed is the primary — its name is the page heading. Reuses feedMedia + the
+ * view-live button block that renderFeedDetail uses.
+ */
+export function renderEventDetail(feeds: FeedCam[], opts: RenderOpts = {}): string {
+	const primary = feeds[0]!;
+	const figures = feeds
+		.map((cam) => {
+			const liveHref = cam.externalUrl ?? cam.liveUrl;
+			const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
+			const cap = [cam.source, feedKindLabel(cam.feedKind)].filter((s): s is string => !!s && s.trim() !== "").map((s) => escapeHtml(s)).join(" &middot; ");
+			return [
+				`${T(1)}<figure class="shot"${devAttrs}>`,
+				feedMedia(cam),
+				`${T(2)}<a class="btn" href="${escapeHtml(liveHref)}" target="_blank" rel="noopener noreferrer">`,
+				indentBlock(btnLayers("View live"), 2),
+				`${T(2)}</a>`,
+				cap ? `${T(2)}<figcaption>${cap}</figcaption>` : "",
+				`${T(1)}</figure>`,
+			].filter((s) => s !== "").join("\n");
+		})
+		.join("\n");
+
+	const rows: string[] = [];
+	const sources = [...new Set(feeds.map((c) => c.source).filter((s): s is string => !!s && s.trim() !== ""))];
+	if (sources.length) rows.push(metaRow("Source", escapeHtml(sources.join(", "))));
+	pushMetaRow(rows, "Fingerprint", feeds.map((c) => c.product).find((p) => p != null && p.trim() !== ""));
+	pushMetaRow(rows, "Location", feeds.map((c) => feedLoc(c)).find((l) => l.trim() !== ""));
+	const geoCam = feeds.find((c) => c.lat != null && c.lng != null);
+	if (geoCam) pushMetaRow(rows, "Coordinates", `${geoCam.lat}, ${geoCam.lng}`);
+	rows.push(metaRow("Feeds", escapeHtml(feeds.map((c) => feedKindLabel(c.feedKind)).join(", "))));
+	const allTags = [...new Set(feeds.flatMap((c) => c.tags))].sort();
+	if (allTags.length) rows.push(metaRow("Tags", renderTagLinks(allTags, opts.slugForTag)));
+
+	return detailArticle({
+		headingHtml: escapeHtml(primary.name),
+		shotsInner: figures,
+		rows,
+		backRoute: HOME,
+		backLabel: "home",
+	});
 }
 
 // ── Tags cloud ─────────────────────────────────────────────────────────────────
@@ -1053,7 +1132,7 @@ export function renderFeedDetail(cam: FeedCam, opts: RenderOpts = {}): string {
 // entities, most on a handful), so a linear map crushes the tail against the minimum
 // size. ln() spreads the low/mid range so the cloud actually varies.
 
-export interface TagCount {
+interface TagCount {
 	tag: string;
 	count: number;
 	/** Derived auto-tag (see autotags.ts): sized on the hand-tag scale but may overshoot TAG_MAX_SIZE. */
@@ -1200,7 +1279,7 @@ function renderTagCard(item: TagItem, opts: RenderOpts = {}): string {
 }
 
 /** Numbered pager for a tag browse page (URL builders closed over the tag's slug). */
-export function renderTagPager(cur: number, total: number, slug: string): string {
+function renderTagPager(cur: number, total: number, slug: string): string {
 	return renderPagerWith(cur, total, (p) => urlOf(tagPage(slug, p)), (p) => snipUrlOf(tagPage(slug, p)));
 }
 
@@ -1218,13 +1297,9 @@ export function renderTagBrowseMain(
 	}
 	const cards = items.map((it) => indentBlock(renderTagCard(it, opts), 1)).join("\n");
 	const pager = renderTagPager(page, totalPages, slug);
-	return [
-		`<section class="gallery">`,
-		cards,
-		`</section>`,
-		...(pager ? [pager] : []),
-		`<a class="back" href="${urlOf(TAGS)}" hx-get="${snipUrlOf(TAGS)}" hx-push-url="${urlOf(TAGS)}">&larr; All tags</a>`,
-	].join("\n");
+	return galleryBody(cards, pager, {
+		after: `<a class="back" href="${urlOf(TAGS)}" hx-get="${snipUrlOf(TAGS)}" hx-push-url="${urlOf(TAGS)}">&larr; All tags</a>`,
+	});
 }
 
 // ── All-kinds gallery + per-vendor galleries ──────────────────────────────────
@@ -1241,7 +1316,7 @@ export function renderGalleryMain(items: TagItem[], page: number, totalPages: nu
 	}
 	const cards = items.map((it) => indentBlock(renderTagCard(it, opts), 1)).join("\n");
 	const pager = renderGalleryPager(page, totalPages);
-	return [`<section class="gallery">`, cards, `</section>`, ...(pager ? [pager] : [])].join("\n");
+	return galleryBody(cards, pager);
 }
 
 /** Inner-<main> for a per-vendor fingerprint gallery: a heading, blended cards, the vendor pager, and a back link. */
@@ -1252,14 +1327,10 @@ export function renderVendorMain(vendor: string, items: TagItem[], page: number,
 	}
 	const cards = items.map((it) => indentBlock(renderTagCard(it, opts), 1)).join("\n");
 	const pager = renderVendorPager(page, totalPages, vendor);
-	return [
-		`<h2 class="vendor-title">${escapeHtml(vendor)} cameras</h2>`,
-		`<section class="gallery">`,
-		cards,
-		`</section>`,
-		...(pager ? [pager] : []),
-		back,
-	].join("\n");
+	return galleryBody(cards, pager, {
+		before: `<h2 class="vendor-title">${escapeHtml(vendor)} cameras</h2>`,
+		after: back,
+	});
 }
 
 // ── World map ────────────────────────────────────────────────────────────────
@@ -1397,7 +1468,7 @@ export interface SiteStats {
 	interval: string;
 }
 
-export interface ShellOpts {
+interface ShellOpts {
 	/** <title> for the full page (host pages differ, for bookmarks/deep links). */
 	title: string;
 	/** Site-wide stat block shown under the h1; identical on every page. */
@@ -1479,6 +1550,8 @@ export function renderShell({ title, stats, mainInner, dev = false }: ShellOpts)
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</footer>`,
 		`${T(2)}<script src="/htmx.min.js"></script>`,
+		// Shared init/teardown plumbing for feeds.js + map.js; must load before them.
+		`${T(2)}<script src="/live-lifecycle.js" defer></script>`,
 		// Live-feed client on every page (tiny): drives feed detail feeds and must be
 		// present however you arrive, including htmx swaps whose snippets carry no script.
 		// It loads hls.min.js on demand only when an HLS cam is actually viewed.

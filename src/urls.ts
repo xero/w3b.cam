@@ -37,6 +37,7 @@ export const FINGERPRINTS = "fingerprints";
 export const MAP = "map";
 export const TIPS = "tips";
 export const IMPORT = "import";
+export const EVENT = "event";
 
 // ── Paginated routes (numbered; the pager links these, page 1 included) ─────────
 
@@ -58,6 +59,8 @@ export const vendorPage = (vendor: string, p: number): string => `${FINGERPRINTS
 export const hostRoute = (slug: string): string => `${HOSTS}/${slug}`;
 export const feedRoute = (slug: string): string => `${FEEDS}/${slug}`;
 export const streamRoute = (slug: string): string => `${STREAMS}/${slug}`;
+/** Combined page for a super-feature event group (both correlated feeds on one page). */
+export const eventRoute = (key: string): string => `${EVENT}/${eventSlug(key)}`;
 
 // ── Slugs (the folder name that identifies one detail page) ─────────────────────
 
@@ -89,6 +92,10 @@ export function feedSlug(id: string): string {
 
 /** Folder name for a video's detail page. Ids are already `[A-Za-z0-9_-]`; this is defensive. */
 export const ytSlug = (id: string): string => `yt-${id.replace(/[^A-Za-z0-9_-]+/g, "")}`;
+
+/** Folder name for a super-feature event page, from its (hand-entered) key. Whitelist for traversal safety. */
+export const eventSlug = (key: string): string =>
+	key.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "event";
 
 /**
  * Folder name for a tag. Lowercased and hyphenated; build.ts dedupes two tags that slug

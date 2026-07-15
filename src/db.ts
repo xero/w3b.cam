@@ -125,15 +125,16 @@ const HOST_BLACKLIST_SEED: readonly string[] = [
  * one polymorphic table keyed on (kind, ref, type, value). `kind` matches the cam's
  * kind ('cam' | 'stream' | 'feed'); `ref` is that source's key: 'cam' -> ip_str
  * (host-level, shared across a host's ports), 'stream' -> video_id, 'feed' -> feed id.
- * `type` is 'tag' (value = the normalized tag) or 'featured' (value = '', presence-only).
+ * `type` is 'tag' (value = the normalized tag), 'featured' (value = '', presence-only), or
+ * 'superfeature' (value = an event key grouping feeds for the homepage banner + /event page).
  * Seeded-then-curated: a fresh DB is seeded from IP_TAGS_SEED / FEATURED_SEED once.
  */
 const META_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
 	kind      TEXT NOT NULL,             -- 'cam' | 'stream' | 'feed'
 	ref       TEXT NOT NULL,             -- cam: ip_str (host-level) | stream: video_id | feed: id
-	type      TEXT NOT NULL,             -- 'tag' | 'featured'
-	value     TEXT NOT NULL DEFAULT '',  -- tag text; '' for featured
+	type      TEXT NOT NULL,             -- 'tag' | 'featured' | 'superfeature'
+	value     TEXT NOT NULL DEFAULT '',  -- tag text; '' for featured; event key for superfeature
 	added_at  TEXT NOT NULL DEFAULT (datetime('now')),
 	PRIMARY KEY (kind, ref, type, value)
 ) STRICT;
@@ -161,9 +162,6 @@ CREATE TABLE IF NOT EXISTS fingerprints (
 
 /** Which source a tag/featured `ref` points at. Matches the cam's `kind`. */
 export type TagKind = "cam" | "stream" | "feed";
-
-/** Which source a featured pin points at. Matches the cam's `kind`. */
-export type FeaturedKind = "cam" | "stream" | "feed";
 
 /**
  * Tag -> IPs used to seed the `meta` table (as kind='cam', type='tag') on a fresh
@@ -201,7 +199,7 @@ const IP_TAGS_SEED: Readonly<Record<string, readonly string[]>> = {
  * other seeds it runs only when no featured rows exist (see seedFeatured), so a pin
  * re-pointed by hand (or via `bun run feature`) never reverts.
  */
-const FEATURED_SEED: readonly { kind: FeaturedKind; ref: string }[] = [
+const FEATURED_SEED: readonly { kind: TagKind; ref: string }[] = [
 	{ kind: "cam", ref: "149.232.130.7" },
 	{ kind: "cam", ref: "160.72.56.179" },
 	{ kind: "stream", ref: "Yw8CZCEOdXE" },
@@ -262,7 +260,7 @@ const IMAGE_COLS = new Set(["ss_mime", "ss_hash", "ss_base64"]);
  * never overwrite. A valid, maximal datetime string no `datetime('now')` write can produce;
  * the upserter below preserves both the image and this sentinel on conflict.
  */
-export const SS_PERMANENT = "9999-12-31 23:59:59";
+const SS_PERMANENT = "9999-12-31 23:59:59";
 
 /** The pre-upsert snapshot of a row, handed to `afterUpsert` so it can decide against the
  *  stored state (the prior product is the linchpin of the fingerprint anti-downgrade). */
@@ -551,7 +549,7 @@ export function deleteBlockedProducts(db: Database): number {
  * Idempotent: once the table holds any row this is a no-op, so it never brings back
  * an entry that was later removed by hand.
  */
-export function seedHostBlacklist(db: Database): void {
+function seedHostBlacklist(db: Database): void {
 	const { c } = db.query("SELECT COUNT(*) AS c FROM host_blacklist").get() as { c: number };
 	if (c > 0) return;
 	const stmt = db.query("INSERT OR IGNORE INTO host_blacklist (host) VALUES (?)");
@@ -561,12 +559,12 @@ export function seedHostBlacklist(db: Database): void {
 }
 
 /** Canonical host key: trimmed, lowercased, trailing FQDN dot removed. */
-export function normalizeHost(host: string): string {
+function normalizeHost(host: string): string {
 	return host.trim().toLowerCase().replace(/\.$/, "");
 }
 
 /** Canonical tag key: trimmed and lowercased, so casing/whitespace never dupes a tag. */
-export function normalizeTag(tag: string): string {
+function normalizeTag(tag: string): string {
 	return tag.trim().toLowerCase();
 }
 
@@ -574,7 +572,7 @@ export function normalizeTag(tag: string): string {
  * Seed `meta` tags from IP_TAGS_SEED (all cams) when no tag rows exist. Idempotent:
  * once any tag exists this is a no-op, so it never re-adds a tag removed by hand.
  */
-export function seedTags(db: Database): void {
+function seedTags(db: Database): void {
 	const { c } = db.query("SELECT COUNT(*) AS c FROM meta WHERE type = 'tag'").get() as { c: number };
 	if (c > 0) return;
 	const stmt = db.query("INSERT OR IGNORE INTO meta (kind, ref, type, value) VALUES ('cam', ?, 'tag', ?)");
@@ -673,11 +671,11 @@ export function loadTagCounts(db: Database): { tag: string; count: number }[] {
  * Idempotent: once any featured row exists this is a no-op, so hand-featured entries
  * never revert.
  */
-export function seedFeatured(db: Database): void {
+function seedFeatured(db: Database): void {
 	const { c } = db.query("SELECT COUNT(*) AS c FROM meta WHERE type = 'featured'").get() as { c: number };
 	if (c > 0) return;
 	const stmt = db.query("INSERT OR IGNORE INTO meta (kind, ref, type, value) VALUES (?, ?, 'featured', '')");
-	db.transaction((seed: readonly { kind: FeaturedKind; ref: string }[]) => {
+	db.transaction((seed: readonly { kind: TagKind; ref: string }[]) => {
 		for (const s of seed) stmt.run(s.kind, s.ref);
 	})(FEATURED_SEED);
 }
@@ -704,18 +702,54 @@ export function loadFeatured(db: Database): { cams: string[]; streams: string[];
 }
 
 /** Mark (kind, ref) as featured. Idempotent (INSERT OR IGNORE); true if newly added. */
-export function addFeatured(db: Database, kind: FeaturedKind, ref: string): boolean {
+export function addFeatured(db: Database, kind: TagKind, ref: string): boolean {
 	return db.query("INSERT OR IGNORE INTO meta (kind, ref, type, value) VALUES (?, ?, 'featured', '')").run(kind, ref).changes > 0;
 }
 
 /** Un-feature (kind, ref). True if a row was deleted, false if it was not featured. */
-export function removeFeatured(db: Database, kind: FeaturedKind, ref: string): boolean {
+export function removeFeatured(db: Database, kind: TagKind, ref: string): boolean {
 	return db.query("DELETE FROM meta WHERE kind = ? AND ref = ? AND type = 'featured'").run(kind, ref).changes > 0;
 }
 
 /** True when (kind, ref) is currently featured. */
-export function isFeatured(db: Database, kind: FeaturedKind, ref: string): boolean {
+export function isFeatured(db: Database, kind: TagKind, ref: string): boolean {
 	return db.query("SELECT 1 FROM meta WHERE kind = ? AND ref = ? AND type = 'featured' LIMIT 1").get(kind, ref) != null;
+}
+
+// ── Super-feature (one-off event groups) ──────────────────────────────────────
+// A `superfeature` meta row groups feeds that show the same thing (e.g. a hi-res
+// stream + a lower-res traffic cam of one bridge demolition). `value` is the shared
+// event key; members of a key render together on a combined /event/<key> page and get
+// a banner promoted above everything on the homepage. The first-added member is the
+// "primary" (its image + name drive the banner and page title). Currently feed-only.
+
+/**
+ * Every super-feature group as key -> [feed ids], insertion order preserved so the first
+ * id is the primary. Feeds whose row is gone are still listed; the build skips them.
+ */
+export function loadSuperFeatures(db: Database): Map<string, string[]> {
+	// rowid is the true insertion order (added_at only has 1s granularity, so members added
+	// in the same second would tiebreak by ref and mis-pick the primary).
+	const rows = db
+		.query("SELECT ref, value FROM meta WHERE type = 'superfeature' AND kind = 'feed' ORDER BY value, rowid")
+		.all() as { ref: string; value: string }[];
+	const groups = new Map<string, string[]>();
+	for (const r of rows) {
+		const list = groups.get(r.value);
+		if (list) list.push(r.ref);
+		else groups.set(r.value, [r.ref]);
+	}
+	return groups;
+}
+
+/** Add a feed to the super-feature group `key`. Idempotent; true if newly added. */
+export function addSuperFeature(db: Database, key: string, feedId: string): boolean {
+	return db.query("INSERT OR IGNORE INTO meta (kind, ref, type, value) VALUES ('feed', ?, 'superfeature', ?)").run(feedId, key).changes > 0;
+}
+
+/** Remove a feed from the super-feature group `key`. True if a row was deleted. */
+export function removeSuperFeature(db: Database, key: string, feedId: string): boolean {
+	return db.query("DELETE FROM meta WHERE kind = 'feed' AND ref = ? AND type = 'superfeature' AND value = ?").run(feedId, key).changes > 0;
 }
 
 // ── Stream geo (manual coordinates, kept inline on the cam row) ────────────────
@@ -895,7 +929,7 @@ export function deleteWebcamsByIp(db: Database, ip: string): number {
  * Delete an entity's tags/featured pins (its meta rows). `ref` is that kind's meta key:
  * ip_str (cam), video_id (stream), id (feed) — see META_SCHEMA.
  */
-export function deleteEntityMeta(db: Database, kind: TagKind, ref: string): void {
+function deleteEntityMeta(db: Database, kind: TagKind, ref: string): void {
 	db.query("DELETE FROM meta WHERE kind = ? AND ref = ?").run(kind, ref);
 }
 

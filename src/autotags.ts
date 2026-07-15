@@ -10,7 +10,7 @@
 
 import type { FeedCam, Host } from "./render.ts";
 
-export type AutoTag = { tag: string; refs: { kind: "cam" | "feed"; ref: string }[] };
+type AutoTag = { tag: string; refs: { kind: "cam" | "feed"; ref: string }[] };
 
 /** A host counts as RTSP if any of its ports is 554 or any angle's product mentions RTSP. */
 const hasRtsp = (h: Host): boolean =>

@@ -17,7 +17,7 @@ export interface ShodanScreenshot {
 }
 
 /** Location fields we read off a match (all optional/nullable, so code defensively). */
-export interface MatchLocation {
+interface MatchLocation {
   city?: string | null;
   region_code?: string | null;
   country_code?: string | null;
@@ -98,14 +98,14 @@ export type StoredRow = CamRow & { first_seen: string; last_seen: string; prefer
 // omits them freely (e.g. liveStreamingDetails is absent on a non-live video).
 
 /** One entry of the `snippet.thumbnails` map. */
-export interface YtThumbnail {
+interface YtThumbnail {
   url: string;
   width?: number;
   height?: number;
 }
 
 /** The `snippet` part of a videos.list item (subset we consume). */
-export interface YtSnippet {
+interface YtSnippet {
   publishedAt?: string;
   channelId?: string;
   title?: string;
@@ -118,7 +118,7 @@ export interface YtSnippet {
 }
 
 /** The `liveStreamingDetails` part of a videos.list item (subset we consume). */
-export interface YtLiveStreamingDetails {
+interface YtLiveStreamingDetails {
   actualStartTime?: string;
   scheduledStartTime?: string;
 }

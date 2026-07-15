@@ -355,7 +355,7 @@ const GENERIC_LABELS = new Set([
 ]);
 
 /** True when a product is empty or a server name (the primary fingerprint targets). */
-export function isServerOrEmpty(p: string | null | undefined): boolean {
+function isServerOrEmpty(p: string | null | undefined): boolean {
 	const t = (p ?? "").trim();
 	return t === "" || SERVER_PRODUCTS.has(t.toLowerCase());
 }
@@ -389,7 +389,7 @@ export function specificity(label: string): number {
 export type Action = "fill" | "fix-server" | "upgrade" | "normalize" | "keep";
 
 /** The product to store for one webcam plus the audit fields that describe how it was derived. */
-export interface CamDecision {
+interface CamDecision {
 	/** The product to write to `cams.product`. */
 	product: string;
 	tier: Tier | "-";
@@ -490,7 +490,7 @@ function cleanModel(rest: string): string | null {
  * The label vocabulary is closed (this file emits it), so this is a lookup, not a guess;
  * anything unrecognized falls to make "Other" with the whole label as the model.
  */
-export function splitProduct(product: string): { make: string; model: string | null } {
+function splitProduct(product: string): { make: string; model: string | null } {
 	const p = product.trim();
 	if (FLOOR_MODEL[p]) return { make: "Unidentified", model: FLOOR_MODEL[p] as string };
 	const lp = p.toLowerCase();
@@ -507,7 +507,7 @@ export function splitProduct(product: string): { make: string; model: string | n
 const NON_CAMERA = new Set(["remote desktop protocol", "vnc"]);
 
 /** One product occurrence for the breakdown: its label, plus the fingerprint vendor when known. */
-export interface BreakdownEntry {
+interface BreakdownEntry {
 	product: string | null | undefined;
 	/** Fingerprint `vendor` slug for this row (from the fingerprints table), or null. */
 	vendor?: string | null;

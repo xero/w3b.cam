@@ -29,7 +29,7 @@ export interface Snapshot {
  * 404s fast, an undecodable one errors fast). Ingesters use a run of `timeout`s to tell
  * "we got banned" from "these feeds are just down". `null` reason ⇔ a real snapshot.
  */
-export type SnapFail = "timeout" | "error" | "no-ffmpeg";
+type SnapFail = "timeout" | "error" | "no-ffmpeg";
 
 /** A snapshot attempt: the still (on success) or the reason it failed (G1). */
 export interface SnapResult {
@@ -99,7 +99,7 @@ export function classify(cam: OsirisCamera): Classified | null {
 }
 
 /** Why a camera was skipped, for the ingest summary. */
-export type SkipReason = "auth-gated" | "viewer-page" | "offsite" | "no-feed";
+type SkipReason = "auth-gated" | "viewer-page" | "offsite" | "no-feed";
 
 /**
  * Classify, or report why the cam is skipped. Splits the null cases classify()

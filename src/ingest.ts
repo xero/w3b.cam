@@ -164,7 +164,7 @@ function makePacer(delayMs: number): () => Promise<void> {
 // ── Shodan ────────────────────────────────────────────────────────────────────
 
 /** Silent single-file/paste result (also the shape the web toast reads). */
-export interface ShodanReport {
+interface ShodanReport {
   added: number;
   updated: number;
   changed: number;
@@ -277,7 +277,7 @@ export function ingestShodanText(db: Database, text: string): ShodanReport {
 
 // ── YouTube ─────────────────────────────────────────────────────────────────────
 
-export interface YtReport {
+interface YtReport {
   added: number;
   updated: number;
   changed: number;
@@ -379,7 +379,7 @@ export async function ingestYoutubeOne(db: Database, input: { url: string; label
 
 // ── MJPEG (camhunt) ──────────────────────────────────────────────────────────────
 
-export interface MjpegOneReport {
+interface MjpegOneReport {
   added: number;
   updated: number;
   changed: number;
@@ -850,30 +850,11 @@ export async function ingestOsirisFile(
       if (!key) {
         ytSkippedNoKey = ytEntries.length;
       } else {
-        const insertYt = makeYtInserter(db);
-        const items = await fetchVideos(ytEntries.map((e) => e.videoId), key);
-        const ytRows: YtRow[] = [];
-        for (const e of ytEntries) {
-          const item = items.get(e.videoId);
-          if (!item) {
-            ytMissing++;
-            continue;
-          }
-          let ss = null;
-          let usedThumbUrl: string | null = null;
-          for (const u of thumbnailUrls(item)) {
-            ss = await fetchThumbnail(u);
-            if (ss) {
-              usedThumbUrl = u;
-              break;
-            }
-          }
-          if (!ss) ytNoThumb++;
-          ytRows.push(buildYtRow(e.videoId, e.label, item, usedThumbUrl, ss));
-        }
-        const yr = insertYt(ytRows);
+        const yr = await ingestYtEntries(db, ytEntries, key);
         ytAdded = yr.added;
         ytUpdated = yr.updated;
+        ytMissing = yr.missing;
+        ytNoThumb = yr.noThumb;
       }
     }
   } catch (err) {

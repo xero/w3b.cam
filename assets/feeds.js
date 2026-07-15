@@ -150,22 +150,18 @@
 	});
 
 	// ── Lifecycle ──────────────────────────────────────────────────────────────
-
-	/** Matching elements within `root`, plus `root` itself if it matches. */
-	function collect(root, sel) {
-		if (!root || root.nodeType !== 1) return [];
-		var list = root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll(sel)) : [];
-		if (root.matches && root.matches(sel)) list.push(root);
-		return list;
-	}
+	// Bootstrap + htmx-swap re-init/teardown live in live-lifecycle.js; this script
+	// supplies only init/teardown. init always runs against document (register calls
+	// init(document)), so it can query directly; collect() handles the removed nodes.
+	var collect = window.liveLifecycle.collect;
 
 	function init(root) {
 		root = root || document;
-		var imgs = root.querySelectorAll ? root.querySelectorAll("img[data-refresh]") : collect(root, "img[data-refresh]");
+		var imgs = root.querySelectorAll("img[data-refresh]");
 		for (var i = 0; i < imgs.length; i++) startImg(imgs[i]);
-		var mjpegs = root.querySelectorAll ? root.querySelectorAll("img[data-mjpeg]") : collect(root, "img[data-mjpeg]");
+		var mjpegs = root.querySelectorAll("img[data-mjpeg]");
 		for (var m = 0; m < mjpegs.length; m++) startMjpeg(mjpegs[m]);
-		var vids = root.querySelectorAll ? root.querySelectorAll("video[data-hls]") : collect(root, "video[data-hls]");
+		var vids = root.querySelectorAll("video[data-hls]");
 		for (var j = 0; j < vids.length; j++) startHls(vids[j]);
 	}
 
@@ -182,36 +178,5 @@
 				} catch (x) {}
 	}
 
-	if (document.readyState === "loading") {
-		document.addEventListener("DOMContentLoaded", function () {
-			init(document);
-		});
-	} else {
-		init(document);
-	}
-
-	// htmx swaps <main> for SPA-like navigation without a full reload. Rather than
-	// depend on htmx's (version-specific) lifecycle event names, watch the DOM: a
-	// MutationObserver re-inits live feeds in newly inserted content and tears down
-	// removed content. Attribute changes (our own src cache-busting) aren't observed,
-	// so this only fires on real structural swaps.
-	if (typeof MutationObserver !== "undefined" && document.body) {
-		var pending = false;
-		var mo = new MutationObserver(function (muts) {
-			var added = false;
-			for (var i = 0; i < muts.length; i++) {
-				var m = muts[i];
-				for (var r = 0; r < m.removedNodes.length; r++) teardown(m.removedNodes[r]);
-				if (m.addedNodes.length) added = true;
-			}
-			if (added && !pending) {
-				pending = true; // coalesce a burst of mutations into one init pass
-				setTimeout(function () {
-					pending = false;
-					init(document);
-				}, 0);
-			}
-		});
-		mo.observe(document.body, { childList: true, subtree: true });
-	}
+	window.liveLifecycle.register({ init: init, teardown: teardown });
 })();

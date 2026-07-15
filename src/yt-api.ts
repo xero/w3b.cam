@@ -52,7 +52,7 @@ export function extractVideoId(url: string): string | null {
 }
 
 /** The canonical watch URL for a video id, stored as the row's `url`. */
-export const watchUrl = (videoId: string): string =>
+const watchUrl = (videoId: string): string =>
   `https://www.youtube.com/watch?v=${videoId}`;
 
 /**

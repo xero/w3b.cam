@@ -730,14 +730,6 @@ body > footer {
 	}
 }
 
-.badge.live {
-	background: var(--warn);
-}
-
-.badge.upcoming {
-	background: var(--dot);
-}
-
 .shot video {
 	display: block;
 	width: auto;
@@ -813,17 +805,6 @@ body > footer {
 		font-weight: 600;
 		color: var(--link);
 	}
-}
-
-.noshot {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 20rem;
-	max-width: 100%;
-	aspect-ratio: 4 / 3;
-	background: #000;
-	color: var(--muted);
 }
 
 .tagcloud {
@@ -946,6 +927,74 @@ body > footer {
 	border-bottom: 1px solid var(--border);
 	padding-bottom: 0.35rem;
 	margin-bottom: var(--gap);
+}
+
+/* Super-feature: a one-off event promoted above every homepage section. A full-width
+   clickable banner (the primary feed's frame beside the title) linking to the combined
+   /event page. Reuses the card hover feel but reads bigger and leads with an accent edge.
+   Flex row wrap stacks the frame above the text on narrow screens. */
+.super-feature {
+	display: flex;
+	flex-flow: row wrap;
+	align-items: stretch;
+	gap: var(--gap);
+	margin-bottom: calc(var(--gap) * 1.5);
+	padding: 1rem;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-left: 4px solid var(--accent);
+	color: inherit;
+	text-decoration: none;
+	transition: border-color 0.15s ease, transform 0.15s ease;
+
+	&:hover,
+	&:focus-visible {
+		border-color: var(--accent);
+		background: var(--coast);
+		transform: translateY(-2px);
+		outline: none;
+	}
+
+	& .sf-thumb {
+		flex: 2 1 22rem;
+		min-width: min(100%, 18rem);
+		max-width: 500px;
+		aspect-ratio: 16 / 9;
+		background: #000 center / cover no-repeat;
+		border: 1px solid var(--border);
+	}
+
+	& .sf-body {
+		flex: 1 1 14rem;
+		display: flex;
+		flex-flow: column nowrap;
+		justify-content: center;
+		gap: 0.6rem;
+	}
+
+	& .sf-tag {
+		align-self: flex-start;
+		font-size: var(--text-sm);
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--on-accent);
+		background: var(--accent);
+		padding: 0.15rem 0.6rem;
+		border-radius: 999px;
+	}
+
+	& .sf-title {
+		font-size: var(--h-xl);
+		font-weight: 700;
+		color: var(--link);
+		overflow-wrap: anywhere;
+	}
+
+	& .sf-more {
+		color: var(--muted);
+		font-weight: 600;
+	}
 }
 
 .home {

@@ -155,18 +155,14 @@
 		svg.__mapInit = false;
 	}
 
-	function collect(root, sel) {
-		if (!root || root.nodeType !== 1) return [];
-		var list = root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll(sel)) : [];
-		if (root.matches && root.matches(sel)) list.push(root);
-		return list;
-	}
+	// Bootstrap + htmx-swap re-init/teardown live in live-lifecycle.js; this script
+	// supplies only init/teardown. init always runs against document (register calls
+	// init(document)), so it can query directly; collect() handles the removed nodes.
+	var collect = window.liveLifecycle.collect;
 
 	function init(root) {
 		root = root || document;
-		// querySelectorAll directly (document is nodeType 9, which collect() rejects);
-		// collect() is only for the MutationObserver's added/removed element nodes.
-		var maps = root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll("svg.worldmap")) : collect(root, "svg.worldmap");
+		var maps = root.querySelectorAll("svg.worldmap");
 		for (var i = 0; i < maps.length; i++) startMap(maps[i]);
 	}
 	function teardown(root) {
@@ -174,34 +170,5 @@
 		for (var i = 0; i < maps.length; i++) stopMap(maps[i]);
 	}
 
-	if (document.readyState === "loading") {
-		document.addEventListener("DOMContentLoaded", function () {
-			init(document);
-		});
-	} else {
-		init(document);
-	}
-
-	// htmx swaps <main> for SPA-like navigation. Mirror feeds.js: watch the DOM and
-	// (re-)init a map in newly inserted content, tearing down a removed one so its
-	// listeners don't leak between page swaps.
-	if (typeof MutationObserver !== "undefined" && document.body) {
-		var pending = false;
-		var mo = new MutationObserver(function (muts) {
-			var added = false;
-			for (var i = 0; i < muts.length; i++) {
-				var m = muts[i];
-				for (var rIdx = 0; rIdx < m.removedNodes.length; rIdx++) teardown(m.removedNodes[rIdx]);
-				if (m.addedNodes.length) added = true;
-			}
-			if (added && !pending) {
-				pending = true;
-				setTimeout(function () {
-					pending = false;
-					init(document);
-				}, 0);
-			}
-		});
-		mo.observe(document.body, { childList: true, subtree: true });
-	}
+	window.liveLifecycle.register({ init: init, teardown: teardown });
 })();

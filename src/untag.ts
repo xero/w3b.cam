@@ -5,24 +5,10 @@
 //
 // Usage:  bun run untag <cam|stream|feed> <ref> <tag>
 
-import { isIP } from "node:net";
 import { closeDb, openDb, removeTag } from "./db.ts";
+import { parseKindRef } from "./cli.ts";
 
-const kind = Bun.argv[2]?.trim();
-const ref = Bun.argv[3]?.trim();
-const tag = Bun.argv[4]?.trim();
-
-if ((kind !== "cam" && kind !== "stream" && kind !== "feed") || !ref || !tag) {
-  console.error("Usage: bun run untag <cam|stream|feed> <ref> <tag>");
-  process.exit(1);
-}
-
-// A cam is keyed by IP; validate it so a typo can't silently match nothing. Stream
-// (video id) and feed (namespaced id) refs are opaque strings, so accept any.
-if (kind === "cam" && isIP(ref) === 0) {
-  console.error(`Invalid IP "${ref}". Expected an IPv4 or IPv6 address.`);
-  process.exit(1);
-}
+const { kind, ref, tag } = parseKindRef("Usage: bun run untag <cam|stream|feed> <ref> <tag>", { needTag: true });
 
 const db = openDb();
 
