@@ -1,0 +1,96 @@
+name: wiki
+
+# Publishes ./docs (plus the root README as the Home page) to the repo's GitHub wiki.
+on:
+  # on any docs or README change on main
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+  # or manually
+  workflow_dispatch:
+
+jobs:
+  sync-docs:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: repo
+
+      - name: checkout wiki
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.CICD_TOKEN }}
+
+      - name: configure git
+        run: |
+          # attribute the sync to the commit's author, falling back to the actor
+          # (workflow_dispatch carries no head_commit)
+          NAME="${{ github.event.head_commit.author.name }}"
+          EMAIL="${{ github.event.head_commit.author.email }}"
+          if [ -z "$NAME" ]; then
+            NAME="${{ github.actor }}"
+            EMAIL="${{ github.actor }}@users.noreply.github.com"
+          fi
+          git config --global user.name "$NAME"
+          git config --global user.email "$EMAIL"
+
+      - name: sync docs to wiki
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # wipe the old wiki content, keeping git internals and any uploaded images
+          find wiki -mindepth 1 -maxdepth 1 -not -name '.git' -not -name 'img' -exec rm -rf {} \;
+
+          # copy the docs pages, and the root README as the wiki Home page
+          cp -r repo/docs/* wiki/
+          cp repo/README.md wiki/Home.md
+
+          cd wiki
+
+          # custom footer: roman-numeral copyright (no custom sidebar)
+          to_roman() {
+            local n=$1 r=""
+            local -a v=(1000 900 500 400 100 90 50 40 10 9 5 4 1)
+            local -a s=(M CM D CD C XC L XL X IX V IV I)
+            local i
+            for i in "${!v[@]}"; do
+              while [ "$n" -ge "${v[i]}" ]; do r="$r${s[i]}"; n=$((n - v[i])); done
+            done
+            printf '%s' "$r"
+          }
+          START=2026
+          NOW=$(date +%Y)
+          if [ "$START" -eq "$NOW" ]; then
+            YEARS="$(to_roman "$NOW")"
+          else
+            YEARS="$(to_roman "$START")-$(to_roman "$NOW")"
+          fi
+          echo "## ▓▒▒░ &copy; ${YEARS} : [w3b.cam](${REPO_URL}) ░▒▒▓" > _Footer.md
+
+          # rewrite links for the flat wiki namespace:
+          #  1. repo-escaping links (../path.md) -> absolute blob URLs (the target is not a wiki page).
+          #     the whole perl program is one double-quoted arg so $REPO_URL expands while perl's
+          #     capture refs stay literal (\$1\$2).
+          find . -name '*.md' -exec perl -pi -e \
+            "s{\]\(\.\./([^)#]+)(#[^)]+)?\)}{](${REPO_URL}/blob/main/\$1\$2)}g" {} +
+          #  2. docs-relative links (./docs/x.md, ./x.md, x.md) -> flat page names (drop ./ , docs/ , .md)
+          find . -name '*.md' -exec perl -pi -e \
+            's{\]\((?!https?://)(?:\./)?(?:docs/)?([^)/#]+)\.md(#[^)]+)?\)}{]($1$2)}g' {} +
+
+          git add .
+          if git diff --staged --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "docs(wiki): sync"
+          git push
