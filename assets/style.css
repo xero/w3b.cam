@@ -134,6 +134,8 @@
 	--link:    #a6f06a;
 	--accent:  #78dc50;
 	--on-accent: #050a06; /* near-black text on the lime badges/buttons (white was unreadable) */
+	--dot:     #57d977; /* map markers: green, not the off-theme blue */
+	--dot-hi:  #c8ff9c; /* highlighted markers: brighter green (was orange) */
 	--font-family: var(--cctv-font); /* whole UI switches to the pixel font in cctv */
 
 	/* Pixel look: kill font anti-aliasing and scale images nearest-neighbour. Both are
@@ -162,8 +164,8 @@
 
 /* In cctv, real playback renders ABOVE the glass so the scanlines/vignette don't sit on a
    live stream. Only genuinely-playing media qualifies — refreshing/MJPEG stills, the
-   mp4/HLS <video>, and the YouTube embed. Previews (plain stills, the .yt-facade) stay
-   under the glass on purpose. */
+   mp4/HLS <video>, and the YouTube embed. Previews (plain stills, the click-to-load
+   .facade) stay under the glass on purpose. */
 :root.cctv :is(img[data-refresh], img[data-mjpeg], .live-video, .yt-embed) {
 	position: relative;
 	z-index: calc(var(--crt-z) + 1);
@@ -210,13 +212,13 @@
 	transform-origin: center center;
 	background: linear-gradient(
 		to bottom,
-		rgba(2, 7, 4, 0.82) 0%,
-		rgba(2, 7, 4, 0.82) 42%,
+		rgba(20, 28, 20, 0.82) 0%,
+		rgba(20, 28, 20, 0.82) 42%,
 		rgba(198, 255, 150, 0.5) 46%,
 		rgba(220, 255, 180, 0.95) 50%,
 		rgba(198, 255, 150, 0.5) 54%,
-		rgba(2, 7, 4, 0.82) 58%,
-		rgba(2, 7, 4, 0.82) 100%
+		rgba(20, 28, 20, 0.82) 58%,
+		rgba(20, 28, 20, 0.82) 100%
 	);
 }
 
@@ -341,10 +343,11 @@ body > header {
 		gap: 1rem;
 		align-items: center;
 
-		/* Below ~620px the brand + nav + picker no longer fit on one row, so drop the
-		   nav to its own full-width row and let the #theme picker ride the title row.
-		   (Icon/title size reductions stay at their own 480px breakpoints.) */
-		@media (max-width: 620px) {
+		/* Below ~800px the brand + nav + picker no longer fit on one row (the captioned nav is
+		   wider, and a single row only fits from ~780px up), so drop the nav to its own
+		   full-width row and let the #theme picker ride the title row. (Icon/title size
+		   reductions stay at their own 480px breakpoints.) */
+		@media (max-width: 800px) {
 			flex-basis: 100%;
 			justify-content: space-between;
 			gap: unset;
@@ -355,9 +358,22 @@ body > header {
 
 		a,
 		a:visited {
+			display: flex;
+			flex-flow: column nowrap;
+			align-items: center;
+			gap: 0.3rem;
+			color: var(--menu); /* the caption; the icon uses var(--menu) via svg fill */
+
+			& span {
+				font-size: 0.72rem;
+				line-height: 1;
+				letter-spacing: 0.02em;
+			}
+
 			&:focus,
 			&:hover {
 				background: transparent !important;
+				color: var(--accent); /* caption + (below) icon light up together on hover */
 				* {
 					fill: var(--accent);
 				}
@@ -1011,7 +1027,10 @@ body > footer {
 	background: #000 center / contain no-repeat;
 }
 
-.yt-facade {
+/* Click-to-load facade: a thumbnail with a play overlay, shared by YouTube streams and
+   every auto-playing feed (hls/mp4/mjpeg/jpg). Inert until clicked — no third-party or
+   cross-origin request fires on page load. See feeds.js for the click handling. */
+.facade {
 	position: relative;
 	display: block;
 	width: 40rem;
@@ -1024,7 +1043,7 @@ body > footer {
 	cursor: pointer;
 }
 
-.yt-facade .yt-play {
+.facade .play {
 	position: absolute;
 	inset: 0;
 	margin: auto;
@@ -1035,7 +1054,7 @@ body > footer {
 	background: rgb(0 0 0 / 0.55);
 }
 
-.yt-facade .yt-play::before {
+.facade .play::before {
 	content: "";
 	position: absolute;
 	inset: 0;
@@ -1048,8 +1067,8 @@ body > footer {
 	transform: translateX(0.15rem);
 }
 
-.yt-facade:hover .yt-play,
-.yt-facade:focus-visible .yt-play {
+.facade:hover .play,
+.facade:focus-visible .play {
 	background: var(--accent);
 }
 

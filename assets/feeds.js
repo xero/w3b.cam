@@ -2,7 +2,10 @@
 // loaded on every page (the shell includes it) so it works however you arrive at a
 // detail page — a full load or an htmx <main> swap whose snippet carries no script.
 //
-// It drives four things:
+// Nothing here auto-loads a feed. Every live element ships inert — a YouTube facade
+// (<a data-yt>), or a feed facade (<a class="facade"> wrapping the real element in a
+// <template>) — and only a click opts the user in, so no cross-origin/third-party request
+// fires on page load. On click we mount the live element and drive it:
 //   * <img data-refresh="URL">   — a JPEG snapshot cam: swap src with a cache-buster
 //                                   every REFRESH_MS so the still keeps updating.
 //   * <img data-mjpeg src="URL"> — a multipart MJPEG stream: plays natively, so we only
@@ -10,10 +13,10 @@
 //   * <video data-hls="URL">     — an HLS stream: play natively (Safari) or via
 //                                   hls.js, which is fetched on demand the first time
 //                                   an HLS cam is actually viewed (never on other pages).
-//   * <a class="yt-facade" data-yt="ID"> — a YouTube stream: on click, swap in a
-//                                   youtube-nocookie iframe (no third-party DOM until then).
-// MP4 cams need no JS (<video src> autoplays). Any failure adds .feed-error to the
-// element; the "View live"/"Watch on YouTube" link is always present as the fallback.
+//   * <video src> (mp4)          — plays on insertion (autoplay muted), no start needed.
+//   * <a data-yt="ID">           — a YouTube stream: swap in a youtube-nocookie iframe.
+// Any failure adds .feed-error to the element; the "View live"/"Watch on YouTube" link is
+// always present as the fallback (and is where a no-JS click on the facade lands).
 
 (function () {
 	"use strict";
@@ -124,11 +127,13 @@
 		});
 	}
 
-	// ── Click-to-load YouTube facade (streams detail pages) ─────────────────────
-	// The facade is an <a class="yt-facade" data-yt="<id>" href="<watch url>">. Swap it
-	// for a youtube-nocookie iframe on click, in place — no third-party DOM loads until
-	// the user opts in. Delegated on document so it survives htmx <main> swaps with no
-	// per-element init; without JS the <a> just opens the video on YouTube.
+	// ── Click-to-load facades (streams + feeds detail pages) ────────────────────
+	// A facade is an <a class="facade" href="<view-live url>"> with a play overlay. A
+	// YouTube one carries data-yt and swaps in a youtube-nocookie iframe; a feed one wraps
+	// its real live element in a <template class="facade-media"> and mounts that. Either
+	// way, no cross-origin/third-party DOM loads until the click. Delegated on document so
+	// it survives htmx <main> swaps with no per-element init; with no JS the <a> just opens
+	// the view-live URL.
 	function loadYt(facade) {
 		var id = facade.getAttribute("data-yt");
 		if (!id) return;
@@ -141,18 +146,38 @@
 		facade.replaceWith(iframe);
 	}
 
-	document.addEventListener("click", function (e) {
-		var facade = e.target && e.target.closest ? e.target.closest(".yt-facade") : null;
-		if (facade) {
-			e.preventDefault();
-			loadYt(facade);
+	// Feed facade: clone the inert <template> into the DOM in place of the facade, then
+	// start whatever it holds (init picks up the jpg/mjpeg/hls element; an mp4 <video>
+	// autoplays on insertion — nudge play() in case a freshly cloned node doesn't).
+	function activateFeed(facade) {
+		var tpl = facade.querySelector("template.facade-media");
+		if (!tpl) return;
+		var parent = facade.parentNode;
+		facade.replaceWith(tpl.content.cloneNode(true));
+		if (!parent) return;
+		init(parent);
+		var vid = parent.querySelector("video.live-video:not([data-hls])");
+		if (vid && vid.paused) {
+			var p = vid.play();
+			if (p && p.catch) p.catch(function () {});
 		}
+	}
+
+	document.addEventListener("click", function (e) {
+		var facade = e.target && e.target.closest ? e.target.closest(".facade") : null;
+		if (!facade) return;
+		e.preventDefault();
+		if (facade.getAttribute("data-yt")) loadYt(facade);
+		else activateFeed(facade);
 	});
 
 	// ── Lifecycle ──────────────────────────────────────────────────────────────
 	// Bootstrap + htmx-swap re-init/teardown live in live-lifecycle.js; this script
 	// supplies only init/teardown. init always runs against document (register calls
 	// init(document)), so it can query directly; collect() handles the removed nodes.
+	// On page load / htmx swap this finds nothing to start — every live element sits inert
+	// inside a facade's <template> (querySelectorAll doesn't descend into template content).
+	// It only has work once activateFeed mounts an element (it also re-scopes init there).
 	var collect = window.liveLifecycle.collect;
 
 	function init(root) {

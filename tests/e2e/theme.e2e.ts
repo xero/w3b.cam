@@ -56,9 +56,10 @@ test.describe("manual theme picker", () => {
 		await expect(page.locator("#themeSel")).toHaveValue("");
 	});
 
-	// Below ~620px the picker must ride the title row with the nav wrapped below — checked
-	// at 400px and at 600px (the latter regressed before the 620px breakpoint fix).
-	for (const width of [400, 600]) {
+	// Below the ~800px breakpoint the picker rides the title row with the captioned nav
+	// wrapped below — checked across the mobile→tablet range (768 regressed before the
+	// breakpoint was raised from 620 to 800).
+	for (const width of [400, 600, 768]) {
 		test(`at ${width}px the picker rides the title row, the nav wraps below`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 800 });
 			await page.goto("/");
@@ -72,6 +73,25 @@ test.describe("manual theme picker", () => {
 			expect(aside.y).toBeLessThan(nav.y);
 		});
 	}
+
+	test("at 1000px the header is a single row (theme not wrapped below the nav)", async ({ page }) => {
+		await page.setViewportSize({ width: 1000, height: 800 });
+		await page.goto("/");
+		const nav = (await page.locator("body > header nav.nav").boundingBox())!;
+		const aside = (await page.locator("body > header #theme").boundingBox())!;
+		// Picker shares the nav's row rather than dangling on a wrapped row beneath it.
+		expect(aside.y).toBeLessThan(nav.y + nav.height);
+		expect(aside.y + aside.height).toBeGreaterThan(nav.y);
+	});
+
+	test("every nav link has an icon and a caption", async ({ page }) => {
+		await page.goto("/");
+		const links = page.locator("nav.nav > a");
+		await expect(links).toHaveCount(8);
+		await expect(links.locator("svg")).toHaveCount(8);
+		await expect(links.locator("span")).toHaveCount(8);
+		await expect(page.locator("nav.nav > a span", { hasText: "models" })).toHaveCount(1);
+	});
 });
 
 test.describe("cctv theme (CRT overlay)", () => {
@@ -99,16 +119,26 @@ test.describe("cctv theme (CRT overlay)", () => {
 		await expect(page.locator("html")).not.toHaveClass(/\bcctv\b/);
 	});
 
-	test("live playback renders above the CRT glass (previews stay under)", async ({ page }) => {
-		// This feed detail page carries a live img[data-refresh] (auto-refreshing snapshot).
+	test("live playback renders above the CRT glass (the facade preview stays under)", async ({ page }) => {
+		// This feed detail page is a click-to-load facade wrapping a live img[data-refresh].
 		await page.goto("/feeds/38.79.156.188");
 		await page.locator("#themeSel").selectOption("cctv");
 
-		const live = page.locator("img[data-refresh], img[data-mjpeg], .live-video, .yt-embed").first();
-		await expect(live).toHaveCSS("position", "relative");
-
+		const liveSel = "img[data-refresh], img[data-mjpeg], .live-video, .yt-embed";
 		const zed = (l: import("@playwright/test").Locator) =>
 			l.evaluate((el) => Number(el.ownerDocument.defaultView!.getComputedStyle(el).zIndex));
+
+		// Before opt-in: nothing live is mounted (it sits inert in a <template>), and the
+		// facade preview isn't lifted above the glass (no elevated z-index).
+		const facade = page.locator(".facade");
+		await expect(facade).toBeVisible();
+		await expect(page.locator(liveSel)).toHaveCount(0);
+		await expect(facade).toHaveCSS("z-index", "auto");
+
+		// Opt in: the live element mounts and renders ABOVE the glass.
+		await facade.click();
+		const live = page.locator(liveSel).first();
+		await expect(live).toHaveCSS("position", "relative");
 		expect(await zed(live)).toBeGreaterThan(await zed(overlay(page)));
 	});
 

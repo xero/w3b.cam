@@ -153,14 +153,16 @@ export function renderYtDetail(stream: YtStream, siblings: YtStream[], opts: Ren
 /**
  * Click-to-load YouTube facade for a stream detail page: the thumbnail with a play
  * overlay, rendered as an <a> to the watch URL so it works with no JS. assets/feeds.js
- * intercepts the click and swaps in a youtube-nocookie iframe, no third-party DOM loads
- * until the user opts in. The "Watch on YouTube" button beneath it stays as the fallback.
+ * intercepts the click (any `.facade`) and, since this one carries `data-yt`, swaps in a
+ * youtube-nocookie iframe — no third-party DOM loads until the user opts in. The "Watch on
+ * YouTube" button beneath it stays as the fallback. Shares the `.facade` look and click
+ * plumbing with the feed facades (feed.ts), which instead opt-in to a live feed element.
  */
 function ytFacade(stream: YtStream): string {
 	const bg = stream.thumbHref ? ` style="background-image:url('${escapeHtml(stream.thumbHref)}')"` : "";
 	return [
-		`${T(2)}<a class="yt-facade" href="${escapeHtml(stream.url)}" data-yt="${escapeHtml(stream.videoId)}" aria-label="Play ${escapeHtml(stream.label)}"${bg}>`,
-		`${T(3)}<span class="yt-play" aria-hidden="true"></span>`,
+		`${T(2)}<a class="facade" href="${escapeHtml(stream.url)}" data-yt="${escapeHtml(stream.videoId)}" aria-label="Play ${escapeHtml(stream.label)}"${bg}>`,
+		`${T(3)}<span class="play" aria-hidden="true"></span>`,
 		`${T(2)}</a>`,
 	].join("\n");
 }

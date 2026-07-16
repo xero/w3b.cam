@@ -54,9 +54,12 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		ghStat("updated", stats.updated, "https://github.com/xero/w3b.cam/deployments"),
 		ghStat("fresh scrapes every", stats.interval, "https://github.com/xero/w3b.cam/blob/main/.github/workflows/scrape.yml#L9"),
 	].join("");
-	const navLink = (href: string, snip: string, label: string, classes:string = ''): string => [
+	// `label` is the icons.svg id + aria-label; `text` is the visible caption under the icon
+	// (defaults to label, but e.g. the fingerprints icon reads "models").
+	const navLink = (href: string, snip: string, label: string, text: string = label, classes: string = ''): string => [
 		`<a class="${classes}" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
 		`<svg alt="${label}" aria-label="${label}"><use href="/icons.svg#${label}"></use></svg>`,
+		`<span>${escapeHtml(text)}</span>`,
 		`</a>`,
 	].join("");
 	return [
@@ -107,11 +110,11 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		indentBlock(navLink(urlOf(HOSTS), snipUrlOf(HOSTS), "hosts"), 4),
 		indentBlock(navLink(urlOf(FEEDS), snipUrlOf(FEEDS), "feeds"), 4),
 		indentBlock(navLink(urlOf(STREAMS), snipUrlOf(STREAMS), "streams"), 4),
-		indentBlock(navLink(urlOf(FINGERPRINTS), snipUrlOf(FINGERPRINTS), "fingerprints"), 4),
+		indentBlock(navLink(urlOf(FINGERPRINTS), snipUrlOf(FINGERPRINTS), "fingerprints", "models"), 4),
 		indentBlock(navLink(urlOf(TAGS), snipUrlOf(TAGS), "tags"), 4),
 		indentBlock(navLink(urlOf(MAP), snipUrlOf(MAP), "map"), 4),
 		indentBlock(navLink(urlOf(TIPS), snipUrlOf(TIPS), "tips"), 4),
-		...(dev ? [indentBlock(navLink(urlOf(IMPORT), snipUrlOf(IMPORT), "import", "dev"), 4)] : []),
+		...(dev ? [indentBlock(navLink(urlOf(IMPORT), snipUrlOf(IMPORT), "import", "import", "dev"), 4)] : []),
 		`${T(3)}</nav>`,
 		`${T(2)}</header>`,
 		`${T(2)}<main hx-target:inherited="main" hx-swap:inherited="innerHTML show:top">`,

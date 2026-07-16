@@ -8,10 +8,13 @@ import { FEEDS, HOME, feedRoute, feedSlug, snipUrlOf, urlOf } from "../urls.ts";
 // ── Feed (Osiris) cams ────────────────────────────────────────────────────────
 // A third source with its own flat gallery (one card per cam, like the streams
 // gallery). Hybrid rendering: the gallery card shows a baked, same-origin thumbnail
-// exactly like the other sources, but the detail page embeds the LIVE feed, an
-// auto-refreshing <img> (jpg), a <video> (mp4/hls, hls via the vendored hls.js), or,
-// for iframe/external-only cams, just a "view live" link (we never load third-party
-// DOM). Every live element degrades to that link on error.
+// exactly like the other sources. The detail page CAN show the LIVE feed — an
+// auto-refreshing <img> (jpg), an MJPEG <img>, or a <video> (mp4/hls, hls via the
+// vendored hls.js) — but never loads it unprompted: every auto-playing kind renders as a
+// click-to-load `.facade` (the baked still with a play overlay), exactly like the YouTube
+// streams. The live element sits inert inside a <template> until the user clicks, so no
+// cross-origin request fires on page load. `link` cams (unembeddable) show just the still;
+// the "View live" link is the way through. Every live element degrades to that link on error.
 
 export interface FeedCam {
 	id: string;
@@ -129,6 +132,10 @@ export function renderFeedMain(cams: FeedCam[], page: number, totalPages: number
  * frame and no broken-image flash; the client (feeds.js) then drives the live feed
  * (cache-busting the jpg <img>, streaming the mjpeg <img>, attaching hls.js to the
  * <video>). `link` cams show just the still; the "View live" button is the way through.
+ *
+ * This is NOT emitted into the live DOM directly for the auto-playing kinds — feedFacade
+ * wraps it in an inert <template> behind a play button so nothing loads until the user
+ * opts in. Only `link` (a plain same-origin still) is rendered as-is.
  */
 function feedMedia(cam: FeedCam): string {
 	const alt = escapeHtml(cam.thumbAlt);
@@ -158,13 +165,35 @@ function feedMedia(cam: FeedCam): string {
 }
 
 /**
+ * Click-to-load wrapper for the auto-playing feed kinds (jpg/mjpeg/mp4/hls): the baked
+ * still with a play overlay (a `.facade`, shared with the YouTube streams), with the real
+ * live element held inert inside a <template>. Nothing loads until the user clicks —
+ * feeds.js clones the template in place of the facade and starts it. The facade is an <a>
+ * to the view-live URL, so with no JS the click just opens the feed (same as the button
+ * below). `link` cams have no live feed to opt into, so they render as the plain still.
+ */
+function feedFacade(cam: FeedCam, liveHref: string): string {
+	const media = feedMedia(cam);
+	if (cam.feedKind === "link" || media.trim() === "") return media;
+	const bg = cam.thumbHref ? ` style="background-image:url('${escapeHtml(cam.thumbHref)}')"` : "";
+	return [
+		`${T(2)}<a class="facade" href="${escapeHtml(liveHref)}" aria-label="Play ${escapeHtml(cam.name)}"${bg}>`,
+		`${T(3)}<span class="play" aria-hidden="true"></span>`,
+		`${T(3)}<template class="facade-media">`,
+		indentBlock(media, 2),
+		`${T(3)}</template>`,
+		`${T(2)}</a>`,
+	].join("\n");
+}
+
+/**
  * Inner-<main> content for a feed cam's detail page: the live media (or a
  * placeholder) with a "View live" button, then a lean metadata table. The button
  * targets the human-facing page when there is one, else the raw feed URL.
  */
 export function renderFeedDetail(cam: FeedCam, opts: RenderOpts = {}): string {
-	const media = feedMedia(cam);
 	const liveHref = cam.externalUrl ?? cam.liveUrl;
+	const media = feedFacade(cam, liveHref);
 	// Dev hook on the figure (a `.shot`, like host pages) so right-click tags this cam.
 	const devAttrs = opts.dev ? ` data-kind="feed" data-ref="${escapeHtml(cam.id)}"` : "";
 	const figure = [
@@ -210,7 +239,7 @@ export function renderEventDetail(feeds: FeedCam[], opts: RenderOpts = {}): stri
 			const cap = [cam.source, feedKindLabel(cam.feedKind)].filter((s): s is string => !!s && s.trim() !== "").map((s) => escapeHtml(s)).join(" &middot; ");
 			return [
 				`${T(1)}<figure class="shot"${devAttrs}>`,
-				feedMedia(cam),
+				feedFacade(cam, liveHref),
 				`${T(2)}<a class="btn" href="${escapeHtml(liveHref)}" target="_blank" rel="noopener noreferrer">`,
 				indentBlock(btnLayers("View live"), 2),
 				`${T(2)}</a>`,
