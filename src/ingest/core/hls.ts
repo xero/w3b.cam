@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { countFeedRows, feedThumbIds, makeFeedInserter } from "../../db/db.ts";
 import { hlsId, parseHlsList, toHlsCam } from "../hls-source.ts";
+import { fetchPa511GeoByChan, pa511ChanId, withPa511Geo } from "../pa511-geo.ts";
 import { buildFeedRow, classify, hasFfmpeg, snapshot } from "../osiris-source.ts";
 import type { Classified, OsirisCamera } from "../../core/types.ts";
 import { FeedFlusher, HLS_MAX_COOLDOWNS, HLS_TIMEOUT_ABORT, makePacer, probeReachable, tally, warnIfRateLimited, type GrabStats } from "./shared.ts";
@@ -65,6 +66,28 @@ export async function ingestHlsFile(
   }
 
   const kept = [...byId.values()];
+
+  // 511PA's arcadis HLS streams carry no location, so fetch their coordinates from 511PA's map
+  // feed once and attach them — a fresh import then lands geolocated. Keyed by the arcadis
+  // channel (see pa511ChanId). Best effort: a feed outage just leaves the cams unlocated.
+  // Mirrors the mjpeg path (core/mjpeg.ts). See ingest/pa511-geo.ts.
+  if (kept.some((k) => pa511ChanId(k.cam.stream_url) != null)) {
+    try {
+      const byChan = await fetchPa511GeoByChan();
+      let matched = 0;
+      for (const k of kept) {
+        const chan = pa511ChanId(k.cam.stream_url);
+        const geo = chan != null ? byChan.get(chan) ?? null : null;
+        if (geo) {
+          k.cam = withPa511Geo(k.cam, geo);
+          matched++;
+        }
+      }
+      console.log(`511PA geo: attached coordinates to ${matched.toLocaleString()} arcadis stream(s).`);
+    } catch (err) {
+      console.warn(`511PA geo lookup failed (${err instanceof Error ? err.message : String(err)}); importing without coords.`);
+    }
+  }
 
   // --skip-existing: drop streams that already have a thumbnail so a per-IP re-run spends
   // its limited request budget only on the gaps. Null-thumbnail placeholders (blocked/dead

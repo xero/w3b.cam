@@ -13,6 +13,7 @@
 // stream/snapshot endpoint via the vendor fingerprint so they still get a thumbnail.
 
 import type { Classified, FeedKind, OsirisCamera } from "../core/types.ts";
+import { tidyPa511Name, withPa511Geo, type Pa511Geo } from "./pa511-geo.ts";
 
 /** Pre-embed category, kept for the ingest summary tally. */
 type MjpegCategory = "mjpeg-stream" | "jpg-snapshot" | "viewer-page";
@@ -191,14 +192,16 @@ export function parseMjpegList(text: string): MjpegEntry[] {
 }
 
 /** Synthesize an OsirisCamera so buildFeedRow is reused verbatim (and raw_json stays
- *  self-documenting: the original curated URL lives in stream_url/external_url). */
-export function toOsirisCam(c: MjpegClassified, label: string): OsirisCamera {
-  return {
+ *  self-documenting: the original curated URL lives in stream_url/external_url). An optional
+ *  `geo` (511PA cams only — their snapshot URLs carry no location) fills in the coordinates
+ *  and county so a fresh import lands already geolocated; see ingest/pa511-geo.ts. */
+export function toOsirisCam(c: MjpegClassified, label: string, geo?: Pa511Geo | null): OsirisCamera {
+  const base: OsirisCamera = {
     id: c.id,
     source: c.vendor,
     country: null,
     city: null,
-    name: label.trim() || c.name,
+    name: geo ? tidyPa511Name(label.trim() || c.name, geo.direction) : label.trim() || c.name,
     lat: null,
     lng: null,
     feed_url: c.grabUrl,
@@ -206,4 +209,6 @@ export function toOsirisCam(c: MjpegClassified, label: string): OsirisCamera {
     stream_type: c.feed_kind,
     external_url: c.external_url,
   };
+  return withPa511Geo(base, geo ?? null);
 }
+

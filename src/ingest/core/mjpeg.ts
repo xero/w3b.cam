@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { countFeedRows, feedThumbIds, makeFeedInserter } from "../../db/db.ts";
 import { classifyMjpeg, feedRank, parseMjpegList, toOsirisCam } from "../mjpeg-source.ts";
 import type { MjpegClassified } from "../mjpeg-source.ts";
+import { fetchPa511Geo, pa511CctvId, type Pa511Geo } from "../pa511-geo.ts";
 import { buildFeedRow, classify, hasFfmpeg, snapshot } from "../osiris-source.ts";
 import { mapLimit } from "../../core/util.ts";
 import { FeedFlusher, grabMjpeg, makePacer, tally, warnIfRateLimited, type GrabStats } from "./shared.ts";
@@ -75,6 +76,19 @@ export async function ingestMjpegFile(
 
   const work = limit ? pending.slice(0, limit) : pending;
 
+  // 511PA snapshot URLs carry no location, so fetch their coordinates from 511PA's own map
+  // feed once and attach them as we build rows — a fresh import then lands geolocated. Best
+  // effort: a feed outage just leaves the cams unlocated until the next import. See pa511-geo.ts.
+  let pa511Geo: Map<number, Pa511Geo> | null = null;
+  if (work.some((k) => pa511CctvId(k.cam.id) != null)) {
+    try {
+      pa511Geo = await fetchPa511Geo();
+      console.log(`511PA geo: loaded ${pa511Geo.size.toLocaleString()} located cameras to enrich matching cams.`);
+    } catch (err) {
+      console.warn(`511PA geo lookup failed (${err instanceof Error ? err.message : String(err)}); importing without coords — re-run the import later.`);
+    }
+  }
+
   console.log(`Parsed ${entries.length} line(s): ${kept.length} unique cam(s), ${deferred} deferred (unrecognized).`);
   console.log(`By vendor: ${Object.entries(byVendor).map(([v, n]) => `${v} ${n}`).join(", ") || "none"}`);
   console.log(`Embeddable: mjpeg ${byKind.mjpeg} + jpg ${byKind.jpg}; screenshot-only: link ${byKind.link}.`);
@@ -100,7 +114,11 @@ export async function ingestMjpegFile(
       // Only persist cams we actually grabbed a shot for: a blank card never renders on the
       // built site, so writing a screenshot-less row just pollutes the DB (an existing row's
       // good shot is preserved either way — a failed re-grab simply isn't written).
-      if (r.snap) flusher.push(buildFeedRow(toOsirisCam(cam, label), cam, r.snap));
+      if (r.snap) {
+        const cctvId = pa511CctvId(cam.id);
+        const geo = pa511Geo && cctvId != null ? pa511Geo.get(cctvId) ?? null : null;
+        flusher.push(buildFeedRow(toOsirisCam(cam, label, geo), cam, r.snap));
+      }
     });
   } catch (err) {
     console.error(`\nMJPEG ingest error: ${err instanceof Error ? err.message : String(err)}`);
@@ -128,6 +146,8 @@ export async function ingestMjpegOne(db: Database, input: { url: string; label?:
   const r = await grabMjpeg(cam.grabUrl);
   // No shot, no row: a blank card never renders, so don't write a screenshot-less cam.
   if (!r.snap) return { added: 0, updated: 0, changed: 0, noThumb: 1 };
+  // No 511PA geo enrichment here: a single interactive add shouldn't pay for the ~16-request
+  // feed pull; the next bulk import (which loads the feed once) fills a 511PA cam's coords.
   const row = buildFeedRow(toOsirisCam(cam, (input.label ?? "").trim()), cam, r.snap);
   const { added, updated, changed } = makeFeedInserter(db)([row]);
   return { added, updated, changed, noThumb: 0 };
