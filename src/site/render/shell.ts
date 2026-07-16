@@ -87,7 +87,14 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		`${T(2)}<link rel="alternate" type="application/rss+xml" title="${escapeHtml(TITLE)} live feed" href="/rss.xml" />`,
 		`${T(2)}<link rel="alternate" type="application/atom+xml" title="${escapeHtml(TITLE)} live feed" href="/atom.xml" />`,
 		`${T(2)}<link rel="stylesheet" href="/style.css" />`,
+		// CRT overlay styles for the opt-in "cctv" theme (assets/theme.js mounts the layers).
+		// Always linked so the effect is ready instantly on switch; classes are inert until then.
+		`${T(2)}<link rel="stylesheet" href="/crt.css" />`,
 		...(dev ? [`${T(2)}<link rel="stylesheet" href="/__dev/dev.css" />`] : []),
+		// Restore a manually-picked theme (assets/theme.js) before first paint so the saved
+		// choice doesn't flash the OS preference first. Runs in <head> before <body> exists,
+		// so the class lands on <html>; the allow-list keeps arbitrary storage out of it.
+		`${T(2)}<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark"||t==="cctv")document.documentElement.classList.add(t);}catch(e){}</script>`,
 		`${T(1)}</head>`,
 		`${T(1)}<body>`,
 		`${T(2)}<header>`,
@@ -128,6 +135,13 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		// Map client (tiny): drag-to-pan / wheel-to-zoom for the SVG world map. Like
 		// feeds.js it loads on every page and no-ops when no map is present.
 		`${T(2)}<script src="/map.js" defer></script>`,
+		// Precomputed CRT layer spec (window.__CRT) for the cctv theme, baked by the build.
+		// Deferred before theme.js so the global is set when the picker mounts the overlay.
+		`${T(2)}<script src="/crt-config.js" defer></script>`,
+		// Theme picker (tiny): writes the opt-in style selector into the header and
+		// toggles a class on <html>. No dependency on live-lifecycle; header/<html>
+		// aren't swapped by htmx, so a one-shot init suffices.
+		`${T(2)}<script src="/theme.js" defer></script>`,
 		...(dev ? [`${T(2)}<script src="/__dev/dev.js"></script>`] : []),
 		`${T(1)}</body>`,
 		"</html>",

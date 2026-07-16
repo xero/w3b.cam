@@ -35,6 +35,10 @@
 	--transition-duration: 250ms;
 	--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 
+	/* z-index layers: the site otherwise uses none, so keep these low and legible. The
+	   cctv CRT glass sits at --crt-z; live playback goes one above it (calc below). */
+	--crt-z: 100;
+
 	/* typography: fluid scale */
 	--font-min:  13px;
 	--font-max:  17px;
@@ -64,6 +68,85 @@
 		--coast:   #b9c4d0;
 		--link:    var(--indigo);
 	}
+}
+
+/* manual theme override (opt-in, JS only): a class on <html> — set by assets/theme.js
+   and restored before paint by the shell's inline head script — forces a theme past the
+   OS preference. :root.<class> is specificity (0,2,0), so it beats both :root and the
+   light media query in any OS mode. Values mirror the dark :root neutrals and the light
+   media query above; the global `transition: all` animates the swap for free. */
+:root.dark {
+	--bg:      #0f1117;
+	--surface: #161925;
+	--text:    #e6e8ee;
+	--muted:   #8a94a6;
+	--border:  rgba(255, 255, 255, 0.1);
+	--land:    #1b2333;
+	--coast:   #2b3a52;
+	--link:    var(--cornflower);
+}
+:root.light {
+	--bg:      #efefef;
+	--surface: #f4f6f8;
+	--text:    #14171f;
+	--muted:   #5c6270;
+	--border:  rgba(0, 0, 0, 0.09);
+	--land:    #dfe6ee;
+	--coast:   #b9c4d0;
+	--link:    var(--indigo);
+}
+
+/* cctv: green-phosphor monochrome on near-black, matched to the CRT sweep/scanline tint
+   rgb(120,220,80). assets/theme.js layers the scanline/sweep/curvature/noise/vignette
+   overlay (crt.css) on top; this block supplies the base colours. --accent is overridden
+   too so hover states go green instead of the default cornflower blue. */
+:root.cctv {
+	--bg:      #050a06;
+	--surface: #0b140d;
+	--text:    #78dc50;
+	--muted:   #4c8a3a;
+	--border:  rgba(120, 220, 80, 0.22);
+	--land:    #0e1f12;
+	--coast:   #17351d;
+	--link:    #a6f06a;
+	--accent:  #78dc50;
+	--on-accent: #050a06; /* near-black text on the lime badges/buttons (white was unreadable) */
+}
+
+/* CRT glass: a fixed, click-through overlay over the whole viewport, built by
+   assets/theme.js for the cctv theme (its effect knobs are applied inline as custom
+   properties; the layout lives here). */
+#crt-overlay {
+	position: fixed;
+	inset: 0;
+	overflow: hidden;
+	pointer-events: none;
+	z-index: var(--crt-z);
+}
+
+/* In cctv, real playback renders ABOVE the glass so the scanlines/vignette don't sit on a
+   live stream. Only genuinely-playing media qualifies — refreshing/MJPEG stills, the
+   mp4/HLS <video>, and the YouTube embed. Previews (plain stills, the .yt-facade) stay
+   under the glass on purpose. */
+:root.cctv :is(img[data-refresh], img[data-mjpeg], .live-video, .yt-embed) {
+	position: relative;
+	z-index: calc(var(--crt-z) + 1);
+}
+
+/* cctv readability: the vignette dims the viewport corners, so brighten + embolden the
+   chrome that lives there — the footer stats and the theme picker — and lift the wordmark
+   to a brighter green. Scoping --link inside .brand brightens only the wordmark and keeps
+   its dark-on-accent hover intact (no specificity override needed). */
+:root.cctv .count {
+	color: var(--text);
+	font-weight: 600;
+}
+:root.cctv #theme select {
+	color: var(--link);
+	font-weight: 600;
+}
+:root.cctv .brand {
+	--link: #b6ff7a;
 }
 html, body, * {
 	transition-property: all;
@@ -115,10 +198,16 @@ body > header {
 		gap: 1rem;
 		align-items: center;
 
-		@media (max-width: 480px) {
+		/* Below ~620px the brand + nav + picker no longer fit on one row, so drop the
+		   nav to its own full-width row and let the #theme picker ride the title row.
+		   (Icon/title size reductions stay at their own 480px breakpoints.) */
+		@media (max-width: 620px) {
 			flex-basis: 100%;
 			justify-content: space-between;
 			gap: unset;
+			/* Sort after the order-0 items (brand + the appended #theme aside) so the
+			   picker rides the title row and the nav wraps full-width beneath it. */
+			order: 1;
 		}
 
 		a,
@@ -149,7 +238,24 @@ body > header {
 		display: flex;
 		flex-grow: 1;
 		justify-content: end;
+		align-self: center;
 
+		select {
+			background: var(--surface);
+			color: var(--text);
+			border: 1px solid var(--border);
+			border-radius: 0.35rem;
+			padding: 0.3rem 0.5rem;
+			font-family: var(--font-family);
+			font-size: var(--text-sm);
+			cursor: pointer;
+
+			&:hover,
+			&:focus-visible {
+				border-color: var(--accent);
+				outline: none;
+			}
+		}
 	}
 }
 
@@ -413,7 +519,7 @@ main {
 		font-size: 1.25rem;
 		line-height: 1.6;
 		text-align: center;
-		color: #efefef;
+		color: var(--on-accent);
 		background: var(--btn-face);
 		will-change: transform;
 		transform: translateY(-4px);

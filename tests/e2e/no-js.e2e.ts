@@ -14,4 +14,9 @@ test.describe("progressive enhancement (no JS)", () => {
 		await page.goto(href as string);
 		await expect(page.locator("main article")).toBeVisible();
 	});
+
+	test("the JS-only theme picker is never in the server-rendered HTML", async ({ page }) => {
+		await page.goto("/");
+		await expect(page.locator("#theme")).toHaveCount(0);
+	});
 });

@@ -12,6 +12,9 @@ import { existsSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import {
 	ASSETS_DIR,
+	CRT_CONFIG_OUT,
+	CRT_CSS_OUT,
+	CRT_CSS_VENDOR_SRC,
 	HLS_OUT,
 	HLS_VENDOR_SRC,
 	HTMX_OUT,
@@ -24,6 +27,7 @@ import {
 	FEED_PAGE_SIZE,
 	YT_PAGE_SIZE,
 } from "../core/config.ts";
+import { crtConfigJs } from "./crt.ts";
 import { computeAutoTags } from "./autotags.ts";
 import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadSuperFeatures, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb, type TagKind } from "../db/db.ts";
 import { productBreakdown } from "../fingerprint/fingerprint.ts";
@@ -174,6 +178,16 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 			await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
 		} else {
 			console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
+		}
+
+		// Vendor the CRT stylesheet and bake its precomputed layer spec for the opt-in
+		// "cctv" theme (assets/theme.js mounts window.__CRT as a fixed overlay). Only
+		// affects that theme, so warn rather than abort if the dep is missing.
+		if (await Bun.file(CRT_CSS_VENDOR_SRC).exists()) {
+			await Bun.write(CRT_CSS_OUT, Bun.file(CRT_CSS_VENDOR_SRC));
+			await Bun.write(CRT_CONFIG_OUT, await crtConfigJs());
+		} else {
+			console.warn(`Missing ${CRT_CSS_VENDOR_SRC}; the opt-in cctv theme will be inert. Run \`bun install\`.`);
 		}
 
 		// Copy static assets (favicons, web manifest) verbatim into out/ root, the

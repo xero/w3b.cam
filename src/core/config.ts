@@ -51,6 +51,11 @@ export const HTMX_OUT = `${OUT_DIR}/htmx.min.js`;
 /** Vendored hls.js (installed via bun), copied to out/ and fetched on demand by the feed client when an HLS cam is viewed. */
 export const HLS_VENDOR_SRC = "node_modules/hls.js/dist/hls.min.js";
 export const HLS_OUT = `${OUT_DIR}/hls.min.js`;
+/** Vendored CRT stylesheet (vault66-crt-effect) for the opt-in "cctv" theme; copied to out/. */
+export const CRT_CSS_VENDOR_SRC = "node_modules/vault66-crt-effect/dist/vault66-crt-effect.css";
+export const CRT_CSS_OUT = `${OUT_DIR}/crt.css`;
+/** Build-time-precomputed CRT layer spec (window.__CRT), emitted for assets/theme.js. */
+export const CRT_CONFIG_OUT = `${OUT_DIR}/crt-config.js`;
 /** Static assets (favicons, web manifest) copied verbatim into out/ root on build. */
 export const ASSETS_DIR = "assets";
 
