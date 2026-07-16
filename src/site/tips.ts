@@ -4,7 +4,7 @@
 /** The inner-<main> body of the Tips page (headings carry GitHub-style anchor ids). */
 export const TIPS_HTML = `
 <h2 id="tips">Tips</h2>
-<blockquote>
+<blockquote class="toc">
 	<h4 id="table-of-contents">Table of Contents</h4>
 	<ul>
 		<li><a href="#cam-hunting">Cam hunting</a>

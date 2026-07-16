@@ -562,6 +562,15 @@ main {
 		& > :first-child {
 			margin-top: 0;
 		}
+		&.toc {
+			background: var(--surface);
+			li a {
+				font-weight: bold;
+			}
+			li li a {
+				font-weight: normal;
+			}
+		}
 	}
 
 	.admonition {

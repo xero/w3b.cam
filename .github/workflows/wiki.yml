@@ -46,7 +46,7 @@ jobs:
           set -euo pipefail
 
           # wipe the old wiki content, keeping git internals and any uploaded images
-          find wiki -mindepth 1 -maxdepth 1 -not -name '.git' -not -name 'img' -exec rm -rf {} \;
+          find wiki -mindepth 1 -maxdepth 1 -not -name '.git' -not -name 'preview.png' -exec rm -rf {} \;
 
           cp -r repo/docs/* wiki/
           head -n -10 repo/README.md > wiki/Home.md
