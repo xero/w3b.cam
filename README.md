@@ -1,25 +1,10 @@
 # https://w3b.cam
 
-[![scrape](https://github.com/xero/w3b.cam/actions/workflows/scrape.yml/badge.svg)](https://github.com/xero/w3b.cam/actions/workflows/scrape.yml)
-
-[![build](https://github.com/xero/w3b.cam/actions/workflows/build.yml/badge.svg)](https://github.com/xero/w3b.cam/actions/workflows/build.yml)
-
-[![tests](https://github.com/xero/w3b.cam/actions/workflows/test.yml/badge.svg)](https://github.com/xero/w3b.cam/actions/workflows/test.yml)
-
-
-
----
-
-[![MIT Licensed](https://img.shields.io/github/license/xero/w3b.cam?logo=wikiversity&logoColor=979da4&labelColor=262a2e&color=b1a268)]()
-[![Latest Test Suite](https://github.com/xero/w3b.cam/actions/workflows/test-suite.yml/badge.svg?branch=main)]()
-[![Latest Deployment](https://img.shields.io/github/deployments/xero/w3b.cam/github-pages?logo=githubactions&logoColor=979da4&label=Pages%20Deployment&labelColor=262a2e)]()
-[![Latest Wiki Build](https://img.shields.io/badge/success-success?logo=gitbook&logoColor=979da4&labelColor=262a2e&label=Wiki%20Deployment)]()
+[![MIT Licensed](https://img.shields.io/github/license/xero/w3b.cam?logo=wikiversity&logoColor=979da4&labelColor=262a2e&color=b1a268)](https://github.com/xero/w3b.cam/blob/main/LICENSE.txt)
+[![Latest Test Suite](https://github.com/xero/w3b.cam/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/xero/w3b.cam/actions/workflows/test.yml)
+[![Latest Deployment](https://img.shields.io/github/deployments/xero/w3b.cam/github-pages?logo=githubactions&logoColor=979da4&label=Pages%20Deployment&labelColor=262a2e)](https://github.com/xero/w3b.cam/actions/workflows/build.yml)
+[![Latest Wiki Build](https://img.shields.io/badge/success-success?logo=gitbook&logoColor=979da4&labelColor=262a2e&label=Wiki%20Deployment)](https://github.com/xero/w3b.cam/wiki)
 [![Powered by Bun](https://img.shields.io/badge/Bun-Bun?labelColor=262a2e&logo=bun&logoColor=f9f1e1&label=Powered%20by&color=e47ab4&link=https%3A%2F%2Fbun.js)](https://bun.com)
-
-
-
-
-
 
 ## What it is
 
