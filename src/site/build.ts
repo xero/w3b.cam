@@ -159,48 +159,50 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		closeDb(db);
 	}
 
-	// ── Wipe and recreate out/ from scratch ─────────────────────────────────────────
-	// Skipped for --index-only: it reuses the last full bake's out/ (images + every page
-	// but the homepage), so wiping and re-copying vendored assets would defeat the point.
-
+	// ── Wipe out/ (full build only) ─────────────────────────────────────────────────
+	// --index-only reuses the last full bake's out/ (images + every page but the homepage),
+	// so it skips the wipe. The asset copying below still runs in both modes.
 	if (!indexOnly) {
 		await rm(OUT_DIR, { recursive: true, force: true });
+	}
 
-		if (!(await Bun.file(HTMX_VENDOR_SRC).exists())) {
-			console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
-			process.exit(1);
-		}
-		await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
+	// ── Vendored libs + static assets (both modes) ──────────────────────────────────
+	// --index-only skips the page + image rebuild, NOT the asset refresh — so edits to
+	// assets/ (theme.js, style.css, favicons, …) and the vendored libs still land in out/.
+	if (!(await Bun.file(HTMX_VENDOR_SRC).exists())) {
+		console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
+		process.exit(1);
+	}
+	await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
 
-		// Vendor hls.js too (fetched on demand by assets/feeds.js when an HLS cam is
-		// viewed). A missing copy only breaks HLS playback, so warn rather than abort.
-		if (await Bun.file(HLS_VENDOR_SRC).exists()) {
-			await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
-		} else {
-			console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
-		}
+	// Vendor hls.js too (fetched on demand by assets/feeds.js when an HLS cam is
+	// viewed). A missing copy only breaks HLS playback, so warn rather than abort.
+	if (await Bun.file(HLS_VENDOR_SRC).exists()) {
+		await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
+	} else {
+		console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
+	}
 
-		// Vendor the CRT stylesheet and bake its precomputed layer spec for the opt-in
-		// "cctv" theme (assets/theme.js mounts window.__CRT as a fixed overlay). Only
-		// affects that theme, so warn rather than abort if the dep is missing.
-		if (await Bun.file(CRT_CSS_VENDOR_SRC).exists()) {
-			await Bun.write(CRT_CSS_OUT, Bun.file(CRT_CSS_VENDOR_SRC));
-			await Bun.write(CRT_CONFIG_OUT, await crtConfigJs());
-		} else {
-			console.warn(`Missing ${CRT_CSS_VENDOR_SRC}; the opt-in cctv theme will be inert. Run \`bun install\`.`);
-		}
+	// Vendor the CRT stylesheet and bake its precomputed layer spec for the opt-in
+	// "cctv" theme (assets/theme.js mounts window.__CRT as a fixed overlay). Only
+	// affects that theme, so warn rather than abort if the dep is missing.
+	if (await Bun.file(CRT_CSS_VENDOR_SRC).exists()) {
+		await Bun.write(CRT_CSS_OUT, Bun.file(CRT_CSS_VENDOR_SRC));
+		await Bun.write(CRT_CONFIG_OUT, await crtConfigJs());
+	} else {
+		console.warn(`Missing ${CRT_CSS_VENDOR_SRC}; the opt-in cctv theme will be inert. Run \`bun install\`.`);
+	}
 
-		// Copy static assets (favicons, web manifest) verbatim into out/ root, the
-		// same flat copy the htmx write above does. Guard on the dir so a missing
-		// assets/ warns instead of aborting the bake (mirrors the htmx guard).
-		// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
-		if (existsSync(ASSETS_DIR)) {
-			for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
-				if (ent.isFile()) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
-			}
-		} else {
-			console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);
+	// Copy static assets (favicons, web manifest) verbatim into out/ root, the
+	// same flat copy the htmx write above does. Guard on the dir so a missing
+	// assets/ warns instead of aborting the bake (mirrors the htmx guard).
+	// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
+	if (existsSync(ASSETS_DIR)) {
+		for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
+			if (ent.isFile()) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
 		}
+	} else {
+		console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);
 	}
 
 	// ── Build the grouped model ──────────────────────────────────────────────────

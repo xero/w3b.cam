@@ -112,6 +112,33 @@ test.describe("cctv theme (CRT overlay)", () => {
 		expect(await zed(live)).toBeGreaterThan(await zed(overlay(page)));
 	});
 
+	test("the retune plays on switch, replays on every htmx nav, and clears on switch away", async ({ page }) => {
+		// Count actual animation starts of the shade — robust to the transient class timing
+		// and guards the htmx v4 event name (colon-separated). globalThis casts keep this
+		// clear of DOM globals the test tsconfig doesn't type.
+		await page.addInitScript(() => {
+			const g = globalThis as unknown as { __retunes: number; document: { addEventListener: (t: string, cb: (e: { animationName: string }) => void, capture: boolean) => void } };
+			g.__retunes = 0;
+			g.document.addEventListener("animationstart", (e) => { if (e.animationName === "crt-retune") g.__retunes++; }, true);
+		});
+		const count = () => page.evaluate(() => (globalThis as unknown as { __retunes?: number }).__retunes ?? 0);
+
+		await page.goto("/");
+		await page.locator("#themeSel").selectOption("cctv");
+		await expect(page.locator("#crt-retune")).toBeAttached();
+		await expect(page.locator("#crt-retune")).toHaveCSS("pointer-events", "none"); // never blocks the page
+		// The decorative "connection lost" message layer, kept out of the a11y tree.
+		await expect(page.locator("#crt-retune-msg")).toHaveText("Connection lost. Reconnecting...");
+		await expect(page.locator("#crt-retune-msg")).toHaveAttribute("aria-hidden", "true");
+		await expect.poll(count).toBe(1);
+
+		await page.locator("nav.nav > a").first().click();
+		await expect.poll(count).toBe(2); // htmx:after:swap must replay it
+
+		await page.locator("#themeSel").selectOption("dark");
+		await expect(page.locator("#crt-retune")).toHaveCount(0);
+	});
+
 	test("the overlay survives htmx nav and a full reload (mounted once)", async ({ page }) => {
 		await page.goto("/");
 		await page.locator("#themeSel").selectOption("cctv");

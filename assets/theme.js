@@ -39,8 +39,24 @@
 	// build-time-precomputed spec baked into /crt-config.js. The green phosphor palette
 	// itself comes from :root.cctv in style.css; this only adds the glass/scanline layers.
 	var CRT_ID = "crt-overlay";
+	var RETUNE_ID = "crt-retune";
+	var RETUNE_MSG_ID = "crt-retune-msg";
 
 	function mountCrt() {
+		// The retune shade + its message layer ride alongside the overlay; create if missing.
+		// Both are decorative, so aria-hidden keeps the fake "connection lost" copy out of the
+		// accessibility tree.
+		if (!document.getElementById(RETUNE_ID)) {
+			var r = document.createElement("div");
+			r.id = RETUNE_ID;
+			r.setAttribute("aria-hidden", "true");
+			document.body.appendChild(r);
+			var msg = document.createElement("div");
+			msg.id = RETUNE_MSG_ID;
+			msg.setAttribute("aria-hidden", "true");
+			msg.textContent = "Connection lost. Reconnecting...";
+			document.body.appendChild(msg);
+		}
 		if (document.getElementById(CRT_ID)) return;
 		var spec = window.__CRT;
 		if (!spec || !spec.wrapper) return;
@@ -68,6 +84,24 @@
 	function unmountCrt() {
 		var el = document.getElementById(CRT_ID);
 		if (el) el.remove();
+		var r = document.getElementById(RETUNE_ID);
+		if (r) r.remove();
+		var m = document.getElementById(RETUNE_MSG_ID);
+		if (m) m.remove();
+		document.documentElement.classList.remove("is-retuning");
+	}
+
+	// Replay the retune flourish. is-retuning on <html> drives both the shade collapse and
+	// the <main> opacity tween, so swapped content reveals WITH the effect. Fired on
+	// switch-to-cctv, cctv page load, and htmx navigations; no-ops unless cctv is mounted.
+	// On htmx nav this runs inside the htmx:after:swap handler — before the browser paints
+	// the new content — so hiding <main> at frame 0 keeps the new page from flashing in.
+	function playRetune() {
+		var root = document.documentElement;
+		if (!document.getElementById(RETUNE_ID) || !root.classList.contains("cctv")) return;
+		root.classList.remove("is-retuning");
+		void root.offsetWidth; // force reflow so the CSS animations restart every time
+		root.classList.add("is-retuning");
 	}
 
 	// Which theme class (if any) is currently on <html>.
@@ -88,8 +122,12 @@
 		} else {
 			try { localStorage.removeItem("theme"); } catch (e) {}
 		}
-		if (v === "cctv") mountCrt();
-		else unmountCrt();
+		if (v === "cctv") {
+			mountCrt();
+			playRetune();
+		} else {
+			unmountCrt();
+		}
 	}
 
 	function init() {
@@ -105,11 +143,19 @@
 		// Reflect the class the head script already applied so the control opens on the
 		// active theme (empty "Theme" == Auto / follow the OS preference).
 		sel.value = current();
-		// The head script may have already applied cctv before paint; mount its overlay now.
-		if (current() === "cctv") mountCrt();
+		// The head script may have already applied cctv before paint; mount its overlay now
+		// and play the power-on retune.
+		if (current() === "cctv") {
+			mountCrt();
+			playRetune();
+		}
 		sel.addEventListener("change", function () {
 			apply(sel.value);
 		});
+		// Replay the retune on every htmx navigation while cctv is active. #crt-retune is a
+		// body-level sibling of <main>, so it survives the swap; playRetune no-ops otherwise.
+		// htmx v4 uses colon-separated event names ("htmx:after:swap", not "htmx:afterSwap").
+		document.addEventListener("htmx:after:swap", playRetune);
 	}
 
 	// Deferred script at the end of <body>: the header already exists, so run now.

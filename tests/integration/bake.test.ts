@@ -20,7 +20,7 @@ const read = (rel: string) => readFileSync(p(rel), "utf8");
 
 describe("bake output", () => {
 	it("writes the homepage, its snippet, and the core assets", () => {
-		for (const f of ["index.html", "index.snippet.html", "style.css", "htmx.min.js", "hls.min.js", "theme.js", "crt.css", "crt-config.js", "rss.xml", "atom.xml", "icons.svg"]) {
+		for (const f of ["index.html", "index.snippet.html", "style.css", "htmx.min.js", "hls.min.js", "theme.js", "crt.css", "crt-config.js", "ms_sans_serif.woff2", "ms_sans_serif_bold.woff2", "rss.xml", "atom.xml", "icons.svg"]) {
 			expect(existsSync(p(f))).toBe(true);
 		}
 	});

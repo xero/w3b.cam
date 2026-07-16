@@ -27,6 +27,8 @@
 	--warn:        var(--salmon);
 	--font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	/* cctv: a pixel-perfect bitmap UI font (see @font-face below) to finish the retro look. */
+	--cctv-font:   "Pixelated MS Sans Serif", "Microsoft Sans Serif", "MS Sans Serif", sans-serif;
 
 	/* metrics */
 	--gap:    clamp(1rem, 2vw, 1.5rem);
@@ -55,6 +57,27 @@
 	--measure:     var(--content-max);  /* prose (.tips); set e.g. 74ch for readable line length */
 	--table-max:   var(--content-max);  /* data tables (.bd-table, .meta) */
 	--card-min:    22rem;               /* gallery grid column min */
+}
+
+/* Pixelated MS Sans Serif — the classic bitmap UI font, used only by the cctv theme. The
+   files are copied verbatim from assets/ to out/ root, so reference them absolutely. */
+@font-face {
+	font-family: "Pixelated MS Sans Serif";
+	src:
+		url("/ms_sans_serif.woff2") format("woff2"),
+		url("/ms_sans_serif.woff") format("woff");
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: "Pixelated MS Sans Serif";
+	src:
+		url("/ms_sans_serif_bold.woff2") format("woff2"),
+		url("/ms_sans_serif_bold.woff") format("woff");
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
 }
 
 @media (prefers-color-scheme: light) {
@@ -111,6 +134,19 @@
 	--link:    #a6f06a;
 	--accent:  #78dc50;
 	--on-accent: #050a06; /* near-black text on the lime badges/buttons (white was unreadable) */
+	--font-family: var(--cctv-font); /* whole UI switches to the pixel font in cctv */
+
+	/* Pixel look: kill font anti-aliasing and scale images nearest-neighbour. Both are
+	   inherited, so they reach the whole cctv page (live playback opts back out below). */
+	font-smooth: never;
+	-webkit-font-smoothing: none;
+	-moz-osx-font-smoothing: unset;
+	font-synthesis-weight: none;
+	image-rendering: -webkit-optimize-contrast;
+	image-rendering: -moz-crisp-edges;
+	image-rendering: crisp-edges;
+	image-rendering: pixelated;
+	-ms-interpolation-mode: nearest-neighbor;
 }
 
 /* CRT glass: a fixed, click-through overlay over the whole viewport, built by
@@ -131,6 +167,7 @@
 :root.cctv :is(img[data-refresh], img[data-mjpeg], .live-video, .yt-embed) {
 	position: relative;
 	z-index: calc(var(--crt-z) + 1);
+	image-rendering: auto; /* live playback stays crisp; only previews/thumbnails pixelate */
 }
 
 /* cctv readability: the vignette dims the viewport corners, so brighten + embolden the
@@ -147,6 +184,112 @@
 }
 :root.cctv .brand {
 	--link: #b6ff7a;
+}
+/* The pixel font ships only 400/700, so the footer credit's weight 500 maps down to regular
+   and loses its look. Force bold — the 3xi.club / xero links inherit it (they keep their
+   larger size). */
+:root.cctv footer cite {
+	font-weight: 700;
+}
+/* Pixel-bold every button face (pagination, view live, watch on youtube, filter, …). */
+:root.cctv .btn .front {
+	font-weight: 700;
+}
+
+/* CRT retune: a channel-change / power-on flourish. A fixed, click-through shade (dark with
+   a bright center scanline baked into the gradient) collapses to a line and snaps back —
+   the viewport-centered adaptation of vault66's monitor "is-retuning" picture-collapse.
+   assets/theme.js builds #crt-retune with the CRT overlay and toggles .is-active on
+   switch-to-cctv, cctv page load, and htmx navigations. Timing/easing match vault66. */
+#crt-retune {
+	position: fixed;
+	inset: 0;
+	z-index: calc(var(--crt-z) + 5);
+	pointer-events: none;
+	opacity: 0;
+	transform-origin: center center;
+	background: linear-gradient(
+		to bottom,
+		rgba(2, 7, 4, 0.82) 0%,
+		rgba(2, 7, 4, 0.82) 42%,
+		rgba(198, 255, 150, 0.5) 46%,
+		rgba(220, 255, 180, 0.95) 50%,
+		rgba(198, 255, 150, 0.5) 54%,
+		rgba(2, 7, 4, 0.82) 58%,
+		rgba(2, 7, 4, 0.82) 100%
+	);
+}
+
+/* The "Connection lost" message: a separate, non-scaled layer above the shade, so the text
+   never squishes with the scaleY collapse. Left-centered (vertically centred, left-aligned)
+   with a little left padding. */
+/* Heavy solid-black message, left-centred over the bright centre scanline (no plate). */
+#crt-retune-msg {
+	position: fixed;
+	inset: 0;
+	z-index: calc(var(--crt-z) + 6);
+	pointer-events: none;
+	display: flex;
+	align-items: center;
+	padding-left: 2.5rem;
+	opacity: 0;
+	color: #000;
+	/* Bold pixel font (inherits the theme's crisp no-AA rendering), kept big for a legible
+	   sub-second flash; a faint green glow helps it read on the beam and the dark alike. */
+	font-family: var(--cctv-font);
+	font-weight: 700;
+	font-size: clamp(1.4rem, 3vw, 2.1rem);
+	letter-spacing: 0.02em;
+	text-shadow: 0 0 6px rgba(190, 255, 150, 0.85);
+}
+
+/* is-retuning on <html> drives the shade collapse (#crt-retune), the message fade
+   (#crt-retune-msg), and the <main> reveal together, so htmx-swapped content fades in WITH
+   the shade reopening instead of popping in first. theme.js adds the class in the
+   htmx:after:swap handler — before the browser paints — so the new page never flashes. */
+:root.cctv.is-retuning #crt-retune {
+	animation: crt-retune 0.72s cubic-bezier(0.77, 0, 0.175, 1) both;
+}
+:root.cctv.is-retuning #crt-retune-msg {
+	animation: crt-retune-msg 0.72s cubic-bezier(0.77, 0, 0.175, 1) both;
+}
+:root.cctv.is-retuning main {
+	animation: crt-content-retune 0.72s cubic-bezier(0.77, 0, 0.175, 1) both;
+}
+
+@keyframes crt-retune {
+	0%   { opacity: 0;    transform: scaleY(1); }
+	8%   { opacity: 0.95; transform: scaleY(1); }
+	34%  { opacity: 1;    transform: scaleY(1); }    /* hold full-dark: the message window */
+	54%  { opacity: 1;    transform: scaleY(0.04); } /* collapse */
+	62%  { opacity: 1;    transform: scaleY(0.01); } /* pinched to a scanline */
+	74%  { opacity: 0.9;  transform: scaleY(0.6); }  /* reopen */
+	90%  { opacity: 0.4;  transform: scaleY(0.98); }
+	100% { opacity: 0;    transform: scaleY(1); }
+}
+
+/* The message reads clearly over the full-dark hold, then fades out before the collapse
+   line so it never washes out against the bright scanline. */
+@keyframes crt-retune-msg {
+	0%   { opacity: 0; }
+	10%  { opacity: 1; }
+	34%  { opacity: 1; }
+	46%  { opacity: 0; }
+	100% { opacity: 0; }
+}
+
+/* Content stays hidden through the collapse, then fades in as the shade reopens. */
+@keyframes crt-content-retune {
+	0%   { opacity: 0; }
+	62%  { opacity: 0; }
+	80%  { opacity: 0.45; }
+	100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root.cctv.is-retuning #crt-retune,
+	:root.cctv.is-retuning #crt-retune-msg,
+	:root.cctv.is-retuning main { animation: none !important; }
 }
 html, body, * {
 	transition-property: all;
