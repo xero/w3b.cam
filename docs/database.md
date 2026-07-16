@@ -42,6 +42,16 @@ Both `--pull` and `--push` overwrite a whole database, so each prints a size and
 > [!WARNING]
 > `--pull` clobbers your local database and `--push` clobbers the published one and redeploys the site. Mind the direction. If your local copy holds edits you have not pushed, reach for `--merge` instead of `--pull` to pick up the store's new cameras without losing them.
 
+> [!NOTE]
+> To download the db without the `gh` command, fetch the asset straight over HTTPS with no login.
+
+```bash
+curl -L -o camhunting.sqlite \
+  https://github.com/xero/w3b.cam/releases/download/db-store/camhunting.sqlite
+# clean up
+rm -f camhunting.sqlite-wal camhunting.sqlite-shm
+```
+
 ---
 
 ## merge
@@ -53,3 +63,4 @@ bun merge camhunting.sqlite.prod camhunting.sqlite
 ```
 
 It diffs the source and target `cams` tables (the `kind='cam'` rows) by their `(ip_str, port)` and inserts only the cameras the target is missing, copied verbatim, including each camera's original `first_seen` and any pin. Rows the target already has are left untouched, so your own pins, tags, and curation survive. Only the target is written; the source is opened read-only. Pass `--dry-run` to preview the delta and write nothing, or `--yes` to skip the confirmation prompt.
+

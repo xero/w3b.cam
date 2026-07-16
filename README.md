@@ -1,4 +1,4 @@
-# https://w3b.cam
+# w3b.cam
 
 [![MIT Licensed](https://img.shields.io/github/license/xero/w3b.cam?logo=wikiversity&logoColor=979da4&labelColor=262a2e&color=b1a268)](https://github.com/xero/w3b.cam/blob/main/LICENSE.txt)
 [![Latest Test Suite](https://github.com/xero/w3b.cam/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/xero/w3b.cam/actions/workflows/test.yml)
@@ -6,11 +6,11 @@
 [![Latest Wiki Build](https://img.shields.io/badge/success-success?logo=gitbook&logoColor=979da4&labelColor=262a2e&label=Wiki%20Deployment)](https://github.com/xero/w3b.cam/wiki)
 [![Powered by Bun](https://img.shields.io/badge/Bun-Bun?labelColor=262a2e&logo=bun&logoColor=f9f1e1&label=Powered%20by&color=e47ab4&link=https%3A%2F%2Fbun.js)](https://bun.com)
 
-## What it is
+## https://w3b.cam
 
-Database and website gallery generator of open webcams, with a tool suite for fingerprinting, scraping, and manual cam hunting.
+[![Preview](https://raw.githubusercontent.com/wiki/xero/w3b.cam/preview.png)](https://w3b.cam)
 
----
+> Database and static website gallery generator of open webcams, with tool suites for fingerprinting, scraping, and manual cam hunting.
 
 ## Quick start
 
