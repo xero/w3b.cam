@@ -9,17 +9,23 @@
 // Usage:  bun run bake   (then: bun run serve)
 
 import { existsSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { cp, readdir, rm } from "node:fs/promises";
 import {
 	APP_JS_OUT,
 	ASSETS_DIR,
 	CRT_CSS_OUT,
 	CRT_CSS_VENDOR_SRC,
+	D3_OUT,
+	D3_VENDOR_SRC,
+	GEO_OUT,
+	GEO_SRC,
 	HLS_OUT,
 	HLS_VENDOR_SRC,
 	HTMX_VENDOR_SRC,
 	MANIFEST,
 	OUT_DIR,
+	TOPOJSON_OUT,
+	TOPOJSON_VENDOR_SRC,
 	PAGE_SIZE,
 	SYNDICATION_LIMIT,
 	TAG_PAGE_SIZE,
@@ -182,6 +188,17 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
 	}
 
+	// Vendor d3 + topojson-client for the fancy JS map (assets/geomap.js fetches them on
+	// demand only on the map page). Kept out of the app bundle so no other page pays for
+	// them; a missing copy just falls back to the plain SVG pan/zoom, so warn don't abort.
+	for (const [src, out] of [
+		[D3_VENDOR_SRC, D3_OUT],
+		[TOPOJSON_VENDOR_SRC, TOPOJSON_OUT],
+	] as const) {
+		if (await Bun.file(src).exists()) await Bun.write(out, Bun.file(src));
+		else console.warn(`Missing ${src}; the map will fall back to plain SVG pan/zoom. Run \`bun install\`.`);
+	}
+
 	// Vendor the CRT stylesheet for the opt-in "cctv" theme (its precomputed layer spec,
 	// window.__CRT, rides in the app bundle below). Only affects that theme, so warn rather
 	// than abort if the dep is missing.
@@ -203,6 +220,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		await Bun.file(`${ASSETS_DIR}/live-lifecycle.js`).text(),
 		await Bun.file(`${ASSETS_DIR}/feeds.js`).text(),
 		await Bun.file(`${ASSETS_DIR}/map.js`).text(),
+		await Bun.file(`${ASSETS_DIR}/geomap.js`).text(),
 		...(crtEnabled ? [await crtConfigJs()] : []),
 		await Bun.file(`${ASSETS_DIR}/theme.js`).text(),
 	];
@@ -211,7 +229,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	// Copy the remaining static assets (style.css, favicons, web manifest) verbatim into
 	// out/ root. Skip the JS now folded into app.js so it isn't also shipped standalone.
 	// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
-	const BUNDLED_JS = new Set(["live-lifecycle.js", "feeds.js", "map.js", "theme.js"]);
+	const BUNDLED_JS = new Set(["live-lifecycle.js", "feeds.js", "map.js", "geomap.js", "theme.js"]);
 	if (existsSync(ASSETS_DIR)) {
 		for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
 			if (ent.isFile() && !BUNDLED_JS.has(ent.name)) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
@@ -219,6 +237,12 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	} else {
 		console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);
 	}
+
+	// The map's vector data (assets/geo/world.json + assets/geo/admin1/*.json) is a nested
+	// tree, so the file-only loop above skips it — copy the whole dir recursively. Missing
+	// data just means the JS map falls back to plain SVG pan/zoom, so warn rather than abort.
+	if (existsSync(GEO_SRC)) await cp(GEO_SRC, GEO_OUT, { recursive: true });
+	else console.warn(`No ${GEO_SRC}/ dir; the map will fall back to plain SVG pan/zoom. Run \`bun run gen-geo\`.`);
 
 	// ── Build the grouped model ──────────────────────────────────────────────────
 

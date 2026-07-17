@@ -33,7 +33,19 @@ function fillerFeed(i: number): FeedRow {
 }
 
 export const FEED_FIXTURES: FeedRow[] = [
-	...Array.from({ length: 8 }, (_, i) => fillerFeed(i + 1)),
+	...Array.from({ length: 8 }, (_, i) => {
+		const f = fillerFeed(i + 1);
+		// Two fillers share one isolated coordinate, giving the map a co-located pair. Geo-IP
+		// routinely stacks cameras on identical coords, and the e2e map spec clicks this pair to
+		// prove a cluster that zoom can't split opens a list. Far from every other fixture point.
+		if (i === 0 || i === 1) {
+			f.lat = 61.5;
+			f.lng = 105.3;
+			f.city = "Krasnoyarsk";
+			f.country_name = "Russia";
+		}
+		return f;
+	}),
 	{
 		id: "mjpeg-38.79.156.188",
 		kind: "feed",

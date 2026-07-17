@@ -6,6 +6,7 @@
 > ### Table of Contents
 > - [bake](#bake)
 > - [serve](#serve)
+> - [gen-geo](#gen-geo)
 > - [The static site model](#the-static-site-model)
 
 ---
@@ -29,6 +30,16 @@ bun serve
 ```
 
 Then open `http://localhost:1337`.
+
+---
+
+## gen-geo
+
+**`bun gen-geo`.** Regenerates the vector data behind the JavaScript map. It downloads Natural Earth country and state boundaries (public domain), simplifies and quantizes them to TopoJSON, and writes `assets/geo/world.json` plus one `assets/geo/admin1/<ADM0_A3>.json` per country. The output is committed, so `bake` needs no network and the boundaries only change when you rerun this.
+
+You rarely need it. The committed data is enough to build the site. Rerun it to refresh the boundaries or change the detail level; the `WORLD_KEEP`, `ADMIN1_KEEP`, and quantization constants at the top of `src/site/gen-geo.ts` control how aggressively the geometry is simplified.
+
+The fancy map is a progressive enhancement for JavaScript users. `bake` copies `assets/geo/` to `out/geo/` and vendors d3 and topojson-client to `out/`, and the map client (`assets/geomap.js`) fetches them on demand only on the map page. It reads the camera dots straight out of the baked SVG, so the map carries no extra point payload. With no JavaScript, or if any of those files are missing, the map falls back to the inert SVG and its plain drag-to-pan and scroll-to-zoom.
 
 ---
 

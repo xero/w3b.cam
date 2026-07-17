@@ -55,8 +55,17 @@ export const HLS_OUT = `${OUT_DIR}/hls.min.js`;
 /** Vendored CRT stylesheet (vault66-crt-effect) for the opt-in "cctv" theme; copied to out/. */
 export const CRT_CSS_VENDOR_SRC = "node_modules/vault66-crt-effect/dist/vault66-crt-effect.css";
 export const CRT_CSS_OUT = `${OUT_DIR}/crt.css`;
+/** Vendored d3 (installed via bun), copied to out/ and fetched on demand by the map client only on the map page. Kept OUT of app.js so it loads only where the fancy map is used. */
+export const D3_VENDOR_SRC = "node_modules/d3/dist/d3.min.js";
+export const D3_OUT = `${OUT_DIR}/d3.min.js`;
+/** Vendored topojson-client (installed via bun), copied to out/; the map client decodes the geo TopoJSON with it. On-demand alongside d3, kept OUT of app.js. */
+export const TOPOJSON_VENDOR_SRC = "node_modules/topojson-client/dist/topojson-client.min.js";
+export const TOPOJSON_OUT = `${OUT_DIR}/topojson-client.min.js`;
 /** Static assets (favicons, web manifest) copied verbatim into out/ root on build. */
 export const ASSETS_DIR = "assets";
+/** Committed map vector data (assets/geo/world.json + assets/geo/admin1/*.json), copied recursively into out/geo/ and fetched on demand by the JS map. Generate with `bun run gen-geo`. */
+export const GEO_SRC = `${ASSETS_DIR}/geo`;
+export const GEO_OUT = `${OUT_DIR}/geo`;
 
 /** Host entries shown per index page. */
 export const PAGE_SIZE = 8;

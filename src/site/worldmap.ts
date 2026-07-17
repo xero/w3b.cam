@@ -1,6 +1,8 @@
 // Generated: world-countries outlines (Natural Earth 110m, public domain) projected
-// equirectangular into a 1000x500 viewBox and Douglas-Peucker simplified.
-// One SVG path 'd' string per country. Regenerate with scratchpad/gen-worldmap.ts.
+// equirectangular into a 1000x500 viewBox (matching project() in render/primitives.ts) and
+// Douglas-Peucker simplified. One SVG path 'd' string per country, drawn by render/map.ts as
+// the no-JS map. A committed, one-time artifact; the original generator wasn't kept, but
+// src/site/gen-geo.ts pulls the same Natural Earth source if these paths ever need rebuilding.
 export const WORLD_PATHS: readonly string[] = [
 	"M670 151L672.9 152L675 151.7L675.5 150.4L679.3 149.1L679.9 146.9L682.2 146.4L682.6 145.4L689.3 147.2L691.3 146.3L692.2 146.8L693.1 145.5L694.8 145.6L696.7 143.1L698.2 143.7L697.9 144.6L698.7 144.7L698.5 147L699.6 147.9L703.5 145.8L708.3 146.1L708.8 146.9L699.6 148.6L698 149.8L698.9 152.4L697.5 153.5L697.7 154.6L696.9 155.6L694.3 155.5L695.3 157.3L693.6 158L692.4 159.7L692.5 161.4L691.5 162.2L688.3 162.3L688 163L685.9 163L684.4 164.6L684.3 167L680.7 168.1L678.8 167.9L678.2 168.5L673.7 168.6L669.1 167.1L671.6 164.6L671.4 162.8L669.3 162.4L668.2 158.4L669.3 156.9L668.1 156.5L670 151Z",
 	"M545.4 266.3L546.8 270.1L548.5 272.4L551.3 271.8L552.8 272.2L553.9 269.9L555.7 269.8L555.8 269.3L557.2 269.3L557 270.3L560.4 270.3L561 273.1L560.8 276.5L561.7 277.5L561.5 280.8L566.4 280.4L566.7 285.9L560.9 285.8L560.8 294.7L564.5 298.7L559.4 299.8L552.7 299.4L550.7 298.1L539.1 298.4L537.4 297.1L535.6 297.1L532.6 298.1L532.3 296.3L533.8 290.1L535.4 286.5L537.9 283.4L538.2 281.4L538 279.8L535.8 275.5L536.8 273.8L535.4 269.2L534 267.5L534.2 266.9L537.2 266.3L545.4 266.3ZM534.5 265.8L533.8 266.1L533.1 264L535.1 262.3L536.1 263.3L534.6 264.6L534.5 265.8Z",

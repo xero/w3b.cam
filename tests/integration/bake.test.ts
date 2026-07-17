@@ -25,16 +25,24 @@ describe("bake output", () => {
 		}
 	});
 
+	it("vendors the map libs on-demand and copies the geo data recursively", () => {
+		// d3 + topojson-client are kept OUT of app.js and fetched only on the map page (like
+		// hls.js), and the committed vector data (a nested tree) lands under out/geo/.
+		for (const f of ["d3.min.js", "topojson-client.min.js", "geo/world.json", "geo/admin1/USA.json"]) {
+			expect(existsSync(p(f))).toBe(true);
+		}
+	});
+
 	it("bundles all client JS into one app.js and ships no standalone client scripts", () => {
 		// The page pulls a single script; hls.js is the one intentional exception (on-demand).
 		expect(read("index.html")).toContain('<script src="/app.js" defer></script>');
-		expect(read("index.html")).not.toMatch(/src="\/(htmx\.min|feeds|map|live-lifecycle|theme|crt-config)\.js"/);
-		for (const gone of ["htmx.min.js", "feeds.js", "map.js", "live-lifecycle.js", "theme.js", "crt-config.js"]) {
+		expect(read("index.html")).not.toMatch(/src="\/(htmx\.min|feeds|map|geomap|live-lifecycle|theme|crt-config)\.js"/);
+		for (const gone of ["htmx.min.js", "feeds.js", "map.js", "geomap.js", "live-lifecycle.js", "theme.js", "crt-config.js"]) {
 			expect(existsSync(p(gone))).toBe(false);
 		}
-		// app.js actually carries htmx + each of our scripts, concatenated.
+		// app.js actually carries htmx + each of our scripts (incl. geomap), concatenated.
 		const app = read("app.js");
-		for (const marker of ["htmx", "window.liveLifecycle", "data-refresh", "window.__CRT", "themeSel"]) {
+		for (const marker of ["htmx", "window.liveLifecycle", "data-refresh", "worldmap-canvas", "window.__CRT", "themeSel"]) {
 			expect(app).toContain(marker);
 		}
 	});

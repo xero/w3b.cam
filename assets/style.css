@@ -1352,6 +1352,7 @@ body > footer {
 	display: flex;
 	flex-flow: column nowrap;
 	gap: 0.75rem;
+	position: relative; /* positioning context for the JS canvas overlay + its tooltip */
 }
 
 .maphint {
@@ -1388,5 +1389,111 @@ body > footer {
 	& .dots a:focus-visible circle {
 		fill: var(--dot-hi);
 		fill-opacity: 1;
+	}
+}
+
+/* JS upgrade: assets/geomap.js swaps the inert SVG for this canvas (clustering, constant-
+   size dots, zoom-in state borders). touch-action:none lets d3-zoom own pinch on mobile. */
+.worldmap-canvas {
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	margin: 0 auto;
+	background: var(--bg);
+	touch-action: none;
+	cursor: grab;
+
+	&:active {
+		cursor: grabbing;
+	}
+}
+
+.map-tip {
+	position: absolute;
+	z-index: 2;
+	transform: translate(-50%, -140%);
+	max-width: 60vw;
+	overflow: hidden;
+	padding: 2px 8px;
+	background: var(--bg);
+	color: var(--text);
+	border: 1px solid var(--accent);
+	border-radius: 4px;
+	font-size: var(--text-sm);
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	pointer-events: none;
+
+	&[hidden] {
+		display: none;
+	}
+}
+
+/* Cluster popover: cameras at co-located coords that zoom can't separate are listed here. */
+.map-list {
+	position: absolute;
+	z-index: 3;
+	top: 2.5rem;
+	right: 0.5rem;
+	display: flex;
+	flex-flow: column nowrap;
+	width: min(320px, 80%);
+	max-height: 70svh;
+	overflow: hidden;
+	background: var(--bg);
+	border: 1px solid var(--accent);
+	border-radius: 6px;
+	box-shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+
+	& header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 6px 10px;
+		border-bottom: 1px solid var(--accent);
+		font-weight: bold;
+		color: var(--text);
+	}
+
+	& .map-list-x {
+		background: none;
+		border: 0;
+		color: var(--muted);
+		font-size: 1.2rem;
+		line-height: 1;
+		cursor: pointer;
+
+		&:hover {
+			color: var(--accent);
+		}
+	}
+
+	& ul {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow-y: auto;
+		list-style: none;
+	}
+
+	& li a {
+		display: block;
+		padding: 5px 10px;
+		color: var(--accent);
+		text-decoration: none;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+
+		&:hover {
+			background: var(--accent);
+			color: var(--bg);
+		}
+	}
+
+	& .map-list-more {
+		padding: 5px 10px;
+		color: var(--muted);
+		font-size: var(--text-xs);
 	}
 }
