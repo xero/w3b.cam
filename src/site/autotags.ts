@@ -9,7 +9,6 @@
 // with zero changes to the browse renderer.
 
 import type { FeedCam, Host } from "./render.ts";
-import { liveKindFromUrl } from "../fingerprint/host-feed.ts";
 
 type AutoTag = { tag: string; refs: { kind: "cam" | "feed"; ref: string }[] };
 
@@ -18,12 +17,15 @@ const hasRtsp = (h: Host): boolean =>
 	h.shots.some((s) => s.port === 554 || (s.product ?? "").toLowerCase().includes("rtsp"));
 
 /**
- * True when a host has an angle whose derived live_url (mined at ingest, see host-feed.ts) is
- * of the given transport — so a Shodan host with a now-playable feed lands under the same
- * mjpeg/hls tags the feed cams do. Hosts only ever derive mjpeg/jpg (no .m3u8 in host banners).
+ * True when a host has an angle that renders an inline MJPEG/snapshot facade — i.e. an https
+ * derived live_url (mined at ingest, see host-feed.ts). This mirrors the facade condition in
+ * host.ts's shotFigure exactly: an http derived URL is mixed-content-blocked on our https site,
+ * so it stays a "View live" link with no inline player and must NOT land under the mjpeg tag
+ * (which, like the feed cams' membership, means "has an inline player"). Hosts only ever derive
+ * mjpeg/jpg — never HLS (no .m3u8 in Shodan host banners) — so this feeds only the mjpeg tag.
  */
-const hasDerived = (h: Host, kind: "mjpeg" | "jpg"): boolean =>
-	h.shots.some((s) => s.liveUrl != null && liveKindFromUrl(s.liveUrl) === kind);
+const hasEmbeddableFeed = (h: Host): boolean =>
+	h.shots.some((s) => s.liveUrl != null && s.liveUrl.startsWith("https:"));
 
 /** The HTTP port family we treat as "http" (plain-text web transports). */
 const HTTP_PORTS = new Set([80, 88, 8080, 8888]);
@@ -41,13 +43,13 @@ export function computeAutoTags(hosts: Host[], feedCams: FeedCam[]): AutoTag[] {
 	return [
 		// Hosts grouped onto more than one port/angle by groupByIp (the "N angles" card badge).
 		{ tag: "multi-angle", refs: camRefs((h) => h.count > 1) },
-		// Refreshing JPEG + multipart MJPEG feeds, plus Shodan hosts we mined a playable
-		// mjpeg/jpg URL for at ingest (both embeddable https and link-only http).
+		// Refreshing JPEG + multipart MJPEG feeds, plus Shodan hosts we mined an embeddable
+		// (https) mjpeg/jpg URL for at ingest — the ones whose page actually inline-plays.
 		{
 			tag: "mjpeg",
 			refs: [
 				...feedRefs((c) => c.feedKind === "jpg" || c.feedKind === "mjpeg"),
-				...camRefs((h) => hasDerived(h, "mjpeg") || hasDerived(h, "jpg")),
+				...camRefs(hasEmbeddableFeed),
 			],
 		},
 		// HTTP Live Streaming feeds. (Hosts never derive HLS — no .m3u8 in Shodan host banners.)

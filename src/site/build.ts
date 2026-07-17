@@ -11,13 +11,12 @@
 import { existsSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import {
+	APP_JS_OUT,
 	ASSETS_DIR,
-	CRT_CONFIG_OUT,
 	CRT_CSS_OUT,
 	CRT_CSS_VENDOR_SRC,
 	HLS_OUT,
 	HLS_VENDOR_SRC,
-	HTMX_OUT,
 	HTMX_VENDOR_SRC,
 	MANIFEST,
 	OUT_DIR,
@@ -173,33 +172,49 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 		console.error(`Missing ${HTMX_VENDOR_SRC}. Run \`bun install\` first.`);
 		process.exit(1);
 	}
-	await Bun.write(HTMX_OUT, Bun.file(HTMX_VENDOR_SRC));
 
-	// Vendor hls.js too (fetched on demand by assets/feeds.js when an HLS cam is
-	// viewed). A missing copy only breaks HLS playback, so warn rather than abort.
+	// Vendor hls.js (fetched on demand by the feed client when an HLS cam is viewed). Kept
+	// out of the app bundle so it loads only on HLS pages. A missing copy only breaks HLS
+	// playback, so warn rather than abort.
 	if (await Bun.file(HLS_VENDOR_SRC).exists()) {
 		await Bun.write(HLS_OUT, Bun.file(HLS_VENDOR_SRC));
 	} else {
 		console.warn(`Missing ${HLS_VENDOR_SRC}; HLS feed cams will fall back to their "View live" link. Run \`bun install\`.`);
 	}
 
-	// Vendor the CRT stylesheet and bake its precomputed layer spec for the opt-in
-	// "cctv" theme (assets/theme.js mounts window.__CRT as a fixed overlay). Only
-	// affects that theme, so warn rather than abort if the dep is missing.
-	if (await Bun.file(CRT_CSS_VENDOR_SRC).exists()) {
+	// Vendor the CRT stylesheet for the opt-in "cctv" theme (its precomputed layer spec,
+	// window.__CRT, rides in the app bundle below). Only affects that theme, so warn rather
+	// than abort if the dep is missing.
+	const crtEnabled = await Bun.file(CRT_CSS_VENDOR_SRC).exists();
+	if (crtEnabled) {
 		await Bun.write(CRT_CSS_OUT, Bun.file(CRT_CSS_VENDOR_SRC));
-		await Bun.write(CRT_CONFIG_OUT, await crtConfigJs());
 	} else {
 		console.warn(`Missing ${CRT_CSS_VENDOR_SRC}; the opt-in cctv theme will be inert. Run \`bun install\`.`);
 	}
 
-	// Copy static assets (favicons, web manifest) verbatim into out/ root, the
-	// same flat copy the htmx write above does. Guard on the dir so a missing
-	// assets/ warns instead of aborting the bake (mirrors the htmx guard).
+	// ── One client bundle: out/app.js (a single request per page) ────────────────────
+	// htmx + our client scripts, concatenated in dependency order (htmx first, then
+	// live-lifecycle before feeds/map, then the CRT spec before theme.js). No minification
+	// beyond htmx's own — the win here is request count, not bytes. Joined with `;` so ASI
+	// can't fuse one file's trailing `})()` into the next's leading `(function(){…`. hls.js
+	// stays a separate on-demand fetch (see above).
+	const bundle: string[] = [
+		await Bun.file(HTMX_VENDOR_SRC).text(),
+		await Bun.file(`${ASSETS_DIR}/live-lifecycle.js`).text(),
+		await Bun.file(`${ASSETS_DIR}/feeds.js`).text(),
+		await Bun.file(`${ASSETS_DIR}/map.js`).text(),
+		...(crtEnabled ? [await crtConfigJs()] : []),
+		await Bun.file(`${ASSETS_DIR}/theme.js`).text(),
+	];
+	await Bun.write(APP_JS_OUT, `${bundle.map((s) => s.trimEnd()).join("\n;\n")}\n`);
+
+	// Copy the remaining static assets (style.css, favicons, web manifest) verbatim into
+	// out/ root. Skip the JS now folded into app.js so it isn't also shipped standalone.
 	// existsSync (not Bun.file().exists()) since ASSETS_DIR is a directory.
+	const BUNDLED_JS = new Set(["live-lifecycle.js", "feeds.js", "map.js", "theme.js"]);
 	if (existsSync(ASSETS_DIR)) {
 		for (const ent of await readdir(ASSETS_DIR, { withFileTypes: true })) {
-			if (ent.isFile()) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
+			if (ent.isFile() && !BUNDLED_JS.has(ent.name)) await Bun.write(`${OUT_DIR}/${ent.name}`, Bun.file(`${ASSETS_DIR}/${ent.name}`));
 		}
 	} else {
 		console.warn(`No ${ASSETS_DIR}/ dir; skipping favicon/manifest copy.`);

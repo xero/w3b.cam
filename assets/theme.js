@@ -120,7 +120,9 @@
 			cl.add(v);
 			try { localStorage.setItem("theme", v); } catch (e) {}
 		} else {
-			try { localStorage.removeItem("theme"); } catch (e) {}
+			// Picking "Theme" (the empty option) is the reset: drop back to the OS preference
+			// and wipe ALL local storage, not just the theme key — a full clean slate.
+			try { localStorage.clear(); } catch (e) {}
 		}
 		if (v === "cctv") {
 			mountCrt();

@@ -14,6 +14,7 @@ import type { CRTOptions } from "vault66-crt-effect/core";
 export const CRT_CONFIG: CRTOptions = {
 	preset: "apple2",
 	scanlineOpacity: 0.23,
+	scanlineGap: 1,
 	enableSweep: true,
 	sweepDuration: 7,
 	sweepThickness: 16,
@@ -24,7 +25,7 @@ export const CRT_CONFIG: CRTOptions = {
 	noiseOpacity: 0.45,
 };
 
-/** Serialized `window.__CRT` payload for out/crt-config.js. Only the wrapper (class +
+/** Serialized `window.__CRT` payload, concatenated into the app.js bundle. Only the wrapper (class +
  *  custom-property style bag) and the overlay layer classes are needed — the client mounts
  *  the wrapper as a fixed overlay and never wraps page content, so `inner` is dropped. The
  *  import is dynamic so a missing dependency degrades to an inert theme instead of aborting

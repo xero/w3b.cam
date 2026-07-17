@@ -49,8 +49,12 @@ test.describe("manual theme picker", () => {
 		await page.locator("nav.nav > a").first().click();
 		await expect(page.locator("html")).toHaveClass(/\blight\b/);
 
-		// Clearing writes through storage too: after a reload the override is gone.
+		// Picking "Theme" (empty) is a full reset: it wipes ALL of localStorage, not just the
+		// theme key. Seed a foreign key first to prove clear() — not removeItem — runs.
+		await page.evaluate(() => localStorage.setItem("scratch", "keep?"));
 		await page.locator("#themeSel").selectOption("");
+		expect(await page.evaluate(() => localStorage.length)).toBe(0);
+		// And it writes through: after a reload the override is still gone.
 		await page.reload();
 		await expect(page.locator("html")).not.toHaveClass(/\b(light|dark)\b/);
 		await expect(page.locator("#themeSel")).toHaveValue("");
@@ -96,6 +100,17 @@ test.describe("manual theme picker", () => {
 
 test.describe("cctv theme (CRT overlay)", () => {
 	const overlay = (p: import("@playwright/test").Page) => p.locator("#crt-overlay");
+
+	test("a ?cctv query param forces the cctv theme on load, overriding the stored choice", async ({ page }) => {
+		// Stash a different saved theme, then arrive via a ?cctv link: the head script applies
+		// cctv before paint and theme.js mounts the overlay + reflects it in the picker.
+		await page.addInitScript(() => localStorage.setItem("theme", "light"));
+		await page.goto("/?cctv");
+		await expect(page.locator("html")).toHaveClass(/\bcctv\b/);
+		await expect(page.locator("html")).not.toHaveClass(/\blight\b/);
+		await expect(overlay(page)).toBeAttached();
+		await expect(page.locator("#themeSel")).toHaveValue("cctv");
+	});
 
 	test("selecting cctv mounts a fixed, click-through overlay with all layers", async ({ page }) => {
 		await page.goto("/");

@@ -20,8 +20,22 @@ const read = (rel: string) => readFileSync(p(rel), "utf8");
 
 describe("bake output", () => {
 	it("writes the homepage, its snippet, and the core assets", () => {
-		for (const f of ["index.html", "index.snippet.html", "style.css", "htmx.min.js", "hls.min.js", "theme.js", "crt.css", "crt-config.js", "ms_sans_serif.woff2", "ms_sans_serif_bold.woff2", "rss.xml", "atom.xml", "icons.svg"]) {
+		for (const f of ["index.html", "index.snippet.html", "style.css", "app.js", "hls.min.js", "crt.css", "ms_sans_serif.woff2", "ms_sans_serif_bold.woff2", "rss.xml", "atom.xml", "icons.svg"]) {
 			expect(existsSync(p(f))).toBe(true);
+		}
+	});
+
+	it("bundles all client JS into one app.js and ships no standalone client scripts", () => {
+		// The page pulls a single script; hls.js is the one intentional exception (on-demand).
+		expect(read("index.html")).toContain('<script src="/app.js" defer></script>');
+		expect(read("index.html")).not.toMatch(/src="\/(htmx\.min|feeds|map|live-lifecycle|theme|crt-config)\.js"/);
+		for (const gone of ["htmx.min.js", "feeds.js", "map.js", "live-lifecycle.js", "theme.js", "crt-config.js"]) {
+			expect(existsSync(p(gone))).toBe(false);
+		}
+		// app.js actually carries htmx + each of our scripts, concatenated.
+		const app = read("app.js");
+		for (const marker of ["htmx", "window.liveLifecycle", "data-refresh", "window.__CRT", "themeSel"]) {
+			expect(app).toContain(marker);
 		}
 	});
 

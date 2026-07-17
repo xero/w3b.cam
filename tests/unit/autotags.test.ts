@@ -15,17 +15,23 @@ const feed = (id: string, feedKind: FeedCam["feedKind"]): FeedCam => ({ id, feed
 const byTag = (tags: ReturnType<typeof computeAutoTags>, name: string) => tags.find((t) => t.tag === name)!;
 
 describe("computeAutoTags — derived host feeds join the mjpeg/hls tags", () => {
-	it("tags hosts with a derived mjpeg or jpg URL under `mjpeg`, alongside the feed cams", () => {
+	it("tags only embeddable (https) hosts under `mjpeg`, alongside the feed cams", () => {
 		const hosts = [
-			host("1.1.1.1", [{ port: 443, liveUrl: "https://1.1.1.1/mjpg/video.mjpg" }]), // mjpeg (https)
-			host("2.2.2.2", [{ port: 80, liveUrl: "http://2.2.2.2/jpg/image.jpg" }]), // jpg (http, link) → still mjpeg tag
-			host("3.3.3.3", [{ port: 8080 }]), // no derived url → not tagged
+			host("1.1.1.1", [{ port: 443, liveUrl: "https://1.1.1.1/mjpg/video.mjpg" }]), // https → facade → tagged
+			host("2.2.2.2", [{ port: 80, liveUrl: "http://2.2.2.2/jpg/image.jpg" }]), // http → link-only → NOT tagged
+			host("3.3.3.3", [{ port: 8080 }]), // no derived url → NOT tagged
+			host("4.4.4.4", [
+				{ port: 8000, liveUrl: "http://4.4.4.4:8000/mjpg/video.mjpg" },
+				{ port: 443, liveUrl: "https://4.4.4.4/mjpg/video.mjpg" }, // one embeddable angle → tagged
+			]),
 		];
 		const mjpeg = byTag(computeAutoTags(hosts, [feed("f-mjpeg", "mjpeg"), feed("f-jpg", "jpg")]), "mjpeg");
 		expect(mjpeg.refs).toContainEqual({ kind: "cam", ref: "1.1.1.1" });
-		expect(mjpeg.refs).toContainEqual({ kind: "cam", ref: "2.2.2.2" });
+		expect(mjpeg.refs).toContainEqual({ kind: "cam", ref: "4.4.4.4" });
 		expect(mjpeg.refs).toContainEqual({ kind: "feed", ref: "f-mjpeg" });
 		expect(mjpeg.refs).toContainEqual({ kind: "feed", ref: "f-jpg" });
+		// http-only or underived hosts stay out — they render a "View live" link, not a facade.
+		expect(mjpeg.refs.some((r) => r.ref === "2.2.2.2")).toBe(false);
 		expect(mjpeg.refs.some((r) => r.ref === "3.3.3.3")).toBe(false);
 	});
 

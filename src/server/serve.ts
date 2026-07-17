@@ -13,7 +13,7 @@ import { OUT_DIR } from "../core/config.ts";
  * its /__dev/* API on top; the static behavior lives in one place.
  *
  * The clean URLs the build emits carry no trailing slash and no extension. We try the
- * literal path first (real assets: /img/x.jpg, /htmx.min.js, an .snippet.html), then
+ * literal path first (real assets: /img/x.jpg, /app.js, an .snippet.html), then
  * fall back to `<path>/index.html`. A "does it have an extension" check can't gate this,
  * since a detail path like /hosts/194.94.76.131 has dots in the IP; the try-then-fallback
  * sidesteps that. GitHub Pages does the same folder resolution in production.

@@ -97,7 +97,9 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		// Restore a manually-picked theme (assets/theme.js) before first paint so the saved
 		// choice doesn't flash the OS preference first. Runs in <head> before <body> exists,
 		// so the class lands on <html>; the allow-list keeps arbitrary storage out of it.
-		`${T(2)}<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark"||t==="cctv")document.documentElement.classList.add(t);}catch(e){}</script>`,
+		// A `?cctv` query param forces the cctv theme for this load (a shareable link),
+		// overriding the stored choice; theme.js then mounts the overlay + reflects the picker.
+		`${T(2)}<script>try{var t=localStorage.getItem("theme");if(new URLSearchParams(location.search).has("cctv"))t="cctv";if(t==="light"||t==="dark"||t==="cctv")document.documentElement.classList.add(t);}catch(e){}</script>`,
 		`${T(1)}</head>`,
 		`${T(1)}<body>`,
 		`${T(2)}<header>`,
@@ -128,23 +130,11 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		`${T(3)}<cite><a href="https://3xi.club" target="_blank">3xi.club</a> project by <a href="https://x-e.ro" target="_blank">xero</a></cite>`,
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</footer>`,
-		`${T(2)}<script src="/htmx.min.js"></script>`,
-		// Shared init/teardown plumbing for feeds.js + map.js; must load before them.
-		`${T(2)}<script src="/live-lifecycle.js" defer></script>`,
-		// Live-feed client on every page (tiny): drives feed detail feeds and must be
-		// present however you arrive, including htmx swaps whose snippets carry no script.
-		// It loads hls.min.js on demand only when an HLS cam is actually viewed.
-		`${T(2)}<script src="/feeds.js" defer></script>`,
-		// Map client (tiny): drag-to-pan / wheel-to-zoom for the SVG world map. Like
-		// feeds.js it loads on every page and no-ops when no map is present.
-		`${T(2)}<script src="/map.js" defer></script>`,
-		// Precomputed CRT layer spec (window.__CRT) for the cctv theme, baked by the build.
-		// Deferred before theme.js so the global is set when the picker mounts the overlay.
-		`${T(2)}<script src="/crt-config.js" defer></script>`,
-		// Theme picker (tiny): writes the opt-in style selector into the header and
-		// toggles a class on <html>. No dependency on live-lifecycle; header/<html>
-		// aren't swapped by htmx, so a one-shot init suffices.
-		`${T(2)}<script src="/theme.js" defer></script>`,
+		// One bundled request per page: htmx + live-lifecycle + feeds + map + the CRT layer
+		// spec + the theme picker, concatenated in dependency order by the build (see
+		// build.ts). Deferred so it runs after parse, in order, before DOMContentLoaded.
+		// hls.js stays a separate on-demand fetch, loaded only when an HLS cam is viewed.
+		`${T(2)}<script src="/app.js" defer></script>`,
 		...(dev ? [`${T(2)}<script src="/__dev/dev.js"></script>`] : []),
 		`${T(1)}</body>`,
 		"</html>",
