@@ -65,6 +65,11 @@
       "isp": "Globex",
       "asn": "AS64501",
       "product": "Boa/0.94.13",
+      "ssl": { "versions": ["TLSv1.2"] },
+      "http": {
+        "title": "Network Camera",
+        "html": "<html><head><title>Network Camera</title></head><body><img id=\"stream\" src=\"/mjpg/video.mjpg\" /></body></html>"
+      },
       "location": {
         "city": "Berlin",
         "region_code": "BE",

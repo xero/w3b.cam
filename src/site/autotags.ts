@@ -9,12 +9,21 @@
 // with zero changes to the browse renderer.
 
 import type { FeedCam, Host } from "./render.ts";
+import { liveKindFromUrl } from "../fingerprint/host-feed.ts";
 
 type AutoTag = { tag: string; refs: { kind: "cam" | "feed"; ref: string }[] };
 
 /** A host counts as RTSP if any of its ports is 554 or any angle's product mentions RTSP. */
 const hasRtsp = (h: Host): boolean =>
 	h.shots.some((s) => s.port === 554 || (s.product ?? "").toLowerCase().includes("rtsp"));
+
+/**
+ * True when a host has an angle whose derived live_url (mined at ingest, see host-feed.ts) is
+ * of the given transport — so a Shodan host with a now-playable feed lands under the same
+ * mjpeg/hls tags the feed cams do. Hosts only ever derive mjpeg/jpg (no .m3u8 in host banners).
+ */
+const hasDerived = (h: Host, kind: "mjpeg" | "jpg"): boolean =>
+	h.shots.some((s) => s.liveUrl != null && liveKindFromUrl(s.liveUrl) === kind);
 
 /** The HTTP port family we treat as "http" (plain-text web transports). */
 const HTTP_PORTS = new Set([80, 88, 8080, 8888]);
@@ -32,9 +41,16 @@ export function computeAutoTags(hosts: Host[], feedCams: FeedCam[]): AutoTag[] {
 	return [
 		// Hosts grouped onto more than one port/angle by groupByIp (the "N angles" card badge).
 		{ tag: "multi-angle", refs: camRefs((h) => h.count > 1) },
-		// Auto-refreshing snapshot feeds: embedded refreshing JPEGs plus true multipart MJPEG.
-		{ tag: "mjpeg", refs: feedRefs((c) => c.feedKind === "jpg" || c.feedKind === "mjpeg") },
-		// HTTP Live Streaming feeds.
+		// Refreshing JPEG + multipart MJPEG feeds, plus Shodan hosts we mined a playable
+		// mjpeg/jpg URL for at ingest (both embeddable https and link-only http).
+		{
+			tag: "mjpeg",
+			refs: [
+				...feedRefs((c) => c.feedKind === "jpg" || c.feedKind === "mjpeg"),
+				...camRefs((h) => hasDerived(h, "mjpeg") || hasDerived(h, "jpg")),
+			],
+		},
+		// HTTP Live Streaming feeds. (Hosts never derive HLS — no .m3u8 in Shodan host banners.)
 		{ tag: "hls", refs: feedRefs((c) => c.feedKind === "hls") },
 		{ tag: "rtsp", refs: camRefs(hasRtsp) },
 		{ tag: "http", refs: camRefs((h) => h.shots.some((s) => HTTP_PORTS.has(s.port))) },

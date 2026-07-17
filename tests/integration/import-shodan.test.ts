@@ -30,6 +30,10 @@ describe("import --shodan (hermetic: screenshots are embedded base64)", () => {
 			// Every stored cam has baked image bytes, so it will actually render.
 			const noImg = (db.query("SELECT COUNT(*) AS c FROM cams WHERE kind='cam' AND ss_base64 IS NULL").get() as { c: number }).c;
 			expect(noImg).toBe(0);
+			// The ingest hook mines a playable feed URL from the host's own HTML into live_url
+			// (149.232.130.7's fixture banner advertises an MJPEG path over https).
+			const live = (db.query("SELECT live_url AS u FROM cams WHERE id = '149.232.130.7:8080'").get() as { u: string | null }).u;
+			expect(live).toBe("https://149.232.130.7:8080/mjpg/video.mjpg");
 		} finally {
 			closeDb(db);
 		}

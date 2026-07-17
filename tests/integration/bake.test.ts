@@ -56,6 +56,17 @@ describe("bake output", () => {
 		}
 	});
 
+	it("a host with a mined live_url joins the mjpeg auto-tag and renders a click-to-load facade", () => {
+		// 149.232.130.7's fixture banner advertises an MJPEG path over https, so the ingest hook
+		// derives its live_url — putting it under the `mjpeg` tag beside the feed cams, and
+		// swapping its host-page screenshot for the shared click-to-load facade.
+		expect(existsSync(p("tags/mjpeg/index.html"))).toBe(true);
+		expect(read("tags/mjpeg/index.html")).toContain("/hosts/149.232.130.7");
+		const host = read("hosts/149.232.130.7/index.html");
+		expect(host).toContain('class="facade"');
+		expect(host).toContain('<template class="facade-media">');
+	});
+
 	it("production HTML carries no dev-only data-* hooks", () => {
 		for (const f of ["index.html", "feeds/38.79.156.188/index.html", "hosts/160.72.56.179/index.html"]) {
 			expect(read(f)).not.toMatch(/data-(kind|ref|port)=/);
