@@ -1117,6 +1117,9 @@ body > footer {
 	& a:focus-visible {
 		color: var(--on-accent);
 	}
+	li {
+		align-self: center;
+	}
 }
 
 .breakdown {
