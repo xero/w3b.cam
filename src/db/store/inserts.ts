@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { CamRow, FeedRow, YtRow } from "../../core/types.ts";
 import { decideCamProduct, fingerprintFeed, fingerprintWebcam } from "../../fingerprint/fingerprint.ts";
+import { deriveHostFeed, isRtspHost } from "../../fingerprint/host-feed.ts";
 import { SS_PERMANENT } from "./common.ts";
 
 /**
@@ -8,7 +9,9 @@ import { SS_PERMANENT } from "./common.ts";
  * (unlisted columns read back NULL). `id` is the conflict key; columns omitted
  * from a list survive a re-ingest by design:
  *   - `first_seen`/`last_seen`/`preferred` are never listed (managed by the upsert).
- *   - CAM omits `preferred` so a reorder pin survives re-scrape.
+ *   - CAM omits `preferred` so a reorder pin survives re-scrape, and `live_url`/`external_url`
+ *     so a derived host feed survives too; the cam hook maintains `live_url` via a separate
+ *     UPDATE (see makeInserter), deriving it from the banner HTML on every (re)ingest.
  *   - FEED omits `product` so it is never overwritten by the upsert; the fingerprint hook
  *     writes it via a separate UPDATE only when the URL matches a rule, so a derived (or
  *     curated) product survives a re-ingest that matches nothing.
@@ -154,12 +157,21 @@ function fingerprintWriters(db: Database): { setProduct: ReturnType<Database["qu
  */
 export function makeInserter(db: Database): (rows: CamRow[]) => InsertResult {
 	const { setProduct, recordFp } = fingerprintWriters(db);
+	// live_url isn't in CAM_COLUMNS (so it survives re-ingest); the hook maintains it with a
+	// standalone UPDATE, the same pattern setProduct uses.
+	const setLiveUrl = db.query("UPDATE cams SET live_url = ? WHERE id = ?");
 	return makeUpserter(db, CAM_COLUMNS, {
 		afterUpsert(before, row) {
 			const oldProduct = before?.product ?? ((row.product as string | null) ?? null);
 			const d = decideCamProduct(oldProduct, fingerprintWebcam(row.raw_json as string));
 			setProduct.run(d.product, row.id);
 			recordFp.run("cam", row.id, d.tier === "-" ? null : d.tier, d.method, d.vendor === "-" ? null : d.vendor, d.evidence || null);
+			// Derive a browser-playable feed URL (mjpeg/jpg) from the host's own stored HTML and
+			// keep it in live_url. A non-derivable or RTSP host clears to NULL, so a host self-heals
+			// when its stream path appears or disappears between scrapes. The host renderer turns an
+			// https URL into a click-to-load facade and an http URL into a "View live" link.
+			const feed = isRtspHost(row.port as number, d.product) ? null : deriveHostFeed(row.raw_json as string, row.ip_str as string, row.port as number);
+			setLiveUrl.run(feed ? feed.liveUrl : null, row.id);
 		},
 	});
 }

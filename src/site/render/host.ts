@@ -1,4 +1,6 @@
 import { T, indentBlock, safeParseArray, liveUrl, type RenderOpts } from "./primitives.ts";
+import { liveImg, facadeWrap } from "./live-facade.ts";
+import { liveKindFromUrl } from "../../fingerprint/host-feed.ts";
 import { renderPager, btnLayers } from "./pager.ts";
 import { galleryBody, metaRow, pushMetaRow, detailArticle, renderTagLinks } from "./shared.ts";
 import { renderYtCard, type YtStream } from "./stream.ts";
@@ -18,7 +20,12 @@ interface Shot {
 	timestamp: string | null;
 	imgHref: string;
 	imgAlt: string;
+	/** The "View live" button target: the derived media URL when we have one, else a plain
+	 *  scheme://host guess. Always present. */
 	liveHref: string;
+	/** Derived same-origin media URL (mjpeg/jpg) mined from the host's own stored HTML, or
+	 *  null. On https it drives an in-page click-to-load facade; on http it's link-only. */
+	liveUrl: string | null;
 }
 
 export interface Host {
@@ -133,14 +140,21 @@ export function groupByIp(
 		}
 		usedSlugs.add(slug);
 
-		const shots: Shot[] = group.map((r) => ({
-			port: r.port,
-			product: r.product,
-			timestamp: r.observed_at,
-			imgHref: imgHref(r),
-			imgAlt: `Screenshot from ${r.ip_str}:${r.port}`,
-			liveHref: liveUrl(r.ip_str, r.port),
-		}));
+		const shots: Shot[] = group.map((r) => {
+			// A derived media URL (backfilled into cams.live_url from the host's own HTML) is a
+			// better "View live" target than the bare scheme://host guess, and — on https —
+			// powers an in-page facade. Cams normally have no live_url, so this is null.
+			const derived = typeof r.live_url === "string" && r.live_url ? r.live_url : null;
+			return {
+				port: r.port,
+				product: r.product,
+				timestamp: r.observed_at,
+				imgHref: imgHref(r),
+				imgAlt: `Screenshot from ${r.ip_str}:${r.port}`,
+				liveHref: derived ?? liveUrl(r.ip_str, r.port),
+				liveUrl: derived,
+			};
+		});
 
 		const host: Host = {
 			ip,
@@ -392,9 +406,22 @@ function shotFigure(shot: Shot, ip: string, opts: RenderOpts = {}): string {
 		.join(" &middot; ");
 	// Dev hook: reorder acts on this exact (ip, port); blacklist/tag act on the IP (ref).
 	const devAttrs = opts.dev ? ` data-kind="cam" data-ref="${escapeHtml(ip)}" data-port="${escapeHtml(shot.port)}"` : "";
+	// A derived https media URL is embeddable, so show the same click-to-load facade the feeds
+	// use (the baked screenshot is the poster; nothing hits the camera until the user clicks).
+	// http can't embed (mixed content) and no derivation stays a plain screenshot; both keep
+	// the "View live" link as the way through.
+	const media =
+		shot.liveUrl && shot.liveUrl.startsWith("https:")
+			? facadeWrap({
+					liveHref: shot.liveHref,
+					thumbHref: shot.imgHref,
+					ariaName: `${ip}:${shot.port}`,
+					media: liveImg(liveKindFromUrl(shot.liveUrl), shot.liveUrl, shot.imgHref, shot.imgAlt),
+				})
+			: `${T(2)}<img src="${escapeHtml(shot.imgHref)}" alt="${escapeHtml(shot.imgAlt)}" loading="lazy" />`;
 	return [
 		`${T(1)}<figure class="shot"${devAttrs}>`,
-		`${T(2)}<img src="${escapeHtml(shot.imgHref)}" alt="${escapeHtml(shot.imgAlt)}" loading="lazy" />`,
+		media,
 		`${T(2)}<figcaption>${caption}</figcaption>`,
 		`${T(2)}<a class="btn" href="${escapeHtml(shot.liveHref)}" target="_blank" rel="noopener noreferrer">`,
 		indentBlock(btnLayers("View live"), 2),

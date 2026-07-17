@@ -1,4 +1,5 @@
 import { T, indentBlock, type RenderOpts } from "./primitives.ts";
+import { liveImg, facadeWrap } from "./live-facade.ts";
 import { renderFeedPager, btnLayers } from "./pager.ts";
 import { galleryBody, metaRow, pushMetaRow, detailArticle, renderTagLinks } from "./shared.ts";
 import { escapeHtml } from "../../core/util.ts";
@@ -141,18 +142,15 @@ function feedMedia(cam: FeedCam): string {
 	const alt = escapeHtml(cam.thumbAlt);
 	const poster = cam.thumbHref ? ` poster="${escapeHtml(cam.thumbHref)}"` : "";
 	switch (cam.feedKind) {
-		case "jpg": {
-			const src = cam.thumbHref ? ` src="${escapeHtml(cam.thumbHref)}"` : "";
-			return `${T(2)}<img class="live-img" data-refresh="${escapeHtml(cam.liveUrl)}"${src} alt="${alt}" referrerpolicy="no-referrer" />`;
-		}
-		case "mjpeg": {
+		case "jpg":
+			// Auto-refreshing snapshot: the baked still is the initial src (instant frame),
+			// data-refresh is the endpoint feeds.js cache-busts on a timer.
+			return liveImg("jpg", cam.liveUrl, cam.thumbHref, cam.thumbAlt);
+		case "mjpeg":
 			// A multipart <img> plays a Motion JPEG stream natively, no JS needed. The baked
 			// still rides as the background (instant frame, and the fallback if the stream is
 			// blocked/dead); feeds.js also swaps src to it on error.
-			const bg = cam.thumbHref ? ` style="background-image:url('${escapeHtml(cam.thumbHref)}')"` : "";
-			const still = cam.thumbHref ? ` data-still="${escapeHtml(cam.thumbHref)}"` : "";
-			return `${T(2)}<img class="live-img" data-mjpeg src="${escapeHtml(cam.liveUrl)}"${still}${bg} alt="${alt}" referrerpolicy="no-referrer" />`;
-		}
+			return liveImg("mjpeg", cam.liveUrl, cam.thumbHref, cam.thumbAlt);
 		case "mp4":
 			return `${T(2)}<video class="live-video" src="${escapeHtml(cam.liveUrl)}" autoplay muted loop playsinline controls${poster}></video>`;
 		case "hls":
@@ -175,15 +173,7 @@ function feedMedia(cam: FeedCam): string {
 function feedFacade(cam: FeedCam, liveHref: string): string {
 	const media = feedMedia(cam);
 	if (cam.feedKind === "link" || media.trim() === "") return media;
-	const bg = cam.thumbHref ? ` style="background-image:url('${escapeHtml(cam.thumbHref)}')"` : "";
-	return [
-		`${T(2)}<a class="facade" href="${escapeHtml(liveHref)}" aria-label="Play ${escapeHtml(cam.name)}"${bg}>`,
-		`${T(3)}<span class="play" aria-hidden="true"></span>`,
-		`${T(3)}<template class="facade-media">`,
-		indentBlock(media, 2),
-		`${T(3)}</template>`,
-		`${T(2)}</a>`,
-	].join("\n");
+	return facadeWrap({ liveHref, thumbHref: cam.thumbHref, ariaName: cam.name, media });
 }
 
 /**
