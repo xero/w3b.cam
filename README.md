@@ -40,7 +40,7 @@ bun sync --push        # publish your edits and redeploy
 
 **[Importing data](./docs/importing.md).** `import` for Shodan JSON, YouTube, MJPEG, and HLS, the `osiris` re-ingest, and the rate-limit controls.
 
-**[Curation](./docs/curation.md).** Blacklist, remove, pin a card image, tag, feature, geolocate, and purge.
+**[Curation](./docs/curation.md).** Blacklist by IP, host, or image hash, remove, pin a card image, tag, feature, super-feature, geolocate, and purge.
 
 **[Fingerprinting](./docs/fingerprinting.md).** Deriving each camera's make and model from its banner.
 
@@ -67,12 +67,12 @@ bun sync --push        # publish your edits and redeploy
 | `bun preflight` | CI credit precheck; spends nothing | [Scraping](./docs/scraping.md#preflight) |
 | `bun import` | Ingest a non-scraped source (`--shodan` / `--youtube` / `--mjpeg` / `--hls`) | [Importing](./docs/importing.md) |
 | `bun run osiris` | Re-ingest the Osiris feed dump | [Importing](./docs/importing.md#osiris) |
-| `bun blacklist` / `bun unblacklist` | Drop a host for good, or reverse it | [Curation](./docs/curation.md#blacklist) |
-| `bun remove` | Delete an entry without blacklisting it | [Curation](./docs/curation.md#remove) |
+| `bun blacklist` / `bun unblacklist` | Block an IP, host, or image hash for good, or reverse it | [Curation](./docs/curation.md#blacklist) |
+| `bun remove` | Delete a cam, stream, feed, or image without blacklisting it | [Curation](./docs/curation.md#remove) |
 | `bun reorder` | Pin a host's card image to one port | [Curation](./docs/curation.md#reorder) |
 | `bun tag` / `bun untag` | Attach or remove a tag | [Curation](./docs/curation.md#tag) |
 | `bun feature` / `bun unfeature` | Add or remove a homepage featured pin | [Curation](./docs/curation.md#feature) |
-| `bun superfeature` | Group feeds into a one-off event banner | [Curation](./docs/curation.md#superfeature) |
+| `bun superfeature` / `bun unsuperfeature` | Group feeds into a one-off event banner, or take a finished one down | [Curation](./docs/curation.md#superfeature) |
 | `bun geo` | Set a YouTube stream's map coordinates | [Curation](./docs/curation.md#geo) |
 | `bun purge` | Drop stored RDP/VNC rows | [Curation](./docs/curation.md#purge) |
 | `bun fingerprint` | Backfill camera make and model labels | [Fingerprinting](./docs/fingerprinting.md) |

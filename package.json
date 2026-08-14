@@ -21,6 +21,7 @@
     "feature": "bun run src/curate/feature.ts",
     "unfeature": "bun run src/curate/unfeature.ts",
     "superfeature": "bun run src/curate/superfeature.ts",
+    "unsuperfeature": "bun run src/curate/unsuperfeature.ts",
     "purge": "bun run src/curate/purge.ts",
     "fingerprint": "bun run src/fingerprint/fingerprint-cli.ts",
     "sync": "bun run src/db/sync.ts",

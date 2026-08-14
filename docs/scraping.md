@@ -20,7 +20,7 @@
 bun scrape --pages 5
 ```
 
-Cameras land as `kind='cam'` rows keyed on the IP and port. The run prints a per-page tally (matches, new, refreshed, blacklisted, no-screenshot, rdp/vnc skipped) and a closing summary with the credit balance before and after.
+Cameras land as `kind='cam'` rows keyed on the IP and port. The run prints a per-page tally (matches, new, refreshed, blacklisted, image-blocked, no-screenshot, rdp/vnc skipped) and a closing summary with the credit balance before and after.
 
 The scraper never plans to spend more credits than you hold. It reads your balance and the query's result count up front, then fetches the smaller of the pages you asked for, the pages that exist, and the credits you have. A credits-out or nothing-new run stays green and emits a neutral stop signal so CI skips the rebuild.
 
@@ -50,9 +50,11 @@ A few details worth knowing:
 
 **Screenshots need `minify: false`.** Shodan truncates large fields by default, which drops the screenshot. The client always requests full records.
 
-**Requests are paced to roughly one per second.** `shodan-ts` does no throttling and does not retry rate-limit errors, so the scraper spaces its calls and backs off on `429` and `5xx` responses.
+**Requests are paced to roughly one per second, and retried on transient failures.** `shodan-ts` does no throttling and no retries, so the scraper spaces its calls and backs off on `429`, `5xx`, and transport errors; a timed-out or aborted fetch is retried, not fatal. A search page carries about 100 base64 screenshots and can run several MB, so the client allows a 60-second timeout. If a page still fails after its retries, the scraper stops early and saves what it already fetched instead of discarding the whole run, so a mid-run blip costs one page, not the batch.
 
 **RDP and VNC screens are filtered.** Some hosts serve a remote-desktop or VNC login that Shodan labels as a webcam. The scraper and importer skip any product of `remote desktop protocol` or `vnc` as they ingest. That guard only blocks new rows, so `bun purge` retroactively drops any that predate it. Re-run `bun bake` afterward. See [Curation](./curation.md#purge).
+
+**Blacklisted screenshots are skipped.** A screenshot whose image hash sits in the `image_blacklist` never enters the database, from any source. The check runs as each row is written, so a spam image reused across rotating IPs is caught whatever host carries it. Add one with `bun blacklist <image-hash>`. See [Curation](./curation.md#blacklist).
 
 ---
 

@@ -23,11 +23,11 @@
 
 **feeds.** Re-ingests the Osiris feed cams on demand, refreshing each cam's baked card thumbnail, then saves the database and calls `build`. It takes an optional dump path, a cam limit, and a source filter. The dump lives under `in/` and is gitignored, so CI can only ingest a copy committed to the checkout; the simpler path is to run `bun run osiris` locally and publish with `bun sync --push`. Either way the live detail feeds stay current on their own; only the gallery thumbnails go stale between refreshes.
 
-**blacklist.** Takes an IP or a hostname, removes the matching cameras, saves the database, then calls `build` so the site drops them.
+**blacklist.** Takes an IP, a hostname, or an image hash, removes the matching cameras, saves the database, then calls `build` so the site drops them. An image hash blocks that screenshot across every host serving it, which is how you stop spam that rotates IPs but reuses one static image.
 
-**unblacklist.** Takes an IP or a hostname and clears it from the blacklist. It does not rebuild, because no camera data changes until the next scrape re-adds the host.
+**unblacklist.** Takes an IP, a hostname, or an image hash and clears it from the blacklist. It does not rebuild, because no camera data changes until the next ingest re-adds the target.
 
-**remove.** Takes a kind (cam, stream, or feed) and a target, deletes the matching entry without blacklisting it, saves the database, then calls `build` so the site drops it. A removed entry returns on the next re-ingest; use `blacklist` to keep a host out for good.
+**remove.** Takes a kind (cam, stream, feed, or image) and a target, deletes the matching entry without blacklisting it, saves the database, then calls `build` so the site drops it. A removed entry returns on the next re-ingest; use `blacklist` to keep a host or image out for good.
 
 **reorder.** Takes an IP and a port, pins that port's screenshot as the host's gallery card, saves the database, then calls `build` so the new card appears on the site.
 
@@ -39,11 +39,19 @@
 
 **geo.** Takes a video id, a latitude, and a longitude, assigns that stream's map coordinates on its `cams` row, saves the database, then calls `build` so the stream appears on the map.
 
+**db-backup.** Runs daily, and on demand, to snapshot the `db-store` database into a separate `db-backups` release, keeping the newest seven and pruning the rest. It reuses the same fail-closed restore the other workflows use, so a snapshot never quietly records an empty file. Nothing depends on it; it exists so a bad write to the store is recoverable.
+
 ---
 
 ## The database store
 
 `camhunting.sqlite` is too large for git, so it lives as an asset on a prerelease named `db-store` instead of in the repo. Every workflow that changes the database restores it from that release first and uploads the new copy when it finishes; `build` reads it without saving. All the writing workflows share one concurrency group (`db-write`), so they can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine; see [Database](./database.md#the-database-store).
+
+The restore and save steps are shared composite actions under `.github/actions/`, so their safety rules live in one place:
+
+- **Restore fails closed.** If the store holds a `camhunting.sqlite` asset but the download errors, the job fails instead of quietly starting from an empty database. A transient GitHub or network blip becomes a red run that self-heals next cycle, never a fresh database that the save step then uploads over the real one. Only a store with no asset yet, a true first run, starts empty.
+- **Save is size-gated.** The upload refuses to replace the store with a database drastically smaller than the one already there, under half its size by default, so a truncated or fresh-started copy can never clobber the good data. Raise the threshold, or push by hand with `bun sync --push`, for a deliberate large shrink.
+- **Backups are kept.** The `db-backup` workflow snapshots the store to a separate `db-backups` release once a day and keeps the newest seven, so a bad write is recoverable rather than lost.
 
 ---
 
@@ -54,12 +62,13 @@ Open the Actions tab, pick the workflow, and choose "Run workflow".
 - **scrape** takes an optional page count (default 2).
 - **youtube** takes a video URL and an optional label.
 - **feeds** takes an optional dump path, cam limit, and source filter.
-- **blacklist** and **unblacklist** each take an IP or a hostname.
-- **remove** takes a kind and a target (an IP or hostname for a cam, the stored id for a stream or feed).
+- **blacklist** and **unblacklist** each take an IP, a hostname, or an image hash.
+- **remove** takes a kind and a target (an IP or hostname for a cam, the stored id for a stream or feed, the image hash for an image).
 - **reorder** takes an IP and a port.
 - **tag** and **untag** each take a kind, a ref, and a label.
 - **feature** and **unfeature** each take a kind and a ref.
 - **geo** takes a video id, a latitude, and a longitude.
+- **db-backup** takes an optional retention count (default 7), and also runs on its own once a day.
 
 Invalid input fails the run immediately.
 

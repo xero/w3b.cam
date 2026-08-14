@@ -74,3 +74,13 @@ export function addSuperFeature(db: Database, key: string, feedId: string): bool
 export function removeSuperFeature(db: Database, key: string, feedId: string): boolean {
 	return db.query("DELETE FROM meta WHERE kind = 'feed' AND ref = ? AND type = 'superfeature' AND value = ?").run(feedId, key).changes > 0;
 }
+
+/**
+ * Remove an ENTIRE super-feature group by event key (every feed under it), taking its banner
+ * off the homepage and dropping the /event/<key> page. The feed cams themselves are untouched
+ * — they keep rendering normally, just no longer grouped as an event. Returns the number of
+ * member rows removed (0 if no such event). The inverse of a full `superfeature <key> ...`.
+ */
+export function removeSuperFeatureEvent(db: Database, key: string): number {
+	return db.query("DELETE FROM meta WHERE type = 'superfeature' AND kind = 'feed' AND value = ?").run(key).changes;
+}

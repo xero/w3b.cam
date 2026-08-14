@@ -25,7 +25,7 @@ A second `feed_kind` column records how a row renders: `screenshot`, `jpg`, `mjp
 Three side tables hang off it:
 
 - **meta.** One polymorphic table for tags, featured pins, and super-feature groups, keyed on `(kind, ref, type, value)`. `type` is `tag`, `featured`, or `superfeature`.
-- **blacklist and host_blacklist.** Blocked IPs and blocked hostnames or domains, so a dropped host never re-ingests.
+- **blacklist, host_blacklist, and image_blacklist.** Blocked IPs, blocked hostnames or domains, and blocked screenshot hashes (the 16-hex `ss_hash` prefix, the same value the baker uses for `/img/<hash>` names), so a dropped host or image never re-ingests, from any source.
 - **fingerprints.** One audit row per fingerprinted cam or feed recording which signal named which vendor at what confidence. See [Fingerprinting](./fingerprinting.md).
 
 Tags, featured pins, and geolocation are unified across all three sources, so tagging `street` on a webcam, a stream, and a feed cam groups all three under one `/tags/street` page.
@@ -83,9 +83,9 @@ src/
     fingerprint.ts  derive camera make/model from a banner into the product field
     fingerprint-cli.ts  catch-up backfill that rebuilds the fingerprint table on demand
   curate/         database-editing commands
-    blacklist.ts    drop a host and record it so scrapes skip it
+    blacklist.ts    drop a host, IP, or image hash and record it so ingest skips it
     unblacklist.ts  reverse a blacklist entry
-    remove.ts       delete a stored entry without blacklisting it
+    remove.ts       delete a cam, stream, feed, or image without blacklisting it
     reorder.ts      pin a host's card image to one port
     tag.ts          attach a free-form label to a cam, stream, or feed cam
     untag.ts        remove a tag from a cam, stream, or feed cam
@@ -93,6 +93,7 @@ src/
     feature.ts      add a cam or stream to the homepage featured set
     unfeature.ts    remove a cam or stream from the featured set
     superfeature.ts group feed cams into a one-off homepage event banner
+    unsuperfeature.ts take a finished event's group back down
     purge.ts        remove stored RDP/VNC rows that predate the ingest filter
   site/           database to static site
     render.ts       barrel re-exporting render/*
@@ -106,7 +107,7 @@ src/
     autotags.ts     derived auto-tags (transport kind, http) for the tag cloud
   server/         static and dev servers
     serve.ts        static file server for out/
-    dev.ts          local dev server with right-click blacklist/reorder/tag
+    dev.ts          local dev server with right-click blacklist/reorder/tag/image-block
     dev-client/     browser editing UI (js and css), served from source
 in/                curated inputs (gitignored)
   youtube.md       YouTube live-stream list, source for `bun import --youtube`

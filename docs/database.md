@@ -25,6 +25,8 @@ The seed is small and hand-curated. A fresh database ships with a built-in host 
 
 All the writing workflows share one concurrency group (`db-write`), so a scheduled scrape, the YouTube ingester, and a manual blacklist can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine, which is how edits you make locally reach the site.
 
+In CI the store is guarded on both ends. The restore that seeds each run fails closed instead of starting from an empty database on a download blip, the save that writes the store back refuses a copy drastically smaller than what is already there, and a daily `db-backup` job keeps the newest seven snapshots on a separate `db-backups` release. See [GitHub Actions](./ci.md#the-database-store).
+
 ---
 
 ## sync

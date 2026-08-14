@@ -1,7 +1,7 @@
 # Curation
 
 > [!NOTE]
-> The database-editing commands: blacklist, remove, pin a card image, tag, feature, geolocate, and purge. Each writes straight to `camhunting.sqlite`; re-run `bun bake` afterward to rebuild the site. The same edits are available by right-click in [`bun dev`](./editing-locally.md).
+> The database-editing commands: blacklist (by IP, host, or image hash), remove, pin a card image, tag, feature, super-feature, geolocate, and purge. Each writes straight to `camhunting.sqlite`; re-run `bun bake` afterward to rebuild the site. The same edits are available by right-click in [`bun dev`](./editing-locally.md).
 
 > ### Table of Contents
 > - [blacklist](#blacklist)
@@ -13,6 +13,7 @@
 > - [feature](#feature)
 > - [unfeature](#unfeature)
 > - [superfeature](#superfeature)
+> - [unsuperfeature](#unsuperfeature)
 > - [geo](#geo)
 > - [purge](#purge)
 
@@ -20,26 +21,37 @@
 
 ## blacklist
 
-**`bun blacklist <ip-or-hostname>`.** Deletes every matching row and records the entry in a blacklist table so the scraper and importer skip it, meaning a host you drop never comes back on a later run. An IP matches exactly, every port; a hostname or domain matches itself and any subdomain, so `bun blacklist cloudzy.com` also drops `cam.node.cloudzy.com`. IPs live in a `blacklist` table, hostnames in a `host_blacklist` table.
+**`bun blacklist <ip | hostname | image-hash>`.** Deletes every matching row and records the entry so the scraper and every importer skip it, meaning what you drop never comes back on a later run. The argument type is auto-detected:
 
-A fresh database starts with a built-in list of blacklisted hostnames; IPs start empty.
+- **IP.** Matches exactly, every port. Stored in a `blacklist` table.
+- **Hostname or domain.** Matches itself and any subdomain, so `bun blacklist cloudzy.com` also drops `cam.node.cloudzy.com`. Stored in a `host_blacklist` table.
+- **Image hash.** The 16-hex hash from an image URL, the `<hash>` in `/img/<hash>.jpg`. Blocks by screenshot content rather than by host. It removes that exact image from every camera serving it and skips it on future ingest, whatever IP carries it. Stored in an `image_blacklist` table. Reach for this when a spam host rotates IPs but reuses one static image, where an IP or host block is whack-a-mole.
+
+The image block is enforced as rows are written, so it covers every source at once: `scrape`, `import`, and `osiris`. A fresh database starts with a built-in list of blacklisted hostnames; IPs and image hashes start empty.
+
+```sh
+bun blacklist 203.0.113.7        # one host, every port
+bun blacklist cloudzy.com        # a domain and its subdomains
+bun blacklist 1e5a6c3a27892c05   # one screenshot, across every host that serves it
+```
 
 ---
 
 ## unblacklist
 
-**`bun unblacklist <ip-or-hostname>`.** Reverses a blacklist entry. Clear the host, then re-run `bun scrape` to fetch it again. It does not rebuild on its own, because no camera data changes until the next scrape re-adds the host.
+**`bun unblacklist <ip | hostname | image-hash>`.** Reverses a blacklist entry of any of the three kinds, auto-detected the same way. Clear it, then re-run `bun scrape` or re-ingest its source to fetch it again. It does not rebuild on its own, because no camera data changes until the next ingest re-adds the target.
 
 ---
 
 ## remove
 
-**`bun remove [--kind cam|stream|feed] <ref>`.** Deletes a stored entry without blacklisting it. Unlike `blacklist`, nothing is recorded to keep it out, so a removed entry returns the next time its source is re-ingested by `scrape`, `import`, or `osiris`. Removing also clears the entry's tags and featured pins.
+**`bun remove [--kind cam|stream|feed|image] <ref>`.** Deletes a stored entry without blacklisting it. Unlike `blacklist`, nothing is recorded to keep it out, so a removed entry returns the next time its source is re-ingested by `scrape`, `import`, or `osiris`. Removing also clears the entry's tags and featured pins.
 
 - **cam (default).** `<ref>` is an IP (matched exactly, every port) or a hostname/domain (matches itself and any subdomain, like `blacklist`).
 - **stream or feed.** `<ref>` is the stored id (video id or feed id).
+- **image.** `<ref>` is the 16-hex image hash from an `/img/<hash>.jpg` URL. Every camera serving that exact screenshot is dropped, across all hosts.
 
-Reach for `blacklist` instead when you want a host gone for good.
+Reach for `blacklist` instead when you want a host or image gone for good.
 
 ---
 
@@ -79,10 +91,22 @@ Tags show on each detail page, size a tag cloud at `/tags` in the header nav, an
 
 **`bun superfeature <event-key> <feed-id> [<feed-id> ...]`.** Groups one or more feed cams under an event key so they render together on a combined `/event/<key>` page and get a banner promoted above everything on the homepage. It is meant for one-off events, like a bridge demolition streamed hi-res on one source and as a low-res traffic cam on another.
 
-The first feed listed is the primary. Its image and name drive the banner and the combined page's title. The pins live in the `meta` table (`type='superfeature'`, `value=<key>`), so re-running is idempotent. A feed id with no stored cam is recorded anyway with a warning and shows once that feed is ingested.
+The first feed listed is the primary. Its image and name drive the banner and the combined page's title. The pins live in the `meta` table (`type='superfeature'`, `value=<key>`), so re-running is idempotent. A feed id with no stored cam is recorded anyway with a warning and shows once that feed is ingested. When the event is over, `bun unsuperfeature <event-key>` takes it back down.
 
 ```sh
 bun superfeature i376-demolition pacast-i376-demolition mjpeg-511pa-6381
+bun bake
+```
+
+---
+
+## unsuperfeature
+
+**`bun unsuperfeature <event-key> [<feed-id> ...]`.** Pulls a completed event's group off the homepage banner and removes its combined `/event/<key>` page. The inverse of `superfeature`. With no feed ids it removes the whole event; with feed ids it drops only those from the group and leaves the rest. The feed cams themselves are untouched: they keep rendering as ordinary feeds, no longer grouped as an event, so they rejoin the normal feeds gallery.
+
+```sh
+bun unsuperfeature i376-demolition                    # event over: drop the whole banner + /event page
+bun unsuperfeature i376-demolition mjpeg-511pa-6381   # or drop just one feed from the group
 bun bake
 ```
 

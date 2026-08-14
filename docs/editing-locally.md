@@ -29,7 +29,7 @@ bun sync --push   # publish your edits and rebuild the live site
 
 **`bun dev`.** Bakes a dev build of the site, serves it at `http://localhost:1337`, and opens your browser. Override the port with `PORT=3000 bun dev`.
 
-Right-click a cam card or screenshot to blacklist the host, pin that port as the card image, or attach a tag; right-click a stream or feed card, or its detail page, to tag it too. The Tag menu lists the entity's current tags as chips, each with an × to remove it, so you add and remove in one place. These are the same operations the [curation](./curation.md) commands run from the CLI.
+Right-click a cam card or screenshot to blacklist the host, pin that port as the card image, or attach a tag; right-click a stream or feed card, or its detail page, to tag it too. Any card or screenshot that shows a baked image also offers **Blacklist image** and **Remove image**. Those act on the screenshot's content, blocking or dropping it across every host that serves it, the same as `bun blacklist <image-hash>` and `bun remove --kind image`. The Tag menu lists the entity's current tags as chips, each with an × to remove it, so you add and remove in one place. These are the same operations the [curation](./curation.md) commands run from the CLI.
 
 Each action writes straight to the local database. Changes apply in the page immediately with no rebuild, because re-extracting thousands of screenshots from a database of a few hundred MB takes tens of seconds. Run `bun bake` when you want the static `out/` regenerated. Dev mode never runs in CI and never touches the published database.
 
