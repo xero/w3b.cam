@@ -1,0 +1,77 @@
+name: Save DB to store
+description: >-
+  Upload camhunting.sqlite to the db-store release, guarded by a size sanity
+  check: refuse to overwrite the store with a DB drastically smaller than the one
+  already there (a truncated / fresh-start DB). This is the backstop that would
+  have blocked the 198-row DB from clobbering the ~9,600-row store.
+
+inputs:
+  github-token:
+    description: Token for the gh CLI (needs contents:write).
+    required: false
+    default: ${{ github.token }}
+  min-percent:
+    description: >-
+      Minimum size, as a percent of the current store asset, the new DB must reach
+      or the upload aborts. Only applied when a store asset already exists. Raise it
+      for a deliberate large shrink, or push manually with `bun run sync --push`.
+    required: false
+    default: '50'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        MIN_PCT: ${{ inputs.min-percent }}
+      run: |
+        set -uo pipefail
+        RELEASE=db-store
+        ASSET=camhunting.sqlite
+        ERR="${RUNNER_TEMP:-/tmp}/save-db.err"
+
+        if [ ! -f "$ASSET" ]; then
+          echo "::error::No local ${ASSET} to save."
+          exit 1
+        fi
+        new="$(stat -c%s "$ASSET")"
+
+        # Current store asset size (0 if the release/asset doesn't exist yet). Retry
+        # transient errors; a truly missing release just means "first save".
+        old=""; state=""
+        for attempt in 1 2 3 4; do
+          if old="$(gh release view "$RELEASE" --json assets --jq '.assets[] | select(.name == "'"$ASSET"'") | .size' 2>"$ERR")"; then
+            state=ok; break
+          fi
+          if grep -qiE 'release not found|not found|no releases' "$ERR"; then
+            state=absent; break
+          fi
+          echo "store size probe attempt ${attempt} failed (transient?); retrying in $((attempt * 5))s…" >&2
+          sleep $((attempt * 5))
+        done
+        if [ "$state" != ok ] && [ "$state" != absent ]; then
+          echo "::error::Could not read the current store size after retries; refusing to upload blind."
+          cat "$ERR" >&2 || true
+          exit 1
+        fi
+        old="${old:-0}"
+
+        if [ "$old" -gt 0 ] && [ $((new * 100)) -lt $((old * MIN_PCT)) ]; then
+          echo "::error::Refusing to save: new ${ASSET} is ${new} bytes, under ${MIN_PCT}% of the current ${old}-byte store — looks truncated or fresh-started. If intentional, raise min-percent or push manually with 'bun run sync --push'."
+          exit 1
+        fi
+
+        # Create the store on first save, then upload (retry transient failures).
+        gh release view "$RELEASE" >/dev/null 2>&1 \
+          || gh release create "$RELEASE" --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
+        for attempt in 1 2 3 4; do
+          if gh release upload "$RELEASE" "$ASSET" --clobber; then
+            echo "Saved ${ASSET} (${new} bytes) to ${RELEASE}."
+            exit 0
+          fi
+          echo "upload attempt ${attempt} failed; retrying in $((attempt * 5))s…" >&2
+          sleep $((attempt * 5))
+        done
+        echo "::error::Upload of ${ASSET} to ${RELEASE} failed after retries."
+        exit 1

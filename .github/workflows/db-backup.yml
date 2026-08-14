@@ -1,0 +1,69 @@
+name: db-backup
+
+# Daily point-in-time snapshot of the db-store SQLite asset into a separate
+# db-backups release, so a bad write to db-store is recoverable — db-store itself
+# keeps only the latest copy, clobbered on every scrape/curation run. Retains the
+# newest `keep` snapshots and prunes the rest.
+on:
+  schedule:
+    - cron: '30 5 * * *' # daily, offset from the 6-hourly scrape windows (0 */6)
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: How many recent snapshots to retain
+        required: false
+        default: '7'
+        type: string
+
+# Share the db-write lock so a snapshot can never read a half-written db-store
+# asset mid-upload.
+concurrency:
+  group: db-write
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # read db-store + create/upload/prune db-backups
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP: ${{ inputs.keep || '7' }}
+    steps:
+      - name: Snapshot db-store -> db-backups
+        shell: bash
+        run: |
+          set -uo pipefail
+          SRC=db-store
+          DST=db-backups
+          ASSET=camhunting.sqlite
+
+          if ! gh release view "$SRC" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET"; then
+            echo "No ${ASSET} in ${SRC} yet — nothing to back up."
+            exit 0
+          fi
+
+          gh release download "$SRC" --pattern "$ASSET" --clobber
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          SNAP="camhunting-${STAMP}.sqlite"
+          mv "$ASSET" "$SNAP"
+
+          gh release view "$DST" >/dev/null 2>&1 \
+            || gh release create "$DST" --prerelease --title "SQLite backups" --notes "Rolling db-store snapshots. Newest is a known-good restore point; older ones are pruned automatically."
+          gh release upload "$DST" "$SNAP" --clobber
+          echo "Uploaded snapshot ${SNAP} to ${DST}."
+
+      - name: Prune old snapshots (keep newest KEEP)
+        shell: bash
+        run: |
+          set -uo pipefail
+          DST=db-backups
+          mapfile -t ALL < <(gh release view "$DST" --json assets --jq '.assets | sort_by(.createdAt) | reverse | .[].name' 2>/dev/null || true)
+          if [ "${#ALL[@]}" -le "$KEEP" ]; then
+            echo "${#ALL[@]} snapshot(s) present; keep=${KEEP}; nothing to prune."
+            exit 0
+          fi
+          for asset in "${ALL[@]:$KEEP}"; do
+            echo "Pruning old snapshot ${asset}"
+            gh release delete-asset "$DST" "$asset" -y
+          done

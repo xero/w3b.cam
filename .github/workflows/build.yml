@@ -37,9 +37,7 @@ jobs:
       # The DB lives as an asset on the db-store release, not in git (it's ~375MB).
       # If the store doesn't exist yet, bake an empty DB (build.ts still emits index.html).
       - name: Restore DB from release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; baking empty"
+        uses: ./.github/actions/restore-db
 
       - name: Bake static site
         run: bun run bake

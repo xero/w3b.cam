@@ -40,9 +40,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Restore DB from release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
+        uses: ./.github/actions/restore-db
 
       # Inputs passed via env (not inline ${{ }}) to avoid shell injection. The `--` keeps a
       # target that begins with '-' from being read as a flag. The script validates and exits 1.
@@ -53,12 +51,7 @@ jobs:
         run: bun run remove --kind "$KIND" -- "$TARGET"
 
       - name: Save DB to release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view db-store >/dev/null 2>&1 \
-            || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
-          gh release upload db-store camhunting.sqlite --clobber
+        uses: ./.github/actions/save-db
 
   # Removing entries changes the gallery, so rebuild & deploy to drop them from the site.
   call-build:

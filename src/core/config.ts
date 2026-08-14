@@ -85,10 +85,16 @@ export const PER_PAGE = 100;
 /** Minimum spacing between API requests (~1 req/sec, with a small margin). */
 export const MIN_REQUEST_MS = 1100;
 
-/** Client-level options. Retries are handled by our own backoff wrapper, not the library. */
-export const CLIENT_OPTS = { timeout: 15_000 } as const;
+/**
+ * Client-level options. Retries are handled by our own backoff wrapper, not the
+ * library. The timeout is generous: a `minify:false` search page carries ~100
+ * base64 screenshots and can be several MB, so a tight timeout aborts mid-download
+ * (this is what stalled scrapes at 15s — the fetch aborts, surfaces as a non-HTTP
+ * error, and used to kill the whole run).
+ */
+export const CLIENT_OPTS = { timeout: 60_000 } as const;
 
-/** Max attempts for a single request before giving up (backoff on 429 / 5xx). */
+/** Max attempts for a single request before giving up (backoff on 429 / 5xx / transport errors). */
 export const MAX_RETRIES = 5;
 
 /** Base delay for exponential backoff. */

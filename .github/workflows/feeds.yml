@@ -51,9 +51,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Restore DB from release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
+        uses: ./.github/actions/restore-db
 
       # Inputs passed via env (not inline ${{ }}) to avoid shell injection.
       - name: Ingest feed cams
@@ -72,12 +70,7 @@ jobs:
           bun run osiris "${args[@]}"
 
       - name: Save DB to release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view db-store >/dev/null 2>&1 \
-            || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
-          gh release upload db-store camhunting.sqlite --clobber
+        uses: ./.github/actions/save-db
 
   # New/refreshed feed cams change the gallery, so rebuild & deploy.
   call-build:

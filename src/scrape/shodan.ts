@@ -9,8 +9,13 @@ export function makeClient(token: string): ShodanClient {
 }
 
 /**
- * Run an API call with retry + exponential backoff on 429 and 5xx.
- * shodan-ts does NOT retry 429 and does no throttling, so we own this.
+ * Run an API call with retry + exponential backoff on transient failures.
+ * shodan-ts does NOT retry 429 and does no throttling, so we own this. Retriable:
+ * throttling (429), server errors (5xx), and transport-level failures — an
+ * aborted/timed-out fetch, connection reset, or DNS blip surface as a non-HTTP
+ * error, i.e. status 0. (A screenshot-heavy search page timing out is exactly
+ * this; before, it wasn't retried and killed the whole scrape.) A definite client
+ * error (4xx) is permanent and is never retried.
  */
 export async function withBackoff<T>(
   label: string,
@@ -21,7 +26,7 @@ export async function withBackoff<T>(
       return await fn();
     } catch (err) {
       const status = err instanceof ShodanApiError ? err.status : 0;
-      const retriable = status === 429 || (status >= 500 && status < 600);
+      const retriable = status === 0 || status === 429 || (status >= 500 && status < 600);
       if (!retriable || attempt >= MAX_RETRIES) throw err;
       const wait = BACKOFF_BASE_MS * 2 ** attempt + Math.floor(Math.random() * 500);
       console.warn(

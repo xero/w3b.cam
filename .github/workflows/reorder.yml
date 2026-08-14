@@ -33,9 +33,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Restore DB from release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
+        uses: ./.github/actions/restore-db
 
       # ip/port passed via env (not inline ${{ }}) to avoid shell injection.
       # The script validates both and exits 1 on bad input (or an unknown host:port).
@@ -46,12 +44,7 @@ jobs:
         run: bun run reorder "$IP" "$PORT"
 
       - name: Save DB to release store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view db-store >/dev/null 2>&1 \
-            || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
-          gh release upload db-store camhunting.sqlite --clobber
+        uses: ./.github/actions/save-db
 
   # Reordering changes a host's card image, so rebuild & deploy to reflect it.
   call-build:

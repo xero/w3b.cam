@@ -49,9 +49,7 @@ jobs:
 
       - name: Restore DB from release store
         if: steps.preflight.outputs.has_credits == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download db-store --pattern camhunting.sqlite --clobber || echo "no DB in store yet; starting fresh"
+        uses: ./.github/actions/restore-db
 
       - name: Scrape
         id: scrape
@@ -63,12 +61,7 @@ jobs:
 
       - name: Save DB to release store
         if: steps.preflight.outputs.has_credits == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view db-store >/dev/null 2>&1 \
-            || gh release create db-store --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
-          gh release upload db-store camhunting.sqlite --clobber
+        uses: ./.github/actions/save-db
 
   # Rebuild & deploy from the DB we just saved (build re-restores it from the store).
   # Skipped when the scrape changed nothing, so scheduled no-op runs don't redeploy.

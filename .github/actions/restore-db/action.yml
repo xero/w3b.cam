@@ -1,0 +1,69 @@
+name: Restore DB from store
+description: >-
+  Download camhunting.sqlite from the db-store release, fail-closed. If the store
+  HAS the asset but the download errors (a transient GitHub/network flake), this
+  fails the job instead of silently continuing with no DB — that swallowed-restore
+  path, paired with the clobber-upload in save-db, once wiped the whole store.
+  Only a genuinely assetless store (a true first run) is allowed to proceed fresh.
+
+inputs:
+  github-token:
+    description: Token for the gh CLI (needs contents:read).
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -uo pipefail
+        RELEASE=db-store
+        ASSET=camhunting.sqlite
+        ERR="${RUNNER_TEMP:-/tmp}/restore-db.err"
+
+        # 1) Probe the store, retrying transient failures. Tell a genuinely missing
+        #    release (first run -> fresh) apart from an unreachable API (-> fail).
+        names=""; state=""
+        for attempt in 1 2 3 4; do
+          if names="$(gh release view "$RELEASE" --json assets --jq '.assets[].name' 2>"$ERR")"; then
+            state=ok; break
+          fi
+          if grep -qiE 'release not found|not found|no releases' "$ERR"; then
+            state=absent; break
+          fi
+          echo "store probe attempt ${attempt} failed (transient?); retrying in $((attempt * 5))s…" >&2
+          cat "$ERR" >&2 || true
+          sleep $((attempt * 5))
+        done
+
+        if [ "$state" = absent ]; then
+          echo "No ${RELEASE} release yet — starting fresh."
+          exit 0
+        fi
+        if [ "$state" != ok ]; then
+          echo "::error::Could not reach the ${RELEASE} store after retries; failing closed rather than risk clobbering it with a fresh DB."
+          cat "$ERR" >&2 || true
+          exit 1
+        fi
+
+        # 2) Store reachable. No asset yet is a legitimate fresh start.
+        if ! printf '%s\n' "$names" | grep -qx "$ASSET"; then
+          echo "${RELEASE} exists but holds no ${ASSET} yet — starting fresh."
+          exit 0
+        fi
+
+        # 3) Asset exists -> the download MUST succeed. Retry, then fail closed so a
+        #    flake can never fall through to a fresh DB that later clobbers the store.
+        for attempt in 1 2 3 4; do
+          if gh release download "$RELEASE" --pattern "$ASSET" --clobber; then
+            echo "Restored ${ASSET} from ${RELEASE}."
+            exit 0
+          fi
+          echo "download attempt ${attempt} failed; retrying in $((attempt * 5))s…" >&2
+          sleep $((attempt * 5))
+        done
+        echo "::error::${ASSET} exists in ${RELEASE} but every download attempt failed; failing closed so the store is not overwritten by a fresh DB."
+        exit 1

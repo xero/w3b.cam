@@ -64,7 +64,20 @@ try {
     }
     lastRequestAt = Date.now();
 
-    const res = await searchPage(client, query, page);
+    // A page fetch that fails even after backoff (e.g. a persistent Shodan
+    // timeout on a screenshot-heavy page) must not discard the pages already
+    // scraped: warn, stop early, and let `finally` persist what we have. The run
+    // stays green so CI's save step still uploads this cycle's progress.
+    let res: Awaited<ReturnType<typeof searchPage>>;
+    try {
+      res = await searchPage(client, query, page);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `::warning::page ${page} failed after retries (${msg}); stopping early and saving the ${added} new cam(s) scraped so far.`,
+      );
+      break;
+    }
     if (res.matches.length === 0) {
       console.log(`page ${page}: no more results, stopping.`);
       break;
