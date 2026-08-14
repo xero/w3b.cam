@@ -103,6 +103,53 @@ describe("reorder", () => {
 	});
 });
 
+describe("image blacklist / remove", () => {
+	// Count stored rows whose screenshot matches a 16-hex image hash (the [:16] prefix,
+	// uniform with the baker's /img/<hash> filenames).
+	const countByHash = (hash: string): number =>
+		withDb((db) => (db.query("SELECT COUNT(*) AS c FROM cams WHERE substr(ss_hash, 1, 16) = ?").get(hash) as { c: number }).c);
+	// A real image hash present in the prepped fixture.
+	const fixtureHash = (): string =>
+		withDb((db) => (db.query("SELECT substr(ss_hash, 1, 16) AS h FROM cams WHERE kind = 'cam' AND ss_hash IS NOT NULL LIMIT 1").get() as { h: string }).h);
+
+	it("blacklist <image-hash> deletes matching cams and blocks re-ingest; unblacklist lifts it", async () => {
+		const hash = fixtureHash();
+		expect(countByHash(hash)).toBeGreaterThan(0);
+
+		const bl = await runScript("blacklist", [hash], { env: env() });
+		expect(bl.code).toBe(0);
+		expect(bl.output).toContain("Image hash:");
+		expect(countByHash(hash)).toBe(0);
+
+		// Re-ingesting the same fixture must NOT bring a blacklisted image back (the ingest
+		// upserter skips it, whatever host/IP carries it).
+		await runScript("import", ["--shodan", SHODAN_FIXTURE_DIR], { env: env() });
+		expect(countByHash(hash)).toBe(0);
+
+		// Lift the block, re-ingest, and the image returns.
+		expect((await runScript("unblacklist", [hash], { env: env() })).code).toBe(0);
+		await runScript("import", ["--shodan", SHODAN_FIXTURE_DIR], { env: env() });
+		expect(countByHash(hash)).toBeGreaterThan(0);
+	});
+
+	it("remove --kind image drops the image but does NOT block re-ingest", async () => {
+		const hash = fixtureHash();
+		expect(countByHash(hash)).toBeGreaterThan(0);
+
+		const rm = await runScript("remove", ["--kind", "image", "--", hash], { env: env() });
+		expect(rm.code).toBe(0);
+		expect(countByHash(hash)).toBe(0);
+
+		// No block recorded, so a re-ingest restores it.
+		await runScript("import", ["--shodan", SHODAN_FIXTURE_DIR], { env: env() });
+		expect(countByHash(hash)).toBeGreaterThan(0);
+	});
+
+	it("rejects a non-hash target for --kind image", async () => {
+		expect((await runScript("remove", ["--kind", "image", "--", "not-a-hash"], { env: env() })).code).toBe(1);
+	});
+});
+
 describe("geo", () => {
 	it("assigns coordinates to a stream", async () => {
 		expect(withDb((db) => loadYtGeo(db).has("aBcDeFgHiJk"))).toBe(false);

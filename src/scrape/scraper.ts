@@ -36,6 +36,7 @@ let added = 0;
 let updated = 0;
 let changed = 0;
 let skippedBlacklist = 0;
+let blockedImage = 0;
 let creditsBefore = 0;
 
 try {
@@ -106,17 +107,19 @@ try {
       if (row) rows.push(row);
     }
 
-    const { added: a, updated: u, changed: c } = insertMany(rows);
+    const { added: a, updated: u, changed: c, blocked: bi } = insertMany(rows);
     seen += res.matches.length;
     added += a;
     updated += u;
     changed += c;
     skippedBlacklist += blacklisted;
+    blockedImage += bi;
 
     const extra =
       (noScreenshot ? `, ${noScreenshot} no-screenshot` : "") +
       (blocked ? `, ${blocked} rdp/vnc skipped` : "") +
-      (blacklisted ? `, ${blacklisted} blacklisted` : "");
+      (blacklisted ? `, ${blacklisted} blacklisted` : "") +
+      (bi ? `, ${bi} image-blocked` : "");
     console.log(
       `page ${page}/${plannedPages}: ${res.matches.length} matches, ` +
         `${rows.length} with screenshot, +${a} new, ${u} refreshed` +
@@ -152,6 +155,7 @@ try {
   console.log(`New cameras added: ${added}`);
   console.log(`Refreshed:         ${updated} existing (${changed} with a changed screenshot)`);
   console.log(`Blacklisted:       ${skippedBlacklist}`);
+  console.log(`Image-blocked:     ${blockedImage}`);
   console.log(`DB rows:           ${startingRows} → ${endingRows}`);
   console.log(
     `Query credits:     ${creditsBefore} → ${creditsAfter} (spent ${creditsBefore - creditsAfter})`,

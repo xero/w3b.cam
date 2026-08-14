@@ -15,9 +15,10 @@ on:
           - cam
           - stream
           - feed
+          - image
         default: cam
       target:
-        description: "cam: IP (IPv4/IPv6) or hostname/domain · stream/feed: the stored id"
+        description: "cam: IP (IPv4/IPv6) or hostname/domain · stream/feed: the stored id · image: 16-hex image hash"
         required: true
         type: string
 

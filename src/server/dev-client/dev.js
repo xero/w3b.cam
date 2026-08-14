@@ -55,6 +55,26 @@
 		});
 	}
 
+	/**
+	 * The 16-hex image hash for a card/shot, read from whatever carries the baked image
+	 * URL — an <img src> (shots, facades, feed posters) or a background-image style (gallery
+	 * cards) — since every baked screenshot addresses as /img/<hash>.<ext>. Returns null when
+	 * the element shows no baked image (a placeholder, or a facade not yet loaded).
+	 */
+	function imageHashOf(el) {
+		const re = /\/img\/([0-9a-f]{16})\./;
+		for (const img of el.querySelectorAll("img[src]")) {
+			const m = re.exec(img.getAttribute("src") || "");
+			if (m) return m[1];
+		}
+		const styled = el.matches("[style*='/img/']") ? el : el.querySelector("[style*='/img/']");
+		if (styled) {
+			const m = re.exec(styled.getAttribute("style") || "");
+			if (m) return m[1];
+		}
+		return null;
+	}
+
 	// ── Toast ──────────────────────────────────────────────────────────────────────
 
 	function toast(message, kind = "info") {
@@ -159,6 +179,71 @@
 		if (ctx.kind === "cam" || ctx.kind === "stream" || ctx.kind === "feed") {
 			menu.appendChild(itemButton("Remove", "danger", () => showRemove(ctx)));
 		}
+		// Image actions block/drop by screenshot CONTENT across every host serving it —
+		// shown only when this card/shot carries a baked image we can hash. "Blacklist image"
+		// keeps it out for good (rotating-IP spam); "Remove image" just deletes it now.
+		if (ctx.hash) {
+			menu.appendChild(itemButton("Blacklist image", "danger", () => showBlacklistImage(ctx)));
+			menu.appendChild(itemButton("Remove image", "danger", () => showRemoveImage(ctx)));
+		}
+	}
+
+	// ── Image blacklist / remove (block by screenshot content) ─────────────────────
+
+	function showBlacklistImage(ctx) {
+		menu.replaceChildren(menuHeader(ctx));
+		const msg = document.createElement("p");
+		msg.className = "dev-msg";
+		msg.textContent =
+			`Blacklist this image (${ctx.hash})? Removes every camera showing this exact ` +
+			`screenshot — across all hosts — and blocks it from future ingests, whatever IP it uses.`;
+		menu.appendChild(msg);
+
+		const row = document.createElement("div");
+		row.className = "dev-row";
+		row.appendChild(actionButton("Cancel", "", () => showOptions(ctx)));
+		row.appendChild(
+			actionButton("Blacklist", "danger", async () => {
+				try {
+					const r = await api("/blacklist-image", "POST", { hash: ctx.hash });
+					closeMenu();
+					removeByImageHash(ctx.hash);
+					toast(`blacklisted image ${ctx.hash}, removed ${r.deleted} camera(s) across ${r.hosts} host(s). run \`bun run bake\``);
+				} catch (e) {
+					toast(`blacklist image failed: ${e.message}`, "error");
+				}
+			}),
+		);
+		menu.appendChild(row);
+		clampMenu();
+	}
+
+	function showRemoveImage(ctx) {
+		menu.replaceChildren(menuHeader(ctx));
+		const msg = document.createElement("p");
+		msg.className = "dev-msg";
+		msg.textContent =
+			`Remove this image (${ctx.hash})? Drops every camera showing this exact screenshot ` +
+			`from the DB; they come back if you re-ingest. Use "Blacklist image" to keep it out for good.`;
+		menu.appendChild(msg);
+
+		const row = document.createElement("div");
+		row.className = "dev-row";
+		row.appendChild(actionButton("Cancel", "", () => showOptions(ctx)));
+		row.appendChild(
+			actionButton("Remove", "danger", async () => {
+				try {
+					const r = await api("/remove-image", "POST", { hash: ctx.hash });
+					closeMenu();
+					removeByImageHash(ctx.hash);
+					toast(`removed image ${ctx.hash} from ${r.deleted} camera(s) across ${r.hosts} host(s). run \`bun run bake\``);
+				} catch (e) {
+					toast(`remove image failed: ${e.message}`, "error");
+				}
+			}),
+		);
+		menu.appendChild(row);
+		clampMenu();
 	}
 
 	// ── Reorder (per-shot, no sub-form) ────────────────────────────────────────────
@@ -549,6 +634,15 @@
 		if (window.htmx) window.htmx.process(main);
 	}
 
+	// Fade every card/shot currently showing the blacklisted/removed image, wherever it is on
+	// the page (an image can span many hosts, so this isn't ref-scoped like removeCard). The
+	// static site only truly reflects it after `bun run bake`.
+	function removeByImageHash(hash) {
+		document.querySelectorAll(".card, .shot").forEach((el) => {
+			if (imageHashOf(el) === hash) fadeRemove(el);
+		});
+	}
+
 	function addTagToMeta(ctx, tag) {
 		if (ctx.role !== "shot") return; // only detail pages (host/stream/feed) render a Tags row
 		for (const th of document.querySelectorAll(".meta th")) {
@@ -609,6 +703,7 @@
 			kind: el.dataset.kind,
 			ref: el.dataset.ref,
 			port: el.dataset.port, // only cam shots carry this
+			hash: imageHashOf(el), // 16-hex image hash, or null if no baked image
 		};
 		e.preventDefault();
 		openMenu(e.clientX, e.clientY, ctx);

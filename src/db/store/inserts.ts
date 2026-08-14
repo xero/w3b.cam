@@ -3,6 +3,7 @@ import type { CamRow, FeedRow, YtRow } from "../../core/types.ts";
 import { decideCamProduct, fingerprintFeed, fingerprintWebcam } from "../../fingerprint/fingerprint.ts";
 import { deriveHostFeed, isRtspHost } from "../../fingerprint/host-feed.ts";
 import { SS_PERMANENT } from "./common.ts";
+import { loadImageBlacklist } from "./moderation.ts";
 
 /**
  * Insert columns per source, in order. Each source writes only its own subset
@@ -47,6 +48,8 @@ export interface InsertResult {
 	updated: number;
 	/** Subset of `updated` whose screenshot hash changed (genuinely new image). */
 	changed: number;
+	/** Rows skipped because their screenshot hash is image-blacklisted (see image_blacklist). */
+	blocked: number;
 }
 
 /** A row bound for `cams`: it always carries the conflict key and screenshot hash. */
@@ -114,11 +117,21 @@ function makeUpserter(db: Database, columns: readonly string[], opts: UpsertOpts
 	// and the prior product so the fingerprint hook can decide against the stored value.
 	const prior = db.query("SELECT ss_hash AS h, last_seen AS ls, product AS product FROM cams WHERE id = ?");
 	const { afterUpsert } = opts;
+	// Content blacklist, loaded once when the upserter is built (one query per run). Every
+	// source funnels through here, so a listed image can't enter via any of them, no matter
+	// which host/IP carries it. Keyed on the 16-hex ss_hash prefix, uniform with the baker.
+	const blockedImages = loadImageBlacklist(db);
 	return db.transaction((rows: UpsertRow[]): InsertResult => {
 		let added = 0;
 		let updated = 0;
 		let changed = 0;
+		let blocked = 0;
 		for (const row of rows) {
+			const imgKey = typeof row.ss_hash === "string" ? row.ss_hash.slice(0, 16) : null;
+			if (imgKey && blockedImages.has(imgKey)) {
+				blocked++;
+				continue; // never store (or refresh) a blacklisted image
+			}
 			const before = prior.get(row.id) as PriorRow | null;
 			stmt.run(row);
 			// Fingerprint the row against its pre-upsert state (synchronous; runs in this txn).
@@ -133,7 +146,7 @@ function makeUpserter(db: Database, columns: readonly string[], opts: UpsertOpts
 				if (row.ss_hash != null && before.h !== row.ss_hash && before.ls !== SS_PERMANENT) changed++;
 			}
 		}
-		return { added, updated, changed };
+		return { added, updated, changed, blocked };
 	});
 }
 

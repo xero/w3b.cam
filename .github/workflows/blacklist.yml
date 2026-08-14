@@ -1,13 +1,14 @@
 name: blacklist
 
-# Blacklists an IP or hostname (removes matching cameras from the DB + records
-# it), persists the updated DB to the db-store release, then rebuilds & deploys
-# the site.
+# Blacklists an IP, hostname, or image hash (removes matching cameras from the DB
+# + records it), persists the updated DB to the db-store release, then rebuilds &
+# deploys the site. An image hash blocks by screenshot CONTENT across every host
+# serving it — the right tool for spam that rotates IPs but reuses one static image.
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: IP (IPv4/IPv6) or hostname/domain to blacklist
+        description: "IP (IPv4/IPv6), hostname/domain, or 16-hex image hash (from an /img/<hash>.jpg URL)"
         required: true
         type: string
 

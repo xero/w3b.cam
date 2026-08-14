@@ -1,26 +1,36 @@
-// Blacklist: stop ingesting a host and delete what we already stored for it.
-// Accepts either an IP (matched exactly, every port) or a hostname/domain
-// (matches itself and any subdomain, e.g. `cloudzy.com` also drops
-// `cam.node.cloudzy.com`). Future scrapes and imports skip anything listed.
-// `unblacklist` reverses the listing. No API, no query credits.
+// Blacklist: stop ingesting something and delete what we already stored for it.
+// Accepts three kinds of target, auto-detected:
+//   • an IP        — matched exactly, every port
+//   • a hostname   — matches itself and any subdomain (e.g. `cloudzy.com` also drops
+//                    `cam.node.cloudzy.com`)
+//   • an image hash — the 16-hex hash from an image URL (/img/<hash>.jpg). Blocks by
+//                     CONTENT: removes that exact screenshot from every host serving it
+//                     and skips it on future ingests, no matter which IP it reappears on.
+//                     Use this for spam hosts that rotate IPs but serve one static image.
+// Future scrapes and imports skip anything listed. `unblacklist` reverses the listing.
+// No API, no query credits.
 //
-// Usage:  bun run blacklist <ip-or-hostname>
+// Usage:  bun run blacklist <ip | hostname | image-hash>
 
 import { isIP } from "node:net";
 import {
   blacklist,
   blacklistHost,
+  blacklistImage,
   closeDb,
   countRows,
   deleteWebcamsByHost,
+  deleteWebcamsByImageHash,
   deleteWebcamsByIp,
+  isImageHash,
+  normalizeImageHash,
   openDb,
 } from "../db/db.ts";
 
 const arg = Bun.argv[2]?.trim();
 
 if (!arg) {
-  console.error("Usage: bun run blacklist <ip-or-hostname>");
+  console.error("Usage: bun run blacklist <ip | hostname | image-hash>");
   process.exit(1);
 }
 
@@ -29,7 +39,16 @@ const startingRows = countRows(db);
 
 try {
   console.log(`\n── Blacklist summary ──`);
-  if (isIP(arg) !== 0) {
+  if (isImageHash(arg)) {
+    const { rows, hosts } = deleteWebcamsByImageHash(db, arg);
+    const added = blacklistImage(db, arg);
+    console.log(`Image hash: ${normalizeImageHash(arg)}`);
+    console.log(`Deleted:    ${rows} row(s) across ${hosts} host(s)`);
+    console.log(`Blacklist:  ${added ? "added" : "already listed"}`);
+    if (rows === 0 && added) {
+      console.warn(`⚠ No stored camera used this image. Recorded anyway so future ingests skip it.`);
+    }
+  } else if (isIP(arg) !== 0) {
     const changes = deleteWebcamsByIp(db, arg);
     const added = blacklist(db, arg);
     console.log(`IP:         ${arg}`);

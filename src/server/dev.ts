@@ -18,7 +18,7 @@ import { parseArgs } from "node:util";
 import { isIP } from "node:net";
 import { createHash } from "node:crypto";
 import { OUT_DIR } from "../core/config.ts";
-import { addFeatured, addTag, blacklist, closeDb, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "../db/db.ts";
+import { addFeatured, addTag, blacklist, blacklistImage, closeDb, deleteWebcamsByImageHash, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, normalizeImageHash, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "../db/db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "../ingest/ingest.ts";
 import { build } from "../site/build.ts";
 import { isSafeImageMime } from "../site/render.ts";
@@ -97,6 +97,30 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 		const changes = deleteWebcamsByIp(db, ip);
 		const added = blacklist(db, ip);
 		return json({ ip, deleted: changes, blacklisted: added });
+	}
+
+	// ── POST /__dev/blacklist-image {hash}, block a screenshot by CONTENT ─────────
+	// Removes every stored row serving that exact image (across all hosts) and records the
+	// hash so future ingests skip it, no matter which IP carries it. `hash` is the 16-hex
+	// image hash from an /img/<hash>.<ext> URL (a full 64-hex sha256 is accepted too).
+	if (req.method === "POST" && path === "/__dev/blacklist-image") {
+		const { hash } = await readBody(req);
+		const norm = typeof hash === "string" ? normalizeImageHash(hash) : null;
+		if (!norm) return json({ error: "invalid image hash" }, 400);
+		const { rows, hosts } = deleteWebcamsByImageHash(db, norm);
+		const added = blacklistImage(db, norm);
+		return json({ hash: norm, deleted: rows, hosts, blacklisted: added });
+	}
+
+	// ── POST /__dev/remove-image {hash}, delete a screenshot's rows WITHOUT blacklisting ──
+	// Like /remove but by image content: drops every row serving that image; they return on
+	// the next re-ingest (use /blacklist-image to keep the image out for good).
+	if (req.method === "POST" && path === "/__dev/remove-image") {
+		const { hash } = await readBody(req);
+		const norm = typeof hash === "string" ? normalizeImageHash(hash) : null;
+		if (!norm) return json({ error: "invalid image hash" }, 400);
+		const { rows, hosts } = deleteWebcamsByImageHash(db, norm);
+		return json({ hash: norm, deleted: rows, hosts });
 	}
 
 	// ── POST /__dev/reorder {ip, port}, emulates reorder.ts (setPreferred) ────────

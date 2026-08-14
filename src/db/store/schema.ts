@@ -88,6 +88,20 @@ const HOST_BLACKLIST_SEED: readonly string[] = [
 ];
 
 /**
+ * Screenshots we never want to ingest again, keyed on the 16-hex image hash — the
+ * same `ss_hash[:16]` value the baker uses for `/img/<hash>.<ext>` filenames, so an
+ * operator can copy the hash straight out of an image URL. Blocks by CONTENT, not
+ * host: spam hosts that rotate IPs but serve one static image are caught no matter
+ * which IP they reappear on (the ingest upserter skips any row whose image is listed).
+ */
+const IMAGE_BLACKLIST_SCHEMA = `
+CREATE TABLE IF NOT EXISTS image_blacklist (
+	hash      TEXT NOT NULL PRIMARY KEY,
+	added_at  TEXT NOT NULL DEFAULT (datetime('now'))
+) STRICT;
+`;
+
+/**
  * Unified metadata across every source: free-form tags and homepage-feature pins,
  * one polymorphic table keyed on (kind, ref, type, value). `kind` matches the cam's
  * kind ('cam' | 'stream' | 'feed'); `ref` is that source's key: 'cam' -> ip_str
@@ -182,6 +196,7 @@ export function openDb(path = DB_PATH): Database {
 	db.run(AUDIT_SCHEMA);
 	db.run(BLACKLIST_SCHEMA);
 	db.run(HOST_BLACKLIST_SCHEMA);
+	db.run(IMAGE_BLACKLIST_SCHEMA);
 	seedHostBlacklist(db);
 	seedTags(db);
 	seedFeatured(db);

@@ -88,6 +88,89 @@ export function unblacklistHost(db: Database, host: string): boolean {
 	return db.query("DELETE FROM host_blacklist WHERE host = ?").run(normalizeHost(host)).changes > 0;
 }
 
+// ── Image blacklist (block by screenshot content) ─────────────────────────────
+
+/** The canonical image-hash key: 16 lowercase hex, i.e. the ss_hash[:16] the baker
+ *  uses for `/img/<hash>.<ext>` filenames. */
+const IMAGE_HASH_RE = /^[0-9a-f]{16}$/;
+
+/**
+ * Normalize an operator-supplied image hash to the canonical 16-hex key, or null if it
+ * isn't one. Accepts the 16-char hash copied straight from an `/img/<hash>.<ext>` URL
+ * (a trailing extension like ".jpg" is tolerated) or a full 64-char sha256 (folded to
+ * its first 16, matching the baker). Case-insensitive.
+ */
+export function normalizeImageHash(raw: string): string | null {
+	let h = raw.trim().toLowerCase();
+	const dot = h.indexOf(".");
+	if (dot >= 0) h = h.slice(0, dot); // tolerate a pasted "<hash>.jpg"
+	if (/^[0-9a-f]{64}$/.test(h)) h = h.slice(0, 16); // full sha256 -> display hash
+	return IMAGE_HASH_RE.test(h) ? h : null;
+}
+
+/** True when `raw` is an image hash (16- or 64-hex), so the CLIs can auto-route it. */
+export function isImageHash(raw: string): boolean {
+	return normalizeImageHash(raw) !== null;
+}
+
+/** Add an image hash to the blacklist. Returns true if newly added. Throws on a non-hash. */
+export function blacklistImage(db: Database, hash: string): boolean {
+	const h = normalizeImageHash(hash);
+	if (!h) throw new Error(`not a valid image hash: ${hash}`);
+	return db.query("INSERT OR IGNORE INTO image_blacklist (hash) VALUES (?)").run(h).changes > 0;
+}
+
+/** Remove an image hash from the blacklist. Returns true if it was listed. Throws on a non-hash. */
+export function unblacklistImage(db: Database, hash: string): boolean {
+	const h = normalizeImageHash(hash);
+	if (!h) throw new Error(`not a valid image hash: ${hash}`);
+	return db.query("DELETE FROM image_blacklist WHERE hash = ?").run(h).changes > 0;
+}
+
+/** Load the blacklisted image hashes as a set of 16-hex keys, for the ingest guard. */
+export function loadImageBlacklist(db: Database): Set<string> {
+	return new Set((db.query("SELECT hash FROM image_blacklist").all() as { hash: string }[]).map((r) => r.hash));
+}
+
+/**
+ * Delete every stored row (any kind) whose screenshot matches `hash`, compared on the
+ * 16-hex ss_hash prefix (uniform with the baker's filename), plus each removed row's
+ * fingerprint audit row. This blocks by CONTENT, so a single call can span many hosts —
+ * exactly the point for an image reused across rotating IPs. A cam's host-level meta
+ * (tags/featured keyed on ip_str) is cleared only when that host has NO rows left, so a
+ * partially-hit host keeps curation on its surviving ports; a stream/feed's meta (keyed
+ * on id) is always cleared, since its single row is gone. Returns rows removed and the
+ * count of distinct cam hosts touched. Throws on a non-hash.
+ */
+export function deleteWebcamsByImageHash(db: Database, hash: string): { rows: number; hosts: number } {
+	const h = normalizeImageHash(hash);
+	if (!h) throw new Error(`not a valid image hash: ${hash}`);
+	const matches = db
+		.query("SELECT id, kind, ip_str FROM cams WHERE substr(ss_hash, 1, 16) = ?")
+		.all(h) as { id: string; kind: string; ip_str: string | null }[];
+	const del = db.query("DELETE FROM cams WHERE id = ?");
+	const delFp = db.query("DELETE FROM fingerprints WHERE ref = ?"); // ref === cams.id (globally unique)
+	const remainingForIp = db.query("SELECT 1 FROM cams WHERE kind = 'cam' AND ip_str = ? LIMIT 1");
+	return db.transaction(() => {
+		let rows = 0;
+		const camIps = new Set<string>();
+		for (const r of matches) {
+			rows += del.run(r.id).changes;
+			delFp.run(r.id);
+			if (r.kind === "cam") {
+				if (r.ip_str) camIps.add(r.ip_str);
+			} else {
+				deleteEntityMeta(db, r.kind as TagKind, r.id); // stream/feed meta keyed on id
+			}
+		}
+		// Clear host meta only for hosts fully removed (no ports left after the delete).
+		for (const ip of camIps) {
+			if (!remainingForIp.get(ip)) deleteEntityMeta(db, "cam", ip);
+		}
+		return { rows, hosts: camIps.size };
+	})();
+}
+
 /**
  * Delete every stored cam whose hostnames or domains match `host` (itself or a
  * subdomain). SQLite can't suffix-match inside the JSON columns, so we scan cam rows

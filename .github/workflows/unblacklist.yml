@@ -1,13 +1,13 @@
 name: unblacklist
 
-# Removes an IP or hostname from the blacklist and persists the updated DB to the
-# db-store release. No rebuild: unblacklisting fetches no camera data, so the
-# site is unchanged until the next scrape re-adds the host.
+# Removes an IP, hostname, or image hash from the blacklist and persists the updated
+# DB to the db-store release. No rebuild: unblacklisting fetches no camera data, so the
+# site is unchanged until the next scrape/ingest re-adds the target.
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: IP (IPv4/IPv6) or hostname/domain to unblacklist
+        description: "IP (IPv4/IPv6), hostname/domain, or 16-hex image hash to unblacklist"
         required: true
         type: string
 
