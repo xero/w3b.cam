@@ -30,35 +30,63 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       KEEP: ${{ inputs.keep || '7' }}
     steps:
-      - name: Snapshot db-store -> db-backups
+      # Needed so the fetch below can use the local composite action.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Reuse the hardened restore path: it retries transient errors and fails
+      # CLOSED if the store holds the asset but the download errors — so a flake
+      # turns into a visible red run, never a silent "nothing to back up".
+      - name: Fetch current db-store
+        uses: ./.github/actions/restore-db
+
+      - name: Snapshot -> db-backups
         shell: bash
         run: |
           set -uo pipefail
-          SRC=db-store
-          DST=db-backups
           ASSET=camhunting.sqlite
+          DST=db-backups
 
-          if ! gh release view "$SRC" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET"; then
-            echo "No ${ASSET} in ${SRC} yet — nothing to back up."
+          # restore-db only leaves a file when the store actually has one. No file
+          # means a genuinely empty store (true first run) — nothing to snapshot.
+          if [ ! -f "$ASSET" ]; then
+            echo "No ${ASSET} present (store empty / first run) — nothing to back up."
             exit 0
           fi
 
-          gh release download "$SRC" --pattern "$ASSET" --clobber
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
           SNAP="camhunting-${STAMP}.sqlite"
           mv "$ASSET" "$SNAP"
 
-          gh release view "$DST" >/dev/null 2>&1 \
-            || gh release create "$DST" --prerelease --title "SQLite backups" --notes "Rolling db-store snapshots. Newest is a known-good restore point; older ones are pruned automatically."
-          gh release upload "$DST" "$SNAP" --clobber
-          echo "Uploaded snapshot ${SNAP} to ${DST}."
+          # Create the backups release if absent (harmless if it already exists),
+          # then upload the snapshot, retrying transient failures.
+          gh release create "$DST" --prerelease --title "SQLite backups" \
+            --notes "Rolling db-store snapshots. Newest is a known-good restore point; older ones are pruned automatically." 2>/dev/null || true
+          for attempt in 1 2 3 4; do
+            if gh release upload "$DST" "$SNAP" --clobber; then
+              echo "Uploaded snapshot ${SNAP} to ${DST}."
+              exit 0
+            fi
+            echo "upload attempt ${attempt} failed; retrying in $((attempt * 5))s…" >&2
+            sleep $((attempt * 5))
+          done
+          echo "::error::Failed to upload snapshot ${SNAP} to ${DST} after retries."
+          exit 1
 
       - name: Prune old snapshots (keep newest KEEP)
         shell: bash
         run: |
           set -uo pipefail
           DST=db-backups
-          mapfile -t ALL < <(gh release view "$DST" --json assets --jq '.assets | sort_by(.createdAt) | reverse | .[].name' 2>/dev/null || true)
+          # If the release genuinely doesn't exist yet there's nothing to prune;
+          # a transient read error just skips pruning this run (harmless — the next
+          # run prunes). Never delete based on an empty/partial listing.
+          names="$(gh release view "$DST" --json assets --jq '.assets | sort_by(.createdAt) | reverse | .[].name' 2>/dev/null)" || {
+            echo "Could not read ${DST} assets; skipping prune this run."
+            exit 0
+          }
+          mapfile -t ALL <<< "$names"
+          # Drop any empty trailing element from a blank listing.
+          [ "${#ALL[@]}" -eq 1 ] && [ -z "${ALL[0]}" ] && ALL=()
           if [ "${#ALL[@]}" -le "$KEEP" ]; then
             echo "${#ALL[@]} snapshot(s) present; keep=${KEEP}; nothing to prune."
             exit 0
