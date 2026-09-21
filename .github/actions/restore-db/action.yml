@@ -4,7 +4,11 @@ description: >-
   HAS the asset but the download errors (a transient GitHub/network flake), this
   fails the job instead of silently continuing with no DB — that swallowed-restore
   path, paired with the clobber-upload in save-db, once wiped the whole store.
-  Only a genuinely assetless store (a true first run) is allowed to proceed fresh.
+  A store with NO asset is only a fresh start when nothing says it ever held one:
+  no half-swapped sibling asset (camhunting.sqlite.new / .prev) and no db-backups
+  snapshot. Otherwise the store was emptied, and the job fails so the next save
+  can't bury the real DB under a fresh one, which is exactly how the 2026-09-05
+  wipe went unnoticed until the last good snapshot had rotated out.
 
 inputs:
   github-token:
@@ -21,37 +25,54 @@ runs:
       run: |
         set -uo pipefail
         RELEASE=db-store
+        BACKUPS=db-backups
         ASSET=camhunting.sqlite
         ERR="${RUNNER_TEMP:-/tmp}/restore-db.err"
 
-        # 1) Probe the store, retrying transient failures. Tell a genuinely missing
-        #    release (first run -> fresh) apart from an unreachable API (-> fail).
-        names=""; state=""
-        for attempt in 1 2 3 4; do
-          if names="$(gh release view "$RELEASE" --json assets --jq '.assets[].name' 2>"$ERR")"; then
-            state=ok; break
-          fi
-          if grep -qiE 'release not found|not found|no releases' "$ERR"; then
-            state=absent; break
-          fi
-          echo "store probe attempt ${attempt} failed (transient?); retrying in $((attempt * 5))s…" >&2
-          cat "$ERR" >&2 || true
-          sleep $((attempt * 5))
-        done
+        # Probe a release's asset names into $names, retrying transient failures, and
+        # set $state to ok | absent (release genuinely missing) | "" (unreachable).
+        probe() {
+          names=""; state=""
+          for attempt in 1 2 3 4; do
+            if names="$(gh release view "$1" --json assets --jq '.assets[].name' 2>"$ERR")"; then
+              state=ok; return
+            fi
+            if grep -qiE 'release not found|not found|no releases' "$ERR"; then
+              state=absent; return
+            fi
+            echo "${1} probe attempt ${attempt} failed (transient?); retrying in $((attempt * 5))s…" >&2
+            cat "$ERR" >&2 || true
+            sleep $((attempt * 5))
+          done
+        }
 
-        if [ "$state" = absent ]; then
-          echo "No ${RELEASE} release yet — starting fresh."
-          exit 0
-        fi
-        if [ "$state" != ok ]; then
+        # 1) Probe the store. Tell a genuinely missing release (-> maybe fresh) apart
+        #    from an unreachable API (-> fail).
+        probe "$RELEASE"
+        if [ -z "$state" ]; then
           echo "::error::Could not reach the ${RELEASE} store after retries; failing closed rather than risk clobbering it with a fresh DB."
           cat "$ERR" >&2 || true
           exit 1
         fi
+        store_names="$names"
 
-        # 2) Store reachable. No asset yet is a legitimate fresh start.
-        if ! printf '%s\n' "$names" | grep -qx "$ASSET"; then
-          echo "${RELEASE} exists but holds no ${ASSET} yet — starting fresh."
+        # 2) No live asset. Fresh is only legitimate if the store never held a DB.
+        if [ "$state" = absent ] || ! printf '%s\n' "$store_names" | grep -qx "$ASSET"; then
+          siblings="$(printf '%s\n' "$store_names" | { grep "^${ASSET}" || true; } | tr '\n' ' ')"
+          if [ -n "$siblings" ]; then
+            echo "::error::${RELEASE} has no ${ASSET} but holds ${siblings}: a save died mid-swap. Promote the complete copy by hand (gh api -X PATCH <its apiUrl> -f name=${ASSET}; see docs/ci.md) and re-run."
+            exit 1
+          fi
+          probe "$BACKUPS"
+          if [ -z "$state" ]; then
+            echo "::error::${RELEASE} has no ${ASSET} and ${BACKUPS} is unreachable; failing closed rather than assume a first run."
+            exit 1
+          fi
+          if [ "$state" = ok ] && [ -n "$names" ]; then
+            echo "::error::${RELEASE} has no ${ASSET} but ${BACKUPS} holds snapshot(s): the store was emptied, not never filled. Restore the newest snapshot (see docs/ci.md) instead of starting fresh over it."
+            exit 1
+          fi
+          echo "No ${ASSET} in ${RELEASE} and no ${BACKUPS} snapshots: a true first run, starting fresh."
           exit 0
         fi
 

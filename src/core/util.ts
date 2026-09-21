@@ -98,13 +98,28 @@ function shodanId(m: WebcamMatch): string | null {
   return null;
 }
 
-/** Safely extract a usable screenshot, or null if the banner has none. */
+/** True when base64 image bytes are a GIF: the `GIF8` magic encodes to `R0lGOD`. */
+export const isGif = (b64: string): boolean => b64.startsWith("R0lGOD");
+
+/** A banner's raw screenshot payload with Shodan's 76-col wrapping stripped, or "" if none. */
+function rawScreenshot(m: WebcamMatch): string {
+  const s = m.screenshot as Partial<ShodanScreenshot> | null | undefined;
+  return s && typeof s.data === "string" ? s.data.replace(/\s/g, "") : "";
+}
+
+/** True when the banner's screenshot is a GIF (refused by getScreenshot; callers count it). */
+export const hasGifScreenshot = (m: WebcamMatch): boolean => isGif(rawScreenshot(m));
+
+/**
+ * Safely extract a usable screenshot, or null if the banner has none. A GIF is never
+ * usable: cameras speak JPEG/MJPEG, and the GIFs Shodan hands out (mislabeled
+ * image/jpeg) are multi-megabyte animated desktop grabs and meme spam. They alone
+ * pushed the store past GitHub's 2 GiB asset cap, so they are refused at the door.
+ */
 export function getScreenshot(m: WebcamMatch): ShodanScreenshot | null {
   const s = m.screenshot as Partial<ShodanScreenshot> | null | undefined;
-  if (!s || typeof s.data !== "string") return null;
-  // Shodan wraps the base64 at 76 cols; strip whitespace to a single clean payload.
-  const data = s.data.replace(/\s/g, "");
-  if (data.length === 0) return null;
+  const data = rawScreenshot(m);
+  if (!s || data.length === 0 || isGif(data)) return null;
   return {
     data,
     mime: typeof s.mime === "string" && s.mime ? s.mime : "image/jpeg",

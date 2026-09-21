@@ -3,7 +3,10 @@ name: db-backup
 # Daily point-in-time snapshot of the db-store SQLite asset into a separate
 # db-backups release, so a bad write to db-store is recoverable — db-store itself
 # keeps only the latest copy, clobbered on every scrape/curation run. Retains the
-# newest `keep` snapshots and prunes the rest.
+# newest `keep` snapshots and prunes the rest. A snapshot drastically smaller than
+# the newest one (a truncated or fresh-started store) is refused, and the run goes
+# red instead: after the 2026-09-05 wipe seven dutiful snapshots of the fresh DB
+# pruned every copy of the real one.
 on:
   schedule:
     - cron: '30 5 * * *' # daily, offset from the 6-hourly scrape windows (0 */6)
@@ -13,6 +16,11 @@ on:
         description: How many recent snapshots to retain
         required: false
         default: '7'
+        type: string
+      min-percent:
+        description: Minimum size, as a percent of the newest snapshot, the store must reach to be snapshotted. Lower it for a deliberate large shrink.
+        required: false
+        default: '50'
         type: string
 
 # Share the db-write lock so a snapshot can never read a half-written db-store
@@ -29,6 +37,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       KEEP: ${{ inputs.keep || '7' }}
+      MIN_PCT: ${{ inputs.min-percent || '50' }}
     steps:
       # Needed so the fetch below can use the local composite action.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -51,6 +60,17 @@ jobs:
           if [ ! -f "$ASSET" ]; then
             echo "No ${ASSET} present (store empty / first run) — nothing to back up."
             exit 0
+          fi
+
+          # Refuse to snapshot a store far smaller than the newest snapshot: that is a
+          # truncated or fresh-started DB, and recording it would only rotate the good
+          # copies out. A transient read error skips the check (the prune step below
+          # tolerates the same), never the upload.
+          new="$(stat -c%s "$ASSET")"
+          old="$(gh release view "$DST" --json assets --jq '.assets | sort_by(.createdAt) | last | .size // 0' 2>/dev/null || echo 0)"
+          if [ "${old:-0}" -gt 0 ] && [ $((new * 100)) -lt $((old * MIN_PCT)) ]; then
+            echo "::error::Refusing to snapshot: the store is ${new} bytes, under ${MIN_PCT}% of the newest ${old}-byte snapshot: looks truncated or fresh-started. Restore the store from db-backups (see docs/ci.md), or re-run with a lower min-percent if the shrink is deliberate."
+            exit 1
           fi
 
           STAMP="$(date -u +%Y%m%d-%H%M%S)"

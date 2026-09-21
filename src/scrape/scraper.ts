@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 import { MIN_REQUEST_MS, PER_PAGE, QUERY } from "../core/config.ts";
 import { closeDb, countRows, loadBlacklist, makeInserter, openDb } from "../db/db.ts";
 import { makeClient, searchPage, withBackoff } from "./shodan.ts";
-import { asMatch, emitBuildNeeded, getScreenshot, isBlockedProduct, mustEnv, sleep, toRow } from "../core/util.ts";
+import { asMatch, emitBuildNeeded, getScreenshot, hasGifScreenshot, isBlockedProduct, mustEnv, sleep, toRow } from "../core/util.ts";
 import type { CamRow } from "../core/types.ts";
 
 const { values } = parseArgs({
@@ -37,6 +37,7 @@ let updated = 0;
 let changed = 0;
 let skippedBlacklist = 0;
 let blockedImage = 0;
+let skippedGif = 0;
 let creditsBefore = 0;
 
 try {
@@ -86,6 +87,7 @@ try {
 
     const rows: CamRow[] = [];
     let noScreenshot = 0;
+    let gif = 0;
     let blocked = 0;
     let blacklisted = 0;
     for (const raw of res.matches) {
@@ -96,7 +98,8 @@ try {
       }
       const ss = getScreenshot(m);
       if (!ss) {
-        noScreenshot++;
+        if (hasGifScreenshot(m)) gif++;
+        else noScreenshot++;
         continue;
       }
       if (isBlockedProduct(m.product)) {
@@ -114,9 +117,11 @@ try {
     changed += c;
     skippedBlacklist += blacklisted;
     blockedImage += bi;
+    skippedGif += gif;
 
     const extra =
       (noScreenshot ? `, ${noScreenshot} no-screenshot` : "") +
+      (gif ? `, ${gif} gif skipped` : "") +
       (blocked ? `, ${blocked} rdp/vnc skipped` : "") +
       (blacklisted ? `, ${blacklisted} blacklisted` : "") +
       (bi ? `, ${bi} image-blocked` : "");
@@ -156,6 +161,7 @@ try {
   console.log(`Refreshed:         ${updated} existing (${changed} with a changed screenshot)`);
   console.log(`Blacklisted:       ${skippedBlacklist}`);
   console.log(`Image-blocked:     ${blockedImage}`);
+  console.log(`GIF skipped:       ${skippedGif}`);
   console.log(`DB rows:           ${startingRows} → ${endingRows}`);
   console.log(
     `Query credits:     ${creditsBefore} → ${creditsAfter} (spent ${creditsBefore - creditsAfter})`,

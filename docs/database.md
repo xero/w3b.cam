@@ -25,7 +25,7 @@ The seed is small and hand-curated. A fresh database ships with a built-in host 
 
 All the writing workflows share one concurrency group (`db-write`), so a scheduled scrape, the YouTube ingester, and a manual blacklist can never run at the same time and clobber each other. `bun sync` moves that same asset to and from your machine, which is how edits you make locally reach the site.
 
-In CI the store is guarded on both ends. The restore that seeds each run fails closed instead of starting from an empty database on a download blip, the save that writes the store back refuses a copy drastically smaller than what is already there, and a daily `db-backup` job keeps the newest seven snapshots on a separate `db-backups` release. See [GitHub Actions](./ci.md#the-database-store).
+In CI the store is guarded on both ends. The restore that seeds each run fails closed instead of starting from an empty database on a download blip or an emptied store, the save that writes the store back uploads under a scratch name and swaps it in so a failed upload never empties the store, and refuses a copy drastically smaller than what is already there or over GitHub's 2 GiB asset ceiling, and a daily `db-backup` job keeps the newest seven snapshots on a separate `db-backups` release. See [GitHub Actions](./ci.md#the-database-store).
 
 ---
 
@@ -35,7 +35,7 @@ In CI the store is guarded on both ends. The restore that seeds each run fails c
 
 **`bun sync --pull`.** Downloads `camhunting.sqlite` from the `db-store` release and overwrites your local copy, so you start from exactly what the site is serving. It removes the stale `-wal` and `-shm` sidecars afterward so SQLite reads the fresh file cleanly.
 
-**`bun sync --push`.** Uploads your local database over the `db-store` asset and triggers the `build` workflow, so the live site rebuilds from your edits. It creates the `db-store` release on the first push if none exists yet.
+**`bun sync --push`.** Uploads your local database over the `db-store` asset and triggers the `build` workflow, so the live site rebuilds from your edits. It creates the `db-store` release on the first push if none exists yet. The upload lands under a scratch name and is swapped in only once it is whole, so a dropped connection leaves the store as it was, and a database at or over GitHub's 2 GiB asset ceiling is refused up front rather than failing mid-upload.
 
 **`bun sync --merge`.** Pulls the published database and folds its new cameras into your local copy in one step, for when your local copy holds edits you have not pushed. See [Editing locally](./editing-locally.md#staying-in-sync-while-you-edit) for when to reach for it.
 

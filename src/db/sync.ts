@@ -16,14 +16,16 @@
 //         bun run sync --merge   (store -> local, merging in new cams, keeping local edits)
 
 import { $ } from "bun";
-import { copyFileSync, renameSync, unlinkSync } from "node:fs";
+import { copyFileSync, linkSync, renameSync, unlinkSync } from "node:fs";
+import { basename } from "node:path";
 import { DB_PATH } from "../core/config.ts";
 import { closeDb, openDb } from "./db.ts";
 import { mergeDbs } from "./merge.ts";
 import { promptYesNo } from "../core/util.ts";
 
 const RELEASE = "db-store";
-const ASSET = DB_PATH; // "camhunting.sqlite"
+const ASSET = basename(DB_PATH); // "camhunting.sqlite": gh names an asset after the file
+const MAX_ASSET = 2 ** 31; // GitHub's per-asset ceiling; an upload at or over it 422s
 const BUILD_WORKFLOW = "build.yml";
 const USAGE = "Usage: bun run sync <--push|--pull|--merge> [--yes]";
 
@@ -83,13 +85,24 @@ async function localMeta(): Promise<Meta | null> {
   return { size: file.size, mtime: file.lastModified };
 }
 
-async function remoteMeta(): Promise<Meta | null> {
+/** One store asset as `gh release view --json assets` reports it. */
+interface Asset {
+  name: string;
+  size: number;
+  state: string;
+  updatedAt: string;
+  apiUrl: string;
+}
+
+/** The store's assets, or [] if the release doesn't exist yet. */
+async function remoteAssets(): Promise<Asset[]> {
   const res = await $`gh release view ${RELEASE} --json assets`.nothrow().quiet();
-  if (res.exitCode !== 0) return null; // store release doesn't exist yet
-  const { assets } = JSON.parse(res.stdout.toString()) as {
-    assets: { name: string; size: number; updatedAt: string }[];
-  };
-  const asset = assets.find((a) => a.name === ASSET);
+  if (res.exitCode !== 0) return [];
+  return (JSON.parse(res.stdout.toString()) as { assets: Asset[] }).assets;
+}
+
+async function remoteMeta(): Promise<Meta | null> {
+  const asset = (await remoteAssets()).find((a) => a.name === ASSET);
   if (!asset) return null;
   return { size: asset.size, mtime: Date.parse(asset.updatedAt) };
 }
@@ -159,6 +172,52 @@ async function downloadStore(dest: string): Promise<void> {
   dropSidecars(dest);
 }
 
+/**
+ * Upload without ever leaving the store empty. `gh release upload --clobber` deletes
+ * the live asset BEFORE uploading, so a failed upload (a dropped connection half-way
+ * through 1.5 GB, or the 2 GiB 422 that wiped the store on 2026-09-05) empties it.
+ * Instead the file lands under a scratch name, and only once it is verified whole is
+ * the live asset renamed aside, the scratch renamed into place, and the old copy
+ * deleted. Mirrors .github/actions/save-db, which the workflows use.
+ */
+async function uploadSwap(size: number): Promise<void> {
+  const scratch = `${DB_PATH}.new`;
+  const [NEW, PREV] = [`${ASSET}.new`, `${ASSET}.prev`];
+  const byName = (assets: Asset[], name: string) => assets.find((a) => a.name === name);
+  const rename = (a: Asset, name: string) => $`gh api -X PATCH ${a.apiUrl} -f name=${name} --silent`;
+
+  // A parked copy left by a push that died after promoting would collide below.
+  const before = await remoteAssets();
+  const stalePrev = byName(before, PREV);
+  if (stalePrev) await $`gh release delete-asset ${RELEASE} ${PREV} -y`;
+
+  // Hard link (fall back to a copy) so gh names the asset after the scratch file.
+  try {
+    linkSync(DB_PATH, scratch);
+  } catch {
+    copyFileSync(DB_PATH, scratch);
+  }
+  try {
+    await $`gh release upload ${RELEASE} ${scratch} --clobber`;
+  } finally {
+    unlinkSync(scratch);
+  }
+
+  const after = await remoteAssets();
+  const fresh = byName(after, NEW);
+  if (!fresh || fresh.size !== size || fresh.state !== "uploaded") {
+    throw new Error(`scratch upload ${NEW} is incomplete (${fresh?.size ?? "?"} bytes, ${fresh?.state ?? "missing"}); the live asset was left in place`);
+  }
+  const live = byName(after, ASSET);
+  if (live) await rename(live, PREV);
+  try {
+    await rename(fresh, ASSET);
+  } catch (err) {
+    throw new Error(`could not promote ${NEW} to ${ASSET}; rename it by hand: gh api -X PATCH ${fresh.apiUrl} -f name=${ASSET} (${err instanceof Error ? err.message : err})`);
+  }
+  if (live) await $`gh release delete-asset ${RELEASE} ${PREV} -y`.nothrow();
+}
+
 async function doPush(): Promise<void> {
   if (!(await Bun.file(DB_PATH).exists())) {
     console.error(`No local DB at ${DB_PATH}. Nothing to push.`);
@@ -169,7 +228,11 @@ async function doPush(): Promise<void> {
   // migrate / seed on open are all no-ops on the populated DB.
   closeDb(openDb());
 
-  const local = await localMeta();
+  const local = (await localMeta())!;
+  if (local.size >= MAX_ASSET) {
+    console.error(`Refusing to push: ${DB_PATH} is ${fmtSize(local.size)}, at or over GitHub's ${fmtSize(MAX_ASSET)} release-asset ceiling; the upload would fail. Shrink the DB first.`);
+    process.exit(1);
+  }
   const remote = await remoteMeta();
   printComparison(local, remote);
   if (!confirm()) {
@@ -177,12 +240,12 @@ async function doPush(): Promise<void> {
     return;
   }
 
-  // Create the store on first push, then overwrite the asset (workflows' commands).
+  // Create the store on first push, then swap the asset in (see uploadSwap).
   if ((await $`gh release view ${RELEASE}`.nothrow().quiet()).exitCode !== 0) {
     await $`gh release create ${RELEASE} --prerelease --title ${"SQLite store"} --notes ${"camhunting.sqlite persistent store, do not delete"}`;
   }
-  console.log(`Uploading ${DB_PATH} (${local ? fmtSize(local.size) : "?"}) to ${RELEASE}…`);
-  await $`gh release upload ${RELEASE} ${DB_PATH} --clobber`;
+  console.log(`Uploading ${DB_PATH} (${fmtSize(local.size)}) to ${RELEASE}…`);
+  await uploadSwap(local.size);
 
   // The live site only reflects the store once build.yml runs; kick it off.
   console.log(`Triggering ${BUILD_WORKFLOW} to rebuild & deploy…`);

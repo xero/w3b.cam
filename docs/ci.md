@@ -39,7 +39,7 @@
 
 **geo.** Takes a video id, a latitude, and a longitude, assigns that stream's map coordinates on its `cams` row, saves the database, then calls `build` so the stream appears on the map.
 
-**db-backup.** Runs daily, and on demand, to snapshot the `db-store` database into a separate `db-backups` release, keeping the newest seven and pruning the rest. It reuses the same fail-closed restore the other workflows use, so a snapshot never quietly records an empty file. Nothing depends on it; it exists so a bad write to the store is recoverable.
+**db-backup.** Runs daily, and on demand, to snapshot the `db-store` database into a separate `db-backups` release, keeping the newest seven and pruning the rest. It reuses the same fail-closed restore the other workflows use, so a snapshot never quietly records an empty file, and it refuses to snapshot a store under half the size of the newest snapshot, so a truncated store goes red instead of rotating the good copies out. Nothing depends on it; it exists so a bad write to the store is recoverable.
 
 ---
 
@@ -49,9 +49,28 @@
 
 The restore and save steps are shared composite actions under `.github/actions/`, so their safety rules live in one place:
 
-- **Restore fails closed.** If the store holds a `camhunting.sqlite` asset but the download errors, the job fails instead of quietly starting from an empty database. A transient GitHub or network blip becomes a red run that self-heals next cycle, never a fresh database that the save step then uploads over the real one. Only a store with no asset yet, a true first run, starts empty.
-- **Save is size-gated.** The upload refuses to replace the store with a database drastically smaller than the one already there, under half its size by default, so a truncated or fresh-started copy can never clobber the good data. Raise the threshold, or push by hand with `bun sync --push`, for a deliberate large shrink.
-- **Backups are kept.** The `db-backup` workflow snapshots the store to a separate `db-backups` release once a day and keeps the newest seven, so a bad write is recoverable rather than lost.
+- **Restore fails closed.** If the store holds a `camhunting.sqlite` asset but the download errors, the job fails instead of quietly starting from an empty database. A transient GitHub or network blip becomes a red run that self-heals next cycle, never a fresh database that the save step then uploads over the real one.
+- **Fresh means never filled.** A store with no asset only starts empty when nothing says it ever held one: no `camhunting.sqlite.new` or `.prev` sibling left by a save that died mid-swap, and no snapshot in `db-backups`. Anything else means the store was emptied, and the job fails so the next save cannot bury the real database under a fresh one. That is how the September 2026 wipe went unnoticed for a week, until the last good snapshot had rotated out.
+- **Save never empties the store.** A plain `gh release upload --clobber` deletes the live asset before uploading, so a failed upload leaves nothing behind. The save step uploads under a scratch name instead, checks the byte count and upload state, then renames the live asset aside, renames the scratch into place, and deletes the old copy. A failed upload leaves the live asset untouched. It also refuses outright a database at or over GitHub's 2 GiB asset ceiling, since that upload can only fail.
+- **Save is size-gated.** The upload refuses to replace the store with a database drastically smaller than the one already there, under half its size by default, so a truncated or fresh-started copy can never clobber the good data. Lower the threshold, or push by hand with `bun sync --push`, for a deliberate large shrink.
+- **Backups are kept, and gated.** The `db-backup` workflow snapshots the store to a separate `db-backups` release once a day and keeps the newest seven, so a bad write is recoverable rather than lost. It applies the same size floor against the newest snapshot, so a bad store cannot push the good snapshots out of the window.
+
+### Recovering the store
+
+If a run fails at the restore step with the store emptied, put the newest snapshot back by hand. Nothing writes until this is done, since every restore fails closed.
+
+```sh
+gh release download db-backups --pattern 'camhunting-*.sqlite' --dir snaps   # or just the newest
+mv snaps/camhunting-<newest>.sqlite camhunting.sqlite
+bun sync --push
+```
+
+If a save died between its renames, the store holds `camhunting.sqlite.new` (the complete new copy) or `camhunting.sqlite.prev` (the parked old one) but no live asset. Promote whichever is complete:
+
+```sh
+gh release view db-store --json assets --jq '.assets[] | [.name, .size, .state, .apiUrl] | @tsv'
+gh api -X PATCH <apiUrl of the complete copy> -f name=camhunting.sqlite
+```
 
 ---
 
@@ -68,7 +87,7 @@ Open the Actions tab, pick the workflow, and choose "Run workflow".
 - **tag** and **untag** each take a kind, a ref, and a label.
 - **feature** and **unfeature** each take a kind and a ref.
 - **geo** takes a video id, a latitude, and a longitude.
-- **db-backup** takes an optional retention count (default 7), and also runs on its own once a day.
+- **db-backup** takes an optional retention count (default 7) and size floor (default 50 percent of the newest snapshot), and also runs on its own once a day.
 
 Invalid input fails the run immediately.
 

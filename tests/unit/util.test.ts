@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { WebcamMatch } from "../../src/core/types.ts";
-import { escapeHtml, getScreenshot, isBlockedProduct, num, toRow } from "../../src/core/util.ts";
+import { escapeHtml, getScreenshot, hasGifScreenshot, isBlockedProduct, num, toRow } from "../../src/core/util.ts";
 
 describe("escapeHtml", () => {
 	it("escapes the five HTML-significant characters", () => {
@@ -44,6 +44,14 @@ describe("getScreenshot", () => {
 	it("returns null when there is no usable data", () => {
 		expect(getScreenshot({} as WebcamMatch)).toBeNull();
 		expect(getScreenshot({ screenshot: { mime: "image/png" } } as WebcamMatch)).toBeNull();
+	});
+	it("refuses a GIF payload whatever mime Shodan claims, and flags it", () => {
+		// "GIF89a" base64-encodes to R0lGODlh; Shodan wraps the payload and labels it image/jpeg.
+		const gif = { screenshot: { data: "R0lG\nODlhAQABAAAAACw=", mime: "image/jpeg" } } as WebcamMatch;
+		expect(getScreenshot(gif)).toBeNull();
+		expect(hasGifScreenshot(gif)).toBe(true);
+		expect(hasGifScreenshot({ screenshot: { data: "/9j/4AAQ" } } as WebcamMatch)).toBe(false);
+		expect(hasGifScreenshot({} as WebcamMatch)).toBe(false);
 	});
 });
 

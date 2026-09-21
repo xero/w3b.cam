@@ -4,7 +4,7 @@
 // RDP/VNC product guards as the scraper. DB-free: the caller loads the blacklist
 // (loadBlacklist) and owns the inserter (makeInserter).
 
-import { asMatch, getScreenshot, isBlockedProduct, toRow } from "../core/util.ts";
+import { asMatch, getScreenshot, hasGifScreenshot, isBlockedProduct, toRow } from "../core/util.ts";
 import type { Blacklist } from "../db/db.ts";
 import type { CamRow, WebcamMatch } from "../core/types.ts";
 
@@ -28,12 +28,14 @@ interface ShodanScan {
   screenshots: number;
   blocked: number;
   blacklisted: number;
+  /** Banners whose screenshot was a GIF (see getScreenshot). */
+  gifs: number;
 }
 
 /**
  * Filter a banner list into insertable rows, in the exact order the scraper/importer
- * apply: skip blacklisted hosts, then banners with no screenshot, then RDP/VNC
- * products. Only banners that clear all three become rows.
+ * apply: skip blacklisted hosts, then banners with no (or a GIF) screenshot, then
+ * RDP/VNC products. Only banners that clear all three become rows.
  */
 export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
   const rows: CamRow[] = [];
@@ -41,6 +43,7 @@ export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
   let screenshots = 0;
   let blocked = 0;
   let blacklisted = 0;
+  let gifs = 0;
   for (const raw of list) {
     banners++;
     const m = asMatch(raw);
@@ -49,7 +52,10 @@ export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
       continue;
     }
     const ss = getScreenshot(m);
-    if (!ss) continue;
+    if (!ss) {
+      if (hasGifScreenshot(m)) gifs++;
+      continue;
+    }
     if (isBlockedProduct(m.product)) {
       blocked++;
       continue;
@@ -58,5 +64,5 @@ export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
     const row = toRow(m, ss);
     if (row) rows.push(row);
   }
-  return { rows, banners, screenshots, blocked, blacklisted };
+  return { rows, banners, screenshots, blocked, blacklisted, gifs };
 }

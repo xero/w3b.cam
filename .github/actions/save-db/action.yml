@@ -1,9 +1,15 @@
 name: Save DB to store
 description: >-
-  Upload camhunting.sqlite to the db-store release, guarded by a size sanity
-  check: refuse to overwrite the store with a DB drastically smaller than the one
-  already there (a truncated / fresh-start DB). This is the backstop that would
-  have blocked the 198-row DB from clobbering the ~9,600-row store.
+  Upload camhunting.sqlite to the db-store release without ever leaving the store
+  empty. Two guards run before the store is touched: a size floor (refuse a DB
+  drastically smaller than the current asset, i.e. truncated / fresh-started; the
+  backstop that blocks a 198-row DB from clobbering a ~9,600-row store) and
+  GitHub's 2 GiB per-asset ceiling (an upload at or over it 422s). The upload is a
+  swap: the new file lands under a scratch name, and only once it is verified
+  complete is the live asset renamed aside, the scratch renamed into place, and
+  the old copy deleted. A plain `gh release upload --clobber` deletes the live
+  asset BEFORE uploading, so a failed upload empties the store: that is how the
+  2 GiB 422 on 2026-09-05 wiped it and let the next scrape start fresh over it.
 
 inputs:
   github-token:
@@ -13,7 +19,7 @@ inputs:
   min-percent:
     description: >-
       Minimum size, as a percent of the current store asset, the new DB must reach
-      or the upload aborts. Only applied when a store asset already exists. Raise it
+      or the upload aborts. Only applied when a store asset already exists. Lower it
       for a deliberate large shrink, or push manually with `bun run sync --push`.
     required: false
     default: '50'
@@ -29,6 +35,9 @@ runs:
         set -uo pipefail
         RELEASE=db-store
         ASSET=camhunting.sqlite
+        NEW="${ASSET}.new"    # scratch name the upload lands under
+        PREV="${ASSET}.prev"  # the old live asset, parked during the swap
+        MAX=2147483648        # GitHub's per-asset ceiling: an upload at or over it 422s
         ERR="${RUNNER_TEMP:-/tmp}/save-db.err"
 
         if [ ! -f "$ASSET" ]; then
@@ -36,42 +45,85 @@ runs:
           exit 1
         fi
         new="$(stat -c%s "$ASSET")"
+        if [ "$new" -ge "$MAX" ]; then
+          echo "::error::Refusing to save: ${ASSET} is ${new} bytes, at or over GitHub's ${MAX}-byte release-asset ceiling; the upload would fail. Shrink the DB before it can be stored again (see docs/ci.md)."
+          exit 1
+        fi
 
-        # Current store asset size (0 if the release/asset doesn't exist yet). Retry
-        # transient errors; a truly missing release just means "first save".
-        old=""; state=""
+        # Current store assets as "name<TAB>size<TAB>apiUrl" lines (empty if the release
+        # doesn't exist yet). Retry transient errors; a truly missing release is "first save".
+        assets=""; state=""
         for attempt in 1 2 3 4; do
-          if old="$(gh release view "$RELEASE" --json assets --jq '.assets[] | select(.name == "'"$ASSET"'") | .size' 2>"$ERR")"; then
+          if assets="$(gh release view "$RELEASE" --json assets --jq '.assets[] | [.name, .size, .apiUrl] | @tsv' 2>"$ERR")"; then
             state=ok; break
           fi
           if grep -qiE 'release not found|not found|no releases' "$ERR"; then
             state=absent; break
           fi
-          echo "store size probe attempt ${attempt} failed (transient?); retrying in $((attempt * 5))s…" >&2
+          echo "store probe attempt ${attempt} failed (transient?); retrying in $((attempt * 5))s…" >&2
           sleep $((attempt * 5))
         done
         if [ "$state" != ok ] && [ "$state" != absent ]; then
-          echo "::error::Could not read the current store size after retries; refusing to upload blind."
+          echo "::error::Could not read the current store after retries; refusing to upload blind."
           cat "$ERR" >&2 || true
           exit 1
         fi
-        old="${old:-0}"
+        field() { printf '%s\n' "$assets" | awk -F'\t' -v n="$1" -v c="$2" '$1 == n { print $c }'; }
+        old="$(field "$ASSET" 2)"; old="${old:-0}"
+        old_url="$(field "$ASSET" 3)"
+
+        # A parked copy with no live asset beside it is a swap that died half-way: the
+        # store needs a hand (restore-db says how), not another upload over it. With a
+        # live asset present it is just leftover from a save that died after promoting,
+        # so clear it or the park rename below collides.
+        if [ -n "$(field "$PREV" 3)" ]; then
+          if [ -z "$old_url" ]; then
+            echo "::error::${RELEASE} holds ${PREV} but no ${ASSET}: a previous save died mid-swap. Rename ${PREV} back to ${ASSET} before saving again."
+            exit 1
+          fi
+          gh release delete-asset "$RELEASE" "$PREV" -y
+        fi
 
         if [ "$old" -gt 0 ] && [ $((new * 100)) -lt $((old * MIN_PCT)) ]; then
-          echo "::error::Refusing to save: new ${ASSET} is ${new} bytes, under ${MIN_PCT}% of the current ${old}-byte store — looks truncated or fresh-started. If intentional, raise min-percent or push manually with 'bun run sync --push'."
+          echo "::error::Refusing to save: new ${ASSET} is ${new} bytes, under ${MIN_PCT}% of the current ${old}-byte store: looks truncated or fresh-started. If intentional, lower min-percent or push manually with 'bun run sync --push'."
           exit 1
         fi
 
-        # Create the store on first save, then upload (retry transient failures).
-        gh release view "$RELEASE" >/dev/null 2>&1 \
-          || gh release create "$RELEASE" --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
+        # Create the store on first save. Then upload under the scratch name (retrying
+        # transient failures); the live asset is untouched until the swap below. --clobber
+        # here only ever replaces a stale scratch left by a run that died mid-upload.
+        [ "$state" = absent ] && gh release create "$RELEASE" --prerelease --title "SQLite store" --notes "camhunting.sqlite persistent store, do not delete"
+        ln -f "$ASSET" "$NEW" 2>/dev/null || cp "$ASSET" "$NEW"
+        uploaded=""
         for attempt in 1 2 3 4; do
-          if gh release upload "$RELEASE" "$ASSET" --clobber; then
-            echo "Saved ${ASSET} (${new} bytes) to ${RELEASE}."
-            exit 0
-          fi
+          if gh release upload "$RELEASE" "$NEW" --clobber; then uploaded=1; break; fi
           echo "upload attempt ${attempt} failed; retrying in $((attempt * 5))s…" >&2
           sleep $((attempt * 5))
         done
-        echo "::error::Upload of ${ASSET} to ${RELEASE} failed after retries."
-        exit 1
+        rm -f "$NEW"
+        if [ -z "$uploaded" ]; then
+          echo "::error::Upload of ${ASSET} to ${RELEASE} failed after retries. The live asset was not touched."
+          exit 1
+        fi
+
+        # Verify the scratch asset is whole before swapping it in: same byte count, and
+        # GitHub marks it 'uploaded' (a dropped upload leaves an 'open' stub).
+        assets="$(gh release view "$RELEASE" --json assets --jq '.assets[] | [.name, .size, .apiUrl, .state] | @tsv')"
+        new_size="$(field "$NEW" 2)"; new_url="$(field "$NEW" 3)"; new_state="$(field "$NEW" 4)"
+        if [ "$new_size" != "$new" ] || [ "$new_state" != uploaded ]; then
+          echo "::error::Scratch upload ${NEW} is incomplete (size ${new_size:-?} vs ${new}, state ${new_state:-?}); leaving the live asset in place."
+          exit 1
+        fi
+
+        # Swap: park the live asset, promote the scratch, drop the parked copy. Renames
+        # are metadata PATCHes, so the store is never without a complete DB for more
+        # than an instant, and restore-db fails closed if it ever finds this half-done.
+        rename() { gh api -X PATCH "$1" -f name="$2" --silent; }
+        if [ -n "$old_url" ]; then
+          rename "$old_url" "$PREV" || { echo "::error::Could not park the live ${ASSET}; the new copy is in the store as ${NEW}."; exit 1; }
+        fi
+        rename "$new_url" "$ASSET" || { echo "::error::Could not promote ${NEW} to ${ASSET}. Rename it by hand: gh api -X PATCH ${new_url} -f name=${ASSET} (the previous DB is parked as ${PREV})."; exit 1; }
+        if [ -n "$old_url" ]; then
+          gh release delete-asset "$RELEASE" "$PREV" -y || echo "::warning::Could not delete parked ${PREV}; the next save cleans it up."
+        fi
+        echo "Saved ${ASSET} (${new} bytes) to ${RELEASE}."

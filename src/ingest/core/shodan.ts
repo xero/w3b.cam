@@ -14,7 +14,9 @@ interface ShodanReport {
   screenshots: number;
   blocked: number;
   blacklisted: number;
-  /** Banners with no screenshot (skipped): banners − screenshots − blocked − blacklisted. */
+  /** Banners whose screenshot was a GIF, refused at ingest. */
+  gifs: number;
+  /** Banners with no screenshot (skipped): banners − screenshots − blocked − blacklisted − gifs. */
   skipped: number;
 }
 
@@ -39,6 +41,7 @@ export async function ingestShodanDir(db: Database, dir: string): Promise<void> 
   let screenshots = 0;
   let blocked = 0;
   let blacklisted = 0;
+  let gifs = 0;
   let added = 0;
   let updated = 0;
   let changed = 0;
@@ -68,6 +71,7 @@ export async function ingestShodanDir(db: Database, dir: string): Promise<void> 
       screenshots += scan.screenshots;
       blocked += scan.blocked;
       blacklisted += scan.blacklisted;
+      gifs += scan.gifs;
 
       const { added: a, updated: u, changed: c } = insertMany(scan.rows);
       added += a;
@@ -82,7 +86,7 @@ export async function ingestShodanDir(db: Database, dir: string): Promise<void> 
     const endingRows = countRows(db);
     console.log(`\n── Import summary ──`);
     console.log(`Files:    ${paths.length} found, ${failed} failed to parse, ${unknown} unknown shape`);
-    console.log(`Banners:  ${banners} seen, ${screenshots} with screenshot, ${blocked} rdp/vnc skipped, ${blacklisted} blacklisted, ${banners - screenshots - blocked - blacklisted} skipped (no screenshot)`);
+    console.log(`Banners:  ${banners} seen, ${screenshots} with screenshot, ${blocked} rdp/vnc skipped, ${gifs} gif skipped, ${blacklisted} blacklisted, ${banners - screenshots - blocked - blacklisted - gifs} skipped (no screenshot)`);
     console.log(`New cameras added: ${added}`);
     console.log(`Refreshed:         ${updated} existing (${changed} with a changed screenshot)`);
     console.log(`DB rows:  ${startingRows} → ${endingRows}`);
@@ -113,7 +117,8 @@ export function ingestShodanText(db: Database, text: string): ShodanReport {
     screenshots: scan.screenshots,
     blocked: scan.blocked,
     blacklisted: scan.blacklisted,
-    skipped: scan.banners - scan.screenshots - scan.blocked - scan.blacklisted,
+    gifs: scan.gifs,
+    skipped: scan.banners - scan.screenshots - scan.blocked - scan.blacklisted - scan.gifs,
   };
 }
 
