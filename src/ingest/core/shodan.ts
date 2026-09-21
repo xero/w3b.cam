@@ -16,7 +16,9 @@ interface ShodanReport {
   blacklisted: number;
   /** Banners whose screenshot was a GIF, refused at ingest. */
   gifs: number;
-  /** Banners with no screenshot (skipped): banners − screenshots − blocked − blacklisted − gifs. */
+  /** Banners wearing the fake-camera decoy banner, refused at ingest. */
+  decoys: number;
+  /** Banners with no screenshot (skipped): banners − screenshots − blocked − blacklisted − gifs − decoys. */
   skipped: number;
 }
 
@@ -42,6 +44,7 @@ export async function ingestShodanDir(db: Database, dir: string): Promise<void> 
   let blocked = 0;
   let blacklisted = 0;
   let gifs = 0;
+  let decoys = 0;
   let added = 0;
   let updated = 0;
   let changed = 0;
@@ -72,6 +75,7 @@ export async function ingestShodanDir(db: Database, dir: string): Promise<void> 
       blocked += scan.blocked;
       blacklisted += scan.blacklisted;
       gifs += scan.gifs;
+      decoys += scan.decoys;
 
       const { added: a, updated: u, changed: c } = insertMany(scan.rows);
       added += a;
@@ -86,7 +90,7 @@ export async function ingestShodanDir(db: Database, dir: string): Promise<void> 
     const endingRows = countRows(db);
     console.log(`\n── Import summary ──`);
     console.log(`Files:    ${paths.length} found, ${failed} failed to parse, ${unknown} unknown shape`);
-    console.log(`Banners:  ${banners} seen, ${screenshots} with screenshot, ${blocked} rdp/vnc skipped, ${gifs} gif skipped, ${blacklisted} blacklisted, ${banners - screenshots - blocked - blacklisted - gifs} skipped (no screenshot)`);
+    console.log(`Banners:  ${banners} seen, ${screenshots} with screenshot, ${blocked} rdp/vnc skipped, ${gifs} gif skipped, ${decoys} decoy skipped, ${blacklisted} blacklisted, ${banners - screenshots - blocked - blacklisted - gifs - decoys} skipped (no screenshot)`);
     console.log(`New cameras added: ${added}`);
     console.log(`Refreshed:         ${updated} existing (${changed} with a changed screenshot)`);
     console.log(`DB rows:  ${startingRows} → ${endingRows}`);
@@ -118,7 +122,8 @@ export function ingestShodanText(db: Database, text: string): ShodanReport {
     blocked: scan.blocked,
     blacklisted: scan.blacklisted,
     gifs: scan.gifs,
-    skipped: scan.banners - scan.screenshots - scan.blocked - scan.blacklisted - scan.gifs,
+    decoys: scan.decoys,
+    skipped: scan.banners - scan.screenshots - scan.blocked - scan.blacklisted - scan.gifs - scan.decoys,
   };
 }
 

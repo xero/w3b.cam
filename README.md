@@ -74,7 +74,7 @@ bun sync --push        # publish your edits and redeploy
 | `bun feature` / `bun unfeature` | Add or remove a homepage featured pin | [Curation](./docs/curation.md#feature) |
 | `bun superfeature` / `bun unsuperfeature` | Group feeds into a one-off event banner, or take a finished one down | [Curation](./docs/curation.md#superfeature) |
 | `bun geo` | Set a YouTube stream's map coordinates | [Curation](./docs/curation.md#geo) |
-| `bun purge` | Drop stored RDP/VNC rows | [Curation](./docs/curation.md#purge) |
+| `bun purge` | Drop stored rows the ingest guards now refuse (RDP/VNC, GIF screenshots, decoy banners) | [Curation](./docs/curation.md#purge) |
 | `bun fingerprint` | Backfill camera make and model labels | [Fingerprinting](./docs/fingerprinting.md) |
 | `bun sync` | Pull, push, or merge with the `db-store` release | [Database](./docs/database.md#sync) |
 | `bun merge` | Merge new cams from one database into another | [Database](./docs/database.md#merge) |

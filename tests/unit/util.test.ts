@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { WebcamMatch } from "../../src/core/types.ts";
-import { escapeHtml, getScreenshot, hasGifScreenshot, isBlockedProduct, num, toRow } from "../../src/core/util.ts";
+import { escapeHtml, getScreenshot, hasGifScreenshot, isBlockedProduct, isDecoyBanner, num, toRow } from "../../src/core/util.ts";
 
 describe("escapeHtml", () => {
 	it("escapes the five HTML-significant characters", () => {
@@ -52,6 +52,24 @@ describe("getScreenshot", () => {
 		expect(hasGifScreenshot(gif)).toBe(true);
 		expect(hasGifScreenshot({ screenshot: { data: "/9j/4AAQ" } } as WebcamMatch)).toBe(false);
 		expect(hasGifScreenshot({} as WebcamMatch)).toBe(false);
+	});
+});
+
+describe("isDecoyBanner", () => {
+	const boa = (http: WebcamMatch["http"]) => ({ product: "Generic IP camera", http }) as WebcamMatch;
+	it("flags a Boa header over a present-but-empty 200 body", () => {
+		expect(isDecoyBanner(boa({ status: 200, server: "Boa/0.94.14rc21", html: "\n" }))).toBe(true);
+		expect(isDecoyBanner(boa({ status: 200, server: "boa/0.94.13", html: "" }))).toBe(true);
+	});
+	it("passes real Boa cams (a body), other servers, non-200s, and banners with no HTTP module", () => {
+		expect(isDecoyBanner(boa({ status: 200, server: "Boa/0.94.14rc21", html: "<html>login</html>" }))).toBe(false);
+		expect(isDecoyBanner(boa({ status: 200, server: "GoAhead-Webs", html: "\n" }))).toBe(false);
+		expect(isDecoyBanner(boa({ status: 401, server: "Boa/0.94.14rc21", html: "" }))).toBe(false);
+		// A Hikvision-style empty 200 with no Server header, and a missing body, must not match.
+		expect(isDecoyBanner(boa({ status: 200, html: "" }))).toBe(false);
+		expect(isDecoyBanner(boa({ status: 200, server: "Boa/0.94.14rc21" }))).toBe(false);
+		expect(isDecoyBanner(boa(null))).toBe(false);
+		expect(isDecoyBanner({} as WebcamMatch)).toBe(false);
 	});
 });
 

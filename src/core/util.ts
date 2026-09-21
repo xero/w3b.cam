@@ -139,6 +139,19 @@ export const BLOCKED_PRODUCTS: ReadonlySet<string> = new Set([
   "vnc",
 ]);
 
+/**
+ * True for the fake-camera banner behind the Sep 2026 meme-GIF spam: an embedded
+ * camera web server's headers (Boa) over an empty 200 body. A real camera's root
+ * answers with a login page or a viewer; a bare 200 with nothing in it exists only
+ * to earn Shodan's "Generic IP camera" fingerprint. Pinned to the Boa header because
+ * a few real Hikvisions also answer 200 with an empty body (and no Server header),
+ * and the body must be present-but-blank so a banner with no HTTP module passes.
+ */
+export function isDecoyBanner(m: WebcamMatch): boolean {
+  const h = m.http;
+  return h?.status === 200 && /^boa\//i.test(h.server ?? "") && typeof h.html === "string" && h.html.trim() === "";
+}
+
 /** True when a match's product is one we skip (an RDP/VNC screen that looks like a webcam). */
 export function isBlockedProduct(product: unknown): boolean {
   return typeof product === "string" && BLOCKED_PRODUCTS.has(product.trim().toLowerCase());

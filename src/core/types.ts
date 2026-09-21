@@ -27,6 +27,13 @@ interface MatchLocation {
   area_code?: number | null;
 }
 
+/** The HTTP module fields the ingest guards read (see isDecoyBanner). */
+export interface MatchHttp {
+  status?: number | null;
+  server?: string | null;
+  html?: string | null;
+}
+
 /** The subset of a search match we care about. Nearly everything is optional. */
 export interface WebcamMatch {
   ip_str?: string;
@@ -42,6 +49,7 @@ export interface WebcamMatch {
   product?: string | null;
   tags?: string[];
   location?: MatchLocation;
+  http?: MatchHttp | null;
   /** Untyped in shodan-ts; we extract via getScreenshot(). */
   screenshot?: unknown;
   /** Untyped in shodan-ts; carries the per-banner UUID under `.id`. */

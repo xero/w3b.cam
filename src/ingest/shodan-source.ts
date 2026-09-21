@@ -4,7 +4,7 @@
 // RDP/VNC product guards as the scraper. DB-free: the caller loads the blacklist
 // (loadBlacklist) and owns the inserter (makeInserter).
 
-import { asMatch, getScreenshot, hasGifScreenshot, isBlockedProduct, toRow } from "../core/util.ts";
+import { asMatch, getScreenshot, hasGifScreenshot, isBlockedProduct, isDecoyBanner, toRow } from "../core/util.ts";
 import type { Blacklist } from "../db/db.ts";
 import type { CamRow, WebcamMatch } from "../core/types.ts";
 
@@ -30,12 +30,14 @@ interface ShodanScan {
   blacklisted: number;
   /** Banners whose screenshot was a GIF (see getScreenshot). */
   gifs: number;
+  /** Banners wearing the fake-camera decoy banner (see isDecoyBanner). */
+  decoys: number;
 }
 
 /**
  * Filter a banner list into insertable rows, in the exact order the scraper/importer
  * apply: skip blacklisted hosts, then banners with no (or a GIF) screenshot, then
- * RDP/VNC products. Only banners that clear all three become rows.
+ * RDP/VNC products, then decoy banners. Only banners that clear all four become rows.
  */
 export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
   const rows: CamRow[] = [];
@@ -44,6 +46,7 @@ export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
   let blocked = 0;
   let blacklisted = 0;
   let gifs = 0;
+  let decoys = 0;
   for (const raw of list) {
     banners++;
     const m = asMatch(raw);
@@ -60,9 +63,13 @@ export function scanBanners(list: WebcamMatch[], bl: Blacklist): ShodanScan {
       blocked++;
       continue;
     }
+    if (isDecoyBanner(m)) {
+      decoys++;
+      continue;
+    }
     screenshots++;
     const row = toRow(m, ss);
     if (row) rows.push(row);
   }
-  return { rows, banners, screenshots, blocked, blacklisted, gifs };
+  return { rows, banners, screenshots, blocked, blacklisted, gifs, decoys };
 }

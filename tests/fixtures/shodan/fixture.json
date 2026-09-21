@@ -133,6 +133,69 @@
         "longitude": 2.3522
       },
       "_shodan": { "id": "55555555-5555-4555-8555-555555555555" }
+    },
+    {
+      "ip_str": "192.0.2.44",
+      "port": 12215,
+      "transport": "tcp",
+      "timestamp": "2026-09-12T09:09:49.456659",
+      "hostnames": [],
+      "domains": [],
+      "org": "Example Fixed Line",
+      "isp": "Example Fixed Line",
+      "asn": "AS64502",
+      "product": "Generic IP camera",
+      "data": "HTTP/1.0 200 OK\r\nServer: Boa/0.94.14rc21\r\nContent-type: text/html\r\nContent-Length: 1\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+      "http": {
+        "status": 200,
+        "server": "Boa/0.94.14rc21",
+        "title": null,
+        "html": "\n",
+        "headers": { "content-length": "1", "server": "Boa/0.94.14rc21", "content-type": "text/html", "access-control-allow-origin": "*" }
+      },
+      "location": {
+        "city": "Tel Aviv",
+        "region_code": "TA",
+        "country_code": "IL",
+        "country_name": "Israel",
+        "latitude": 32.08,
+        "longitude": 34.78
+      },
+      "_shodan": { "id": "66666666-6666-4666-8666-666666666666" },
+      "screenshot": {
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "mime": "image/png",
+        "hash": 666666,
+        "labels": ["webcam"]
+      }
+    },
+    {
+      "ip_str": "192.0.2.45",
+      "port": 16400,
+      "transport": "tcp",
+      "timestamp": "2026-09-13T01:14:05.000000",
+      "hostnames": [],
+      "domains": [],
+      "org": "Example Fixed Line",
+      "isp": "Example Fixed Line",
+      "asn": "AS64502",
+      "product": "Generic IP camera",
+      "http": { "status": 200, "server": "GoAhead-Webs", "title": "Camera", "html": "<html><body>cam</body></html>" },
+      "location": {
+        "city": "Haifa",
+        "region_code": "HA",
+        "country_code": "IL",
+        "country_name": "Israel",
+        "latitude": 32.79,
+        "longitude": 34.99
+      },
+      "_shodan": { "id": "77777777-7777-4777-8777-777777777777" },
+      "screenshot": {
+        "data": "R0lGODlhAQABAIAAAAAA////IfkEAQAAAAAsAAAAAAEAAQAAAgJEAQA7",
+        "mime": "image/jpeg",
+        "hash": 777777,
+        "labels": ["windows", "webcam"]
+      }
     }
   ]
 }

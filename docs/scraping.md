@@ -20,7 +20,7 @@
 bun scrape --pages 5
 ```
 
-Cameras land as `kind='cam'` rows keyed on the IP and port. The run prints a per-page tally (matches, new, refreshed, blacklisted, image-blocked, no-screenshot, gif skipped, rdp/vnc skipped) and a closing summary with the credit balance before and after.
+Cameras land as `kind='cam'` rows keyed on the IP and port. The run prints a per-page tally (matches, new, refreshed, blacklisted, image-blocked, no-screenshot, gif skipped, decoy skipped, rdp/vnc skipped) and a closing summary with the credit balance before and after.
 
 The scraper never plans to spend more credits than you hold. It reads your balance and the query's result count up front, then fetches the smaller of the pages you asked for, the pages that exist, and the credits you have. A credits-out or nothing-new run stays green and emits a neutral stop signal so CI skips the rebuild.
 
@@ -53,6 +53,8 @@ A few details worth knowing:
 **Requests are paced to roughly one per second, and retried on transient failures.** `shodan-ts` does no throttling and no retries, so the scraper spaces its calls and backs off on `429`, `5xx`, and transport errors; a timed-out or aborted fetch is retried, not fatal. A search page carries about 100 base64 screenshots and can run several MB, so the client allows a 60-second timeout. If a page still fails after its retries, the scraper stops early and saves what it already fetched instead of discarding the whole run, so a mid-run blip costs one page, not the batch.
 
 **GIF screenshots are refused.** No camera answers with a GIF; JPEG and MJPEG are the standard. The GIFs Shodan hands out, labeled `image/jpeg`, are multi-megabyte animated desktop grabs and meme spam, and in September 2026 they alone pushed the store past GitHub's 2 GiB asset ceiling. The scraper and importer detect the format from the bytes, not the label, skip the banner, and count it in the tally as `gif skipped`.
+
+**Decoy banners are refused.** The same spam campaign earns Shodan's `Generic IP camera` fingerprint by copying an embedded camera web server's headers (`Server: Boa/0.94.14rc21`) over a one-byte 200 body, then serving a meme from the snapshot path. A real camera's root answers with a login page or a viewer, never nothing. Any banner whose HTTP module shows a Boa server header, a 200 status, and a present-but-empty body is skipped and counted as `decoy skipped`. The rule is pinned to Boa because a few real Hikvisions also answer 200 with an empty body, and it requires the body field to be present so a banner with no HTTP module passes. Across the whole database that rule matches every one of the 634 spam rows and none of the 257 real Boa cams. Since a spammer can drop the tell, the campaign's addresses are also on the IP blacklist.
 
 **RDP and VNC screens are filtered.** Some hosts serve a remote-desktop or VNC login that Shodan labels as a webcam. The scraper and importer skip any product of `remote desktop protocol` or `vnc` as they ingest. That guard only blocks new rows, so `bun purge` retroactively drops any that predate it. Re-run `bun bake` afterward. See [Curation](./curation.md#purge).
 

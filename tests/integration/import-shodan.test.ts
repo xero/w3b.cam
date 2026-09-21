@@ -13,11 +13,13 @@ afterEach(() => cleanTmpDir(space.dir));
 const importShodan = () => runScript("import", ["--shodan", SHODAN_FIXTURE_DIR], { env: { DB_PATH: space.dbPath } });
 
 describe("import --shodan (hermetic: screenshots are embedded base64)", () => {
-	it("ingests valid cams and drops RDP/VNC + no-screenshot banners", async () => {
+	it("ingests valid cams and drops RDP/VNC, no-screenshot, GIF, and decoy banners", async () => {
 		const r = await importShodan();
 		expect(r.code).toBe(0);
 		expect(r.output).toContain("New cameras added: 3");
 		expect(r.output).toContain("rdp/vnc skipped");
+		expect(r.output).toContain("1 gif skipped");
+		expect(r.output).toContain("1 decoy skipped");
 		expect(r.output).toContain("no screenshot");
 
 		const db = openDb(space.dbPath);
@@ -27,6 +29,8 @@ describe("import --shodan (hermetic: screenshots are embedded base64)", () => {
 			expect(hasHost(db, "149.232.130.7")).toBe(true); // valid
 			expect(hasHost(db, "203.0.113.9")).toBe(false); // VNC -> dropped
 			expect(hasHost(db, "198.51.100.7")).toBe(false); // no screenshot -> dropped
+			expect(hasHost(db, "192.0.2.44")).toBe(false); // decoy banner (Boa over an empty 200) -> dropped
+			expect(hasHost(db, "192.0.2.45")).toBe(false); // GIF screenshot labeled image/jpeg -> dropped
 			// Every stored cam has baked image bytes, so it will actually render.
 			const noImg = (db.query("SELECT COUNT(*) AS c FROM cams WHERE kind='cam' AND ss_base64 IS NULL").get() as { c: number }).c;
 			expect(noImg).toBe(0);

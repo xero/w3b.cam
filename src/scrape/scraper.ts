@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 import { MIN_REQUEST_MS, PER_PAGE, QUERY } from "../core/config.ts";
 import { closeDb, countRows, loadBlacklist, makeInserter, openDb } from "../db/db.ts";
 import { makeClient, searchPage, withBackoff } from "./shodan.ts";
-import { asMatch, emitBuildNeeded, getScreenshot, hasGifScreenshot, isBlockedProduct, mustEnv, sleep, toRow } from "../core/util.ts";
+import { asMatch, emitBuildNeeded, getScreenshot, hasGifScreenshot, isBlockedProduct, isDecoyBanner, mustEnv, sleep, toRow } from "../core/util.ts";
 import type { CamRow } from "../core/types.ts";
 
 const { values } = parseArgs({
@@ -38,6 +38,7 @@ let changed = 0;
 let skippedBlacklist = 0;
 let blockedImage = 0;
 let skippedGif = 0;
+let skippedDecoy = 0;
 let creditsBefore = 0;
 
 try {
@@ -88,6 +89,7 @@ try {
     const rows: CamRow[] = [];
     let noScreenshot = 0;
     let gif = 0;
+    let decoy = 0;
     let blocked = 0;
     let blacklisted = 0;
     for (const raw of res.matches) {
@@ -106,6 +108,10 @@ try {
         blocked++;
         continue;
       }
+      if (isDecoyBanner(m)) {
+        decoy++;
+        continue;
+      }
       const row = toRow(m, ss);
       if (row) rows.push(row);
     }
@@ -118,11 +124,13 @@ try {
     skippedBlacklist += blacklisted;
     blockedImage += bi;
     skippedGif += gif;
+    skippedDecoy += decoy;
 
     const extra =
       (noScreenshot ? `, ${noScreenshot} no-screenshot` : "") +
       (gif ? `, ${gif} gif skipped` : "") +
       (blocked ? `, ${blocked} rdp/vnc skipped` : "") +
+      (decoy ? `, ${decoy} decoy skipped` : "") +
       (blacklisted ? `, ${blacklisted} blacklisted` : "") +
       (bi ? `, ${bi} image-blocked` : "");
     console.log(
@@ -162,6 +170,7 @@ try {
   console.log(`Blacklisted:       ${skippedBlacklist}`);
   console.log(`Image-blocked:     ${blockedImage}`);
   console.log(`GIF skipped:       ${skippedGif}`);
+  console.log(`Decoy skipped:     ${skippedDecoy}`);
   console.log(`DB rows:           ${startingRows} → ${endingRows}`);
   console.log(
     `Query credits:     ${creditsBefore} → ${creditsAfter} (spent ${creditsBefore - creditsAfter})`,

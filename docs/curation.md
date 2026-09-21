@@ -120,4 +120,4 @@ bun bake
 
 ## purge
 
-**`bun purge`.** Removes stored RDP and VNC rows that predate the ingest filter. Some hosts serve a remote-desktop or VNC login that Shodan labels as a webcam; the scraper and importer now skip those, but that guard only blocks new rows. Purge retroactively drops any that slipped in before it existed. Re-run `bun bake` afterward.
+**`bun purge`.** Removes stored cam rows that the ingest guards would refuse today: RDP and VNC products, GIF screenshots, and the fake-camera decoy banner (a Boa server header over an empty 200 body). Each guard only blocks new rows, so purge retroactively drops any that slipped in before it existed, and prints a count per guard. Curated feeds are never touched. Re-run `bun bake` afterward. See [Scraping](./scraping.md#how-the-scraper-works) for what each guard catches and why.

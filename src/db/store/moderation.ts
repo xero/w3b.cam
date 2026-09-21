@@ -18,6 +18,32 @@ export function deleteBlockedProducts(db: Database): number {
 		.run(...list).changes;
 }
 
+/**
+ * Purge stored cams whose screenshot is a GIF: the SQL twin of getScreenshot's
+ * refusal, for rows that predate it. `R0lGOD` is the base64 of the `GIF8` magic.
+ * Cam-source only, so a curated feed's GIF thumbnail is left alone.
+ */
+export function deleteGifScreenshots(db: Database): number {
+	return db.query("DELETE FROM cams WHERE kind = 'cam' AND substr(ss_base64, 1, 6) = 'R0lGOD'").run().changes;
+}
+
+/**
+ * Purge stored cams wearing the fake-camera decoy banner: the SQL twin of
+ * isDecoyBanner (a Boa server header over a present-but-empty 200 body), read back
+ * out of the row's raw Shodan JSON. Cam-source only.
+ */
+export function deleteDecoyBanners(db: Database): number {
+	return db
+		.query(
+			`DELETE FROM cams WHERE kind = 'cam'
+			   AND json_extract(raw_json, '$.http.status') = 200
+			   AND lower(json_extract(raw_json, '$.http.server')) LIKE 'boa/%'
+			   AND json_type(raw_json, '$.http.html') = 'text'
+			   AND trim(json_extract(raw_json, '$.http.html'), char(32, 9, 10, 13)) = ''`,
+		)
+		.run().changes;
+}
+
 // ── Blacklist ─────────────────────────────────────────────────────────────────
 
 /** True when `name` equals, or is a subdomain of, any listed host. Case/dot-insensitive. */

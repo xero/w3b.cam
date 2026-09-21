@@ -94,7 +94,7 @@ src/
     unfeature.ts    remove a cam or stream from the featured set
     superfeature.ts group feed cams into a one-off homepage event banner
     unsuperfeature.ts take a finished event's group back down
-    purge.ts        remove stored RDP/VNC rows that predate the ingest filter
+    purge.ts        remove stored RDP/VNC, GIF-screenshot, and decoy-banner rows that predate the ingest guards
   site/           database to static site
     render.ts       barrel re-exporting render/*
     render/         primitives, pager, shared, host, stream, feed, tags, map, pages, shell
