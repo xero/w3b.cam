@@ -37,6 +37,7 @@ import { computeAutoTags } from "./autotags.ts";
 import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadSuperFeatures, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb, type TagKind } from "../db/db.ts";
 import { productBreakdown } from "../fingerprint/fingerprint.ts";
 import { isBlockedProduct, pickRandom } from "../core/util.ts";
+import { spinning } from "../core/spinner.ts";
 import {
 	groupByIp,
 	project,
@@ -682,4 +683,4 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 }
 
 // Direct run (`bun run bake` / `bun run src/site/build.ts`) bakes the production site.
-if (import.meta.main) await build();
+if (import.meta.main) await spinning("baking site", () => build(), "baked site");

@@ -416,7 +416,7 @@
 			var panel = document.createElement("div");
 			panel.className = "map-list";
 			var head = document.createElement("header");
-			head.textContent = cl.n.toLocaleString() + " cameras here";
+			head.textContent = cl.n.toLocaleString() + " cameras discovered";
 			var x = document.createElement("button");
 			x.type = "button";
 			x.className = "map-list-x";
@@ -564,7 +564,7 @@
 		// Go live: size, wire zoom, first paint, and retire the SVG (this also fires map.js's
 		// teardown via live-lifecycle's removed-node observer, so its viewBox handlers detach).
 		var hint = mapwrap.querySelector(".maphint");
-		if (hint) hint.textContent = pts.length.toLocaleString() + " geolocated cameras · drag to pan, scroll or pinch to zoom, click a cluster to open it, a camera to view it";
+		if (hint) hint.textContent = '<strong class="hl">' + pts.length.toLocaleString() + " geolocated cameras</strong> · drag to pan, scroll or pinch to zoom, click a cluster to expand, or an individual camera to view it";
 		sizeToContainer();
 		d3.select(canvas).call(zoom).on("dblclick.zoom", null);
 		canvas.style.cursor = "grab";

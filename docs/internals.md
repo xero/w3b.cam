@@ -59,6 +59,7 @@ src/
     types.ts        screenshot, match, and row interfaces
     util.ts         escaping, screenshot extraction, row mapping
     cli.ts          shared argument parsing for the small curation CLIs
+    spinner.ts      braille progress spinner for bake and dev, off under CI
   db/             schema, inserts, and database-lifecycle commands
     db.ts           barrel re-exporting store/*
     store/          schema, inserts, reads, tags, featured, ytgeo, moderation

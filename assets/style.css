@@ -6,8 +6,14 @@
 	--tangerine:   #d06900;
 	--salmon:      #e25569;
 	--mercury:     #efefef;
+	--white:       #fff;
+	--black:       #000;
+	--xero-blue:   #1933fc; /* the xero logo's native blue */
 
-	/* neutrals: dark defaults (flipped in the light media query below) */
+	/* neutrals: dark defaults (flipped in the light media query below). color-scheme tells
+	   the browser which mode each theme already is, so UI widgets match and Chrome's auto
+	   dark mode leaves the dark themes alone instead of lightening their dark fills. */
+	color-scheme: dark;
 	--bg:      #0f1117;
 	--surface: #161925;
 	--text:    #e6e8ee;
@@ -25,6 +31,11 @@
 	--dot:         var(--ultramarine);
 	--dot-hi:      var(--tangerine);
 	--warn:        var(--salmon);
+	--hl:          var(--indigo);
+	--xero-bg:     var(--xero-blue); /* footer logos (icons.svg#xero, #3xi) */
+	--xero-fg:     var(--white);
+	--3xi-sclera:  var(--white);
+	--3xi-iris:    var(--black); /* outline too: it melts into the dark bg, as on 3xi.club */
 	--font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	/* cctv: a pixel-perfect bitmap UI font (see @font-face below) to finish the retro look. */
@@ -82,6 +93,7 @@
 
 @media (prefers-color-scheme: light) {
 	:root {
+		color-scheme: light;
 		--bg:      #efefef;
 		--surface: #f4f6f8;
 		--text:    #14171f;
@@ -90,6 +102,8 @@
 		--land:    #dfe6ee;
 		--coast:   #b9c4d0;
 		--link:    var(--indigo);
+		--xero-bg: var(--indigo);
+		--xero-fg: var(--bg);
 	}
 }
 
@@ -99,6 +113,7 @@
    light media query in any OS mode. Values mirror the dark :root neutrals and the light
    media query above; the global `transition: all` animates the swap for free. */
 :root.dark {
+	color-scheme: dark;
 	--bg:      #0f1117;
 	--surface: #161925;
 	--text:    #e6e8ee;
@@ -107,8 +122,11 @@
 	--land:    #1b2333;
 	--coast:   #2b3a52;
 	--link:    var(--cornflower);
+	--xero-bg: var(--xero-blue);
+	--xero-fg: var(--white);
 }
 :root.light {
+	color-scheme: light;
 	--bg:      #efefef;
 	--surface: #f4f6f8;
 	--text:    #14171f;
@@ -117,6 +135,8 @@
 	--land:    #dfe6ee;
 	--coast:   #b9c4d0;
 	--link:    var(--indigo);
+	--xero-bg: var(--indigo);
+	--xero-fg: var(--bg);
 }
 
 /* cctv: green-phosphor monochrome on near-black, matched to the CRT sweep/scanline tint
@@ -124,6 +144,7 @@
    overlay (crt.css) on top; this block supplies the base colours. --accent is overridden
    too so hover states go green instead of the default cornflower blue. */
 :root.cctv {
+	color-scheme: dark;
 	--bg:      #050a06;
 	--surface: #0b140d;
 	--text:    #78dc50;
@@ -136,6 +157,11 @@
 	--on-accent: #050a06; /* near-black text on the lime badges/buttons (white was unreadable) */
 	--dot:     #57d977; /* map markers: green, not the off-theme blue */
 	--dot-hi:  #c8ff9c; /* highlighted markers: brighter green (was orange) */
+	--hl:      var(--dot-hi);
+	--xero-bg: #1f4a26; /* dark shape, bright letters: dark-on-lime is lost under the CRT glass */
+	--xero-fg: var(--dot-hi);
+	--3xi-sclera: var(--muted); /* like the feed icons: muted, then --accent on hover */
+	--3xi-iris:   var(--bg);
 	--font-family: var(--cctv-font); /* whole UI switches to the pixel font in cctv */
 
 	/* Pixel look: kill font anti-aliasing and scale images nearest-neighbour. Both are
@@ -187,11 +213,11 @@
 :root.cctv .brand {
 	--link: #b6ff7a;
 }
-/* The pixel font ships only 400/700, so the footer credit's weight 500 maps down to regular
-   and loses its look. Force bold — the 3xi.club / xero links inherit it (they keep their
-   larger size). */
+/* The 3xi pupils step through the phosphor greens instead of the rainbow, which would break
+   the monochrome look. */
 :root.cctv footer cite {
-	font-weight: 700;
+	animation-name: phosphor-cycle;
+	animation-duration: calc(5 * var(--3xi-step));
 }
 /* Pixel-bold every button face (pagination, view live, watch on youtube, filter, …). */
 :root.cctv .btn .front {
@@ -581,6 +607,9 @@ main {
 	}
 }
 
+.hl {
+	color: var(--hl);
+}
 .host {
 	border-top: 1px solid var(--accent);
 	padding-top: 10px;
@@ -969,25 +998,50 @@ main {
 }
 
 body > footer {
+	--footer-pad:  clamp(1rem, 1vw, 1rem);
+	--footer-icon: 40px; /* the feed icons, whose row sets the footer height */
 	display: flex;
 	flex-flow: row wrap;
 	gap: 0.75rem 1.5rem;
-	padding: clamp(1rem, 1vw, 1rem);
+	padding: var(--footer-pad);
 	border-top: 1px solid var(--border);
 	align-items: center;
 	justify-content: space-between;
 
 	cite {
 		display: flex;
-		font-style: normal;
-		font-weight: 500;
-		line-height: 1em;
+		align-items: center;
+		gap: 0.5rem;
+		/* the logos span the icon row plus both paddings, and the matching negative margin
+		   keeps them from growing the footer, so they sit ~3px (the icon row's line box
+		   slack) off the edges while the sections around them keep their full padding */
+		--logo-h: calc(var(--footer-icon) + 2 * var(--footer-pad));
+		margin-block: calc(-1 * var(--footer-pad));
+		/* scoped to cite so only this subtree restyles each frame, not the whole page */
+		--3xi-pupil: var(--3xi-hue);
+		--3xi-step: 1.25s; /* how long each eye color holds */
+		animation: hue-cycle calc(13 * var(--3xi-step)) linear infinite;
 		@media (max-width: 480px) {
 			display: none;
 		}
 		a {
-			font-size: 1.5em;
 			padding-inline: 4px;
+		}
+		/* mirror the link hover (accent box, --link-hover text) inside the logos' own fills;
+		   the box itself would just swallow them. Each symbol reads only its own vars. */
+		a:is(:hover, :focus-visible) {
+			background: transparent;
+			--xero-bg: var(--accent);
+			--xero-fg: var(--link-hover);
+			--3xi-sclera: var(--accent);
+		}
+		svg {
+			display: block;
+			height: var(--logo-h); /* width follows the viewBox set in the markup */
+		}
+		/* the eyes read heavier than the xero wordmark, so they sit a size down */
+		a[href*="3xi.club"] svg {
+			height: calc(var(--logo-h) * 0.8);
 		}
 	}
 	#syndication {
@@ -999,8 +1053,8 @@ body > footer {
 				}
 			}
 			svg {
-				width: 40px;
-				height: 40px;
+				width: var(--footer-icon);
+				height: var(--footer-icon);
 				* {
 					fill: var(--muted);
 				}
@@ -1011,6 +1065,55 @@ body > footer {
 		line-height: 1.23em;
 		flex-grow: 0;
 	}
+}
+
+/* the eye cycle: crimson, coral, amber, lime, emerald, teal, sky, blue, indigo, violet,
+   purple, fuchsia, rose. One contrast fingerprint (#667eea's), so every hue reads the same
+   on the black iris in any theme. --3xi-hue is deliberately not an @property: unregistered
+   it steps from color to color like 3xi.club, where a smooth blend is too slow to notice. */
+@keyframes hue-cycle {
+	0%, 100% { --3xi-hue: #e25569; }
+	7.69%    { --3xi-hue: #dc5e52; }
+	15.38%   { --3xi-hue: #d06900; }
+	23.08%   { --3xi-hue: #789000; }
+	30.77%   { --3xi-hue: #009a4d; }
+	38.46%   { --3xi-hue: #009784; }
+	46.15%   { --3xi-hue: #0091ba; }
+	53.85%   { --3xi-hue: #058ae2; }
+	61.54%   { --3xi-hue: #5681ea; }
+	69.23%   { --3xi-hue: #667eea; }
+	76.92%   { --3xi-hue: #9274dd; }
+	84.62%   { --3xi-hue: #b06bc5; }
+	92.31%   { --3xi-hue: #cb60a1; }
+}
+	5%       { --3xi-hue: #e81f63; }
+	10%      { --3xi-hue: #c01859; }
+	15%      { --3xi-hue: #e75480; }
+	20%      { --3xi-hue: #ffb347; }
+	25%      { --3xi-hue: #ff8800; }
+	30%      { --3xi-hue: #ffc107; }
+	35%      { --3xi-hue: #4caf50; }
+	40%      { --3xi-hue: #2ecc71; }
+	45%      { --3xi-hue: #62c688; }
+	50%      { --3xi-hue: #59dcbd; }
+	55%      { --3xi-hue: #17cfc4; }
+	60%      { --3xi-hue: #1ba9e1; }
+	65%      { --3xi-hue: #58abdd; }
+	70%      { --3xi-hue: #266bb0; }
+	75%      { --3xi-hue: #262aaf; }
+	80%      { --3xi-hue: #a084e8; }
+	85%      { --3xi-hue: #9d5adf; }
+	90%      { --3xi-hue: #9d27b1; }
+	95%      { --3xi-hue: #5627b1; }
+}
+/* cctv's take: the theme's own greens, resolved on cite like any other var. Five stops, so
+   cctv runs 5 steps to the rainbow's 13, keeping each green up as long as each color. */
+@keyframes phosphor-cycle {
+	0%, 100% { --3xi-hue: var(--dot-hi); }
+	20%      { --3xi-hue: var(--text); }
+	40%      { --3xi-hue: var(--muted); }
+	60%      { --3xi-hue: var(--dot); }
+	80%      { --3xi-hue: var(--link); }
 }
 
 .shot video {

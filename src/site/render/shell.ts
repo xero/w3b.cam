@@ -35,10 +35,14 @@ interface ShellOpts {
 	ogImage?: string;
 	/** Absolute canonical page URL for og:url; "" omits the tag. */
 	ogUrl?: string;
+	/** Per-build stamp appended as ?x=<build> to the shell's css and js, so a fresh build
+	 *  never renders against a browser's stale cached copy; 0 omits it. */
+	build?: number;
 }
 
 /** Wrap inner-<main> content in the full HTML document. */
-export function renderShell({ title, stats, mainInner, dev = false, ogImage = "", ogUrl = "" }: ShellOpts): string {
+export function renderShell({ title, stats, mainInner, dev = false, ogImage = "", ogUrl = "", build = 0 }: ShellOpts): string {
+	const v = build ? `?x=${build}` : "";
 	// Header links (brand + nav + the discovered-count link) live outside <main>, so they
 	// can't inherit its hx-target:inherited / hx-swap:inherited. Without a resolvable
 	// target htmx falls back to a full-page navigation on the href, which loads the whole
@@ -54,11 +58,12 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		ghStat("updated", stats.updated, "https://github.com/xero/w3b.cam/deployments"),
 		ghStat("fresh scrapes every", stats.interval, "https://github.com/xero/w3b.cam/blob/main/.github/workflows/scrape.yml#L9"),
 	].join("");
-	// `label` is the icons.svg id + aria-label; `text` is the visible caption under the icon
-	// (defaults to label, but e.g. the fingerprints icon reads "models").
+	// `label` is the icons.svg id; `text` is the visible caption under the icon (defaults to
+	// label, but e.g. the fingerprints icon reads "models"). The caption names the link, so the
+	// icon is aria-hidden rather than labelled (a label would be read twice).
 	const navLink = (href: string, snip: string, label: string, text: string = label, classes: string = ''): string => [
 		`<a class="${classes}" href="${href}" hx-get="${snip}" ${navAttrs} hx-push-url="${href}">`,
-		`<svg alt="${label}" aria-label="${label}"><use href="/icons.svg#${label}"></use></svg>`,
+		`<svg aria-hidden="true"><use href="/icons.svg#${label}"></use></svg>`,
 		`<span>${escapeHtml(text)}</span>`,
 		`</a>`,
 	].join("");
@@ -89,10 +94,10 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		`${T(2)}<link rel="manifest" href="/site.webmanifest" />`,
 		`${T(2)}<link rel="alternate" type="application/rss+xml" title="${escapeHtml(TITLE)} live feed" href="/rss.xml" />`,
 		`${T(2)}<link rel="alternate" type="application/atom+xml" title="${escapeHtml(TITLE)} live feed" href="/atom.xml" />`,
-		`${T(2)}<link rel="stylesheet" href="/style.css" />`,
+		`${T(2)}<link rel="stylesheet" href="/style.css${v}" />`,
 		// CRT overlay styles for the opt-in "cctv" theme (assets/theme.js mounts the layers).
 		// Always linked so the effect is ready instantly on switch; classes are inert until then.
-		`${T(2)}<link rel="stylesheet" href="/crt.css" />`,
+		`${T(2)}<link rel="stylesheet" href="/crt.css${v}" />`,
 		...(dev ? [`${T(2)}<link rel="stylesheet" href="/__dev/dev.css" />`] : []),
 		// Restore a manually-picked theme (assets/theme.js) before first paint so the saved
 		// choice doesn't flash the OS preference first. Runs in <head> before <body> exists,
@@ -124,17 +129,17 @@ export function renderShell({ title, stats, mainInner, dev = false, ogImage = ""
 		`${T(2)}</main>`,
 		`${T(2)}<footer>`,
 		`${T(3)}<p id="syndication">`,
-		`${T(4)}<a href="/atom.xml"><svg alt="atom feed" aria-label="atom feed"><use href="/icons.svg#atom"></use></svg></a>`,
-		`${T(4)}<a href="/rss.xml"><svg alt="rss feed" aria-label="rss feed"><use href="/icons.svg#rss"></use></svg></a>`,
+		`${T(4)}<a href="/atom.xml"><svg role="img" aria-label="atom feed"><use href="/icons.svg#atom"></use></svg></a>`,
+		`${T(4)}<a href="/rss.xml"><svg role="img" aria-label="rss feed"><use href="/icons.svg#rss"></use></svg></a>`,
 		`${T(3)}</p>`,
-		`${T(3)}<cite><a href="https://3xi.club" target="_blank">3xi.club</a> project by <a href="https://x-e.ro" target="_blank">xero</a></cite>`,
+		`${T(3)}<cite><a href="https://x-e.ro" target="_blank"><svg role="img" aria-label="xero" viewBox="0 0 492 430"><use href="/icons.svg#xero"></use></svg></a><a href="https://3xi.club" target="_blank"><svg role="img" aria-label="3xi.club" viewBox="0 0 870 870"><use href="/icons.svg#3xi"></use></svg></a></cite>`,
 		`${T(3)}<p class="count">${counts}</p>`,
 		`${T(2)}</footer>`,
 		// One bundled request per page: htmx + live-lifecycle + feeds + map + the CRT layer
 		// spec + the theme picker, concatenated in dependency order by the build (see
 		// build.ts). Deferred so it runs after parse, in order, before DOMContentLoaded.
 		// hls.js stays a separate on-demand fetch, loaded only when an HLS cam is viewed.
-		`${T(2)}<script src="/app.js" defer></script>`,
+		`${T(2)}<script src="/app.js${v}" defer></script>`,
 		...(dev ? [`${T(2)}<script src="/__dev/dev.js"></script>`] : []),
 		`${T(1)}</body>`,
 		"</html>",

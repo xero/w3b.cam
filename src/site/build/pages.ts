@@ -6,7 +6,8 @@ import { renderShell, type SiteStats } from "../render.ts";
 import { diskOf, snipDiskOf, urlOf } from "../urls.ts";
 
 /** One Unix-seconds stamp per build, appended as ?x=<EPOCH> to OG image URLs so social
- *  scrapers re-fetch an updated screenshot instead of serving a stale cached preview. */
+ *  scrapers re-fetch an updated screenshot instead of serving a stale cached preview, and
+ *  to the shell's css/js URLs so browsers drop their stale copies the same way. */
 const EPOCH = Math.floor(Date.now() / 1000);
 
 /**
@@ -21,6 +22,6 @@ const EPOCH = Math.floor(Date.now() / 1000);
 export async function writePage(route: string, mainInner: string, title: string, stats: SiteStats, opts: { dev?: boolean; thumb?: string } = {}): Promise<void> {
 	const ogImage = opts.thumb ? `${SITE_URL}${opts.thumb}?x=${EPOCH}` : "";
 	const ogUrl = `${SITE_URL}${urlOf(route)}`;
-	await Bun.write(`${OUT_DIR}/${diskOf(route)}`, renderShell({ title, stats, mainInner, dev: opts.dev, ogImage, ogUrl }));
+	await Bun.write(`${OUT_DIR}/${diskOf(route)}`, renderShell({ title, stats, mainInner, dev: opts.dev, ogImage, ogUrl, build: EPOCH }));
 	await Bun.write(`${OUT_DIR}/${snipDiskOf(route)}`, `${mainInner}\n`);
 }

@@ -18,6 +18,7 @@ import { parseArgs } from "node:util";
 import { isIP } from "node:net";
 import { createHash } from "node:crypto";
 import { OUT_DIR } from "../core/config.ts";
+import { spinning } from "../core/spinner.ts";
 import { addFeatured, addTag, blacklist, blacklistImage, closeDb, deleteWebcamsByImageHash, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, normalizeImageHash, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "../db/db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "../ingest/ingest.ts";
 import { build } from "../site/build.ts";
@@ -31,7 +32,7 @@ const DEV_CLIENT = `${import.meta.dir}/dev-client`;
 const port = Number(process.env.PORT ?? 1337);
 
 // 1. Bake the dev-flavored site into out/ (data-* hooks + /__dev/* asset refs).
-await build({ dev: true, indexOnly: values["index-only"] });
+await spinning("baking dev site", () => build({ dev: true, indexOnly: values["index-only"] }), "baked dev site");
 
 // 2. One long-lived handle for the server's lifetime. bun:sqlite calls are
 //    synchronous and Bun is single-threaded, so mutation endpoints can't race each

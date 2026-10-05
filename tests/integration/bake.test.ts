@@ -33,9 +33,17 @@ describe("bake output", () => {
 		}
 	});
 
+	it("cache-busts the shell's css and js with one per-build stamp", () => {
+		const html = read("index.html");
+		const stamps = [...html.matchAll(/(?:href|src)="\/(?:style\.css|crt\.css|app\.js)(\?x=\d+)?/g)].map((m) => m[1]);
+		expect(stamps.length).toBe(3);
+		expect(stamps[0]).toBeDefined();
+		expect(new Set(stamps).size).toBe(1);
+	});
+
 	it("bundles all client JS into one app.js and ships no standalone client scripts", () => {
 		// The page pulls a single script; hls.js is the one intentional exception (on-demand).
-		expect(read("index.html")).toContain('<script src="/app.js" defer></script>');
+		expect(read("index.html")).toMatch(/<script src="\/app\.js\?x=\d+" defer><\/script>/);
 		expect(read("index.html")).not.toMatch(/src="\/(htmx\.min|feeds|map|geomap|live-lifecycle|theme|crt-config)\.js"/);
 		for (const gone of ["htmx.min.js", "feeds.js", "map.js", "geomap.js", "live-lifecycle.js", "theme.js", "crt-config.js"]) {
 			expect(existsSync(p(gone))).toBe(false);

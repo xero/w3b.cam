@@ -15,7 +15,7 @@
 
 **test.** Runs on every pull request and on pushes to `main` as the quality gate: `bun typecheck`, the unit and integration suite, then the Playwright run over the built site. It is fully offline (the tests seed a throwaway database and bake a fixture site), so it needs no secrets and no database restore. Add it to `main`'s branch protection as a required status check to block merges on a red run.
 
-**build.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping.
+**build.** Bakes the database into `out/` and deploys it to GitHub Pages. It is reusable, so the other workflows call it after they change the data. Run it on its own to redeploy without scraping. The bake step sets `CI=true`, which turns off the terminal spinner so the log carries no animation frames.
 
 **scrape.** Runs every six hours (`0 */6 * * *`), or on demand with a page count (default 2). It restores the database, fetches new cameras, saves the database, then calls `build`. This is the only workflow that uses the `SHODANTOKEN` secret.
 
