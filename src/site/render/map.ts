@@ -47,7 +47,7 @@ export function renderMapMain(points: MapPoint[], total: number): string {
 		.join("\n");
 	return [
 		`<section class="mapwrap">`,
-		`${T(1)}<p class="maphint">${total.toLocaleString()} geolocated cameras &middot; drag to pan, scroll to zoom, click a dot to open it</p>`,
+		`${T(1)}<p class="maphint"><strong class="hl">${total.toLocaleString()} geolocated cameras</strong> &middot; hover a dot for its location, click it to view that camera</p>`,
 		`${T(1)}<svg class="worldmap" viewBox="0 0 ${MAP_W} ${MAP_H}" preserveAspectRatio="xMidYMid meet" aria-label="World map of ${total.toLocaleString()} geolocated cameras">`,
 		`${T(2)}<g class="land" aria-hidden="true">`,
 		land,

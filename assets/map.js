@@ -27,6 +27,11 @@
 		if (!base) return;
 		svg.__mapInit = true;
 
+		// The baked hint only promises what works without JS. Now that pan/zoom is live,
+		// say so, keeping the <strong> count. geomap.js overwrites this if it takes over.
+		var hint = svg.parentNode && svg.parentNode.querySelector(".maphint");
+		if (hint && hint.lastChild) hint.lastChild.textContent = " · drag to pan, scroll to zoom, click a dot to view that camera";
+
 		var vb = { x: base.x, y: base.y, w: base.w, h: base.h };
 		var aspect = base.h / base.w;
 		var ctrl = new AbortController();

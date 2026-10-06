@@ -25,6 +25,11 @@ test.describe("map (JS canvas upgrade)", () => {
 		// The inert SVG is retired once the canvas is live (its dot links live on every other page).
 		await expect(page.locator("svg.worldmap")).toHaveCount(0);
 		await expect(page.locator("canvas.worldmap-canvas")).toHaveCount(1);
+		// The hint's markup must render, not show up as escaped text.
+		const hint = page.locator(".maphint");
+		await expect(hint.locator("strong")).toHaveCount(1);
+		await expect(hint).toContainText("scroll or pinch to zoom");
+		await expect(hint).not.toContainText("<strong");
 
 		expect(offOrigin, "map must not request any third-party host (no tile server)").toEqual([]);
 		expect(errors).toEqual([]);
@@ -123,6 +128,9 @@ test.describe("map (JS canvas upgrade)", () => {
 		await page.waitForTimeout(700);
 		await expect(page.locator("canvas.worldmap-canvas")).toHaveCount(0);
 		await expect(page.locator("svg.worldmap")).toHaveCount(1);
+		const hint = page.locator(".maphint");
+		await expect(hint.locator("strong")).toHaveCount(1);
+		await expect(hint).toContainText("drag to pan, scroll to zoom");
 
 		// map.js still enhances the SVG: a wheel nudges the viewBox.
 		const svg = page.locator("svg.worldmap");

@@ -26,6 +26,11 @@ test.describe("progressive enhancement (no JS)", () => {
 		// real links to each camera's detail page.
 		await expect(page.locator("canvas.worldmap-canvas")).toHaveCount(0);
 		await expect(page.locator("svg.worldmap")).toHaveCount(1);
+		// No pan/zoom without JS, so the hint mustn't promise it.
+		const hint = page.locator(".maphint");
+		await expect(hint.locator("strong")).toHaveCount(1);
+		await expect(hint).toContainText("click it to view that camera");
+		await expect(hint).not.toContainText("drag");
 		const dot = page.locator("svg.worldmap .dots a").first();
 		const href = await dot.getAttribute("href");
 		expect(href).toBeTruthy();
