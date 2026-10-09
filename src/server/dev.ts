@@ -19,7 +19,7 @@ import { isIP } from "node:net";
 import { createHash } from "node:crypto";
 import { banner, spinning } from "../core/spinner.ts";
 import { table, took } from "../core/table.ts";
-import { addFeatured, addTag, blacklist, blacklistImage, closeDb, deleteWebcamsByImageHash, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, normalizeImageHash, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "../db/db.ts";
+import { addFeatured, addTag, blacklist, blacklistImage, closeDb, deleteWebcamsByImageHash, deleteWebcamsByIp, entityTags, isFeatured, loadTagCounts, normalizeImageHash, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "../db/db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "../ingest/ingest.ts";
 import { build } from "../site/build.ts";
 import { isSafeImageMime } from "../site/render.ts";
@@ -57,8 +57,8 @@ async function handleDev(req: Request, path: string): Promise<Response> {
 	if (req.method === "GET" && path === "/__dev/dev.js") return new Response(Bun.file(`${DEV_CLIENT}/dev.js`));
 	if (req.method === "GET" && path === "/__dev/dev.css") return new Response(Bun.file(`${DEV_CLIENT}/dev.css`));
 
-	// ── GET /__dev/tags → string[] (tag autocomplete) ──────────────────────────────
-	if (req.method === "GET" && path === "/__dev/tags") return json(distinctTags(db));
+	// ── GET /__dev/tags → {tag, count}[] (tag autocomplete; count ranks ties) ──────
+	if (req.method === "GET" && path === "/__dev/tags") return json(loadTagCounts(db));
 
 	// ── GET /__dev/entity-tags?kind=&ref= → string[] (one entity's current tags) ────
 	if (req.method === "GET" && path === "/__dev/entity-tags") {

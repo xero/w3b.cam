@@ -69,16 +69,11 @@ export function entityTags(db: Database, kind: TagKind, ref: string): string[] {
 		.map((r) => r.value);
 }
 
-/** Every distinct tag name across all kinds, sorted. Feeds the dev-mode tag autocomplete. */
-export function distinctTags(db: Database): string[] {
-	return (db.query("SELECT DISTINCT value FROM meta WHERE type = 'tag' ORDER BY value").all() as { value: string }[])
-		.map((r) => r.value);
-}
-
 /**
  * Every distinct tag with how many entities carry it, ordered by tag name. Since a
  * tag can't repeat on one entity, COUNT(*) per tag is exactly its entity count across
- * all sources. Counts every tagged ref whether or not its row still exists. Feeds renderTagsMain.
+ * all sources. Counts every tagged ref whether or not its row still exists. Feeds
+ * renderTagsMain and the dev-mode tag autocomplete (count breaks ranking ties).
  */
 export function loadTagCounts(db: Database): { tag: string; count: number }[] {
 	return db

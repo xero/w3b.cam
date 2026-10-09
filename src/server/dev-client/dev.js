@@ -9,7 +9,7 @@
 	const API = "/__dev";
 	let menu = null; // the open .dev-menu element, or null
 	let toastTimer = null;
-	let tagCache = null; // string[] of existing tags, lazy-loaded once
+	let tagCache = null; // {tag, count}[] of existing tags, lazy-loaded once
 
 	// ── Backend ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +35,26 @@
 			tagCache = [];
 		}
 		return tagCache;
+	}
+
+	/**
+	 * Subsequence scorer for tag suggestions; null means no match. Every query char
+	 * must appear in the tag in order, so a skipped letter ("ste") still hits "street".
+	 * Compact matches near the front win: +3 for matching the tag's first char, +2 per
+	 * char adjacent to the previous match, -1 per skipped tag char. Ties go to the
+	 * more-used tag (count), then alphabetical.
+	 */
+	function fuzzyScore(q, t) {
+		let score = 0, pos = 0;
+		for (const c of q) {
+			const at = t.indexOf(c, pos);
+			if (at < 0) return null;
+			if (at === 0) score += 3;
+			else if (at === pos) score += 2;
+			score -= at - pos;
+			pos = at + 1;
+		}
+		return score;
 	}
 
 	/**
@@ -415,7 +435,9 @@
 			x.textContent = "×";
 			x.addEventListener("click", async () => {
 				try {
-					await api("/untag", "POST", { kind: ctx.kind, ref: ctx.ref, tag });
+					const r = await api("/untag", "POST", { kind: ctx.kind, ref: ctx.ref, tag });
+					const t = r.removed && tagCache && tagCache.find((x) => x.tag === tag);
+					if (t && t.count > 0) t.count--;
 					li.remove();
 					removeTagFromMeta(ctx, tag);
 					toast(`untagged ${ctx.ref} #${tag}. run \`bun run bake\``);
@@ -454,7 +476,14 @@
 
 		function renderSuggest() {
 			const q = input.value.trim().toLowerCase();
-			matches = q ? (tagCache || []).filter((t) => t.includes(q) && t !== q).slice(0, 8) : [];
+			matches = q
+				? (tagCache || [])
+					.map((t) => ({ ...t, score: fuzzyScore(q, t.tag) }))
+					.filter((t) => t.score !== null && t.tag !== q)
+					.sort((a, b) => b.score - a.score || b.count - a.count || a.tag.localeCompare(b.tag))
+					.slice(0, 8)
+					.map((t) => t.tag)
+				: [];
 			suggest.replaceChildren();
 			active = -1;
 			for (const m of matches) {
@@ -510,9 +539,10 @@
 			}
 			try {
 				const r = await api("/tag", "POST", { kind: ctx.kind, ref: ctx.ref, tag });
-				if (tagCache && !tagCache.includes(r.tag)) {
-					tagCache.push(r.tag);
-					tagCache.sort();
+				if (tagCache) {
+					const t = tagCache.find((x) => x.tag === r.tag);
+					if (!t) tagCache.push({ tag: r.tag, count: 1 });
+					else if (r.added) t.count++;
 				}
 				addTagToMeta(ctx, r.tag);
 				addChip(r.tag);
