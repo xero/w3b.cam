@@ -1,7 +1,7 @@
-// Terminal spinner for the long site rebuilds (`bun bake`, `bun dev`). Frames draw from a
+// Terminal banner and spinner for the long site rebuilds (`bun bake`, `bun dev`). Frames draw from a
 // worker thread because the bake blocks the main thread for seconds at a time (sync SQLite
 // reads, grouping, autotags), which would freeze a setInterval spinner mid-build.
-// Truthy CI turns it off so Actions logs stay clean; so does a non-terminal stderr.
+// Truthy CI turns both off so Actions logs stay clean; so does a non-terminal stderr.
 
 import { writeSync } from "node:fs";
 import { format } from "node:util";
@@ -17,9 +17,9 @@ export const animated = (env: NodeJS.ProcessEnv = process.env, tty = !!process.s
 
 const CLEAR = "\r\x1b[K";
 const paint = (sgr: string, s: string): string => (process.env.NO_COLOR ? s : `\x1b[${sgr}m${s}\x1b[0m`);
-const clock = (ms: number): string => {
+export const clock = (ms: number, sep = ""): string => {
 	const s = Math.floor(ms / 1000);
-	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${sep}${String(s % 60).padStart(2, "0")}s`;
 };
 // Clipped to the terminal: a wrapped line strands rows that CLEAR can't reach on the next frame.
 const line = (mark: string, msg: string, t0: number): string => {
@@ -68,7 +68,7 @@ export function spin(msg: string): Spinner {
 		void w.terminate();
 		Object.assign(console, con);
 		process.off("SIGINT", onInt).off("SIGTERM", onTerm).off("exit", onExit);
-		writeSync(2, `${line(mark, m, t0)}\n\x1b[?25h`);
+		writeSync(2, `${m ? `${line(mark, m, t0)}\n` : CLEAR}\x1b[?25h`);
 	};
 	const s: Spinner = {
 		update: (m) => { cur = m; w.postMessage(m); },
@@ -82,8 +82,8 @@ export function spin(msg: string): Spinner {
 	return s;
 }
 
-/** Spin while `fn` runs: ✓ `done` when it resolves, ✗ (then rethrow) when it rejects. */
-export async function spinning<T>(msg: string, fn: () => Promise<T>, done = msg): Promise<T> {
+/** Spin while `fn` runs: ✓ `done` when it resolves (an empty `done` just clears the line), ✗ (then rethrow) when it rejects. */
+export async function spinning<T>(msg: string, fn: () => Promise<T>, done = ""): Promise<T> {
 	const s = spin(msg);
 	try {
 		const v = await fn();
@@ -94,6 +94,39 @@ export async function spinning<T>(msg: string, fn: () => Promise<T>, done = msg)
 		throw e;
 	}
 }
+
+// The wordmark is String.raw so its backslashes survive. The camera can't be: Bun rewrites non-ASCII
+// in a raw template to \uXXXX escapes, which String.raw then returns verbatim. ESC goes in through
+// ${E}; the wordmark row ending in a backslash keeps a trailing space so it can't escape that ${.
+const E = "\x1b";
+export const BANNER = String.raw`  ${E}[37mhttps://w3b.cam          .--.${E}[0m
+                   ${E}[37m.------/   |           ________      _________ _____${E}[0m
+   ${E}[37m.----./\.----__/ __    \   !----.    .'       / .---'    \    \     \ ${E}[0m
+    ${E}[37m\   /  \    \___>     |     _   \  /   /____/ /   _     /     >   . |${E}[0m
+    ${E}[37m|         . |__<     <| :   )    |<    \    \/    (     |        .: |${E}[0m
+    ${E}[37m|       .:: \   >  .: | ::.      |_\     .:: \ ::..  _  /       .:: |${E}[0m
+    ${E}[37m|____/\_____|\_______/\/\_______/(_)\______  /\______>\/\__/\/\_____|${E}[0m
+                                               ${E}[37m\/${E}[0m` + `
+
+                       ${E}[37m▄▄▄▄▄▄▄▄${E}[30;47m▀▀${E}[37;40m████████████████████████████████${E}[0m
+              ${E}[37m▄▄█████████████████████████████▀▀▀▀▀▀▀▀▀▀▀▀▀███████${E}[0m
+              ${E}[37m███▌▒▌▒▌▒▌▒██████████████████▀  ░░░░░░░░ ░▒  ▓▓██▀${E}[0m
+              ${E}[37m▀██████████████████████████▀ ░ ░░  ▄▄  ░░ ▒▓ ▓█▀${E}[0m
+               ${E}[37m▄▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ░▒ ░ ▄█▀▀█▄ ░ ▓▓ ▀${E}[0m
+               ${E}[37m▀███▓▓▓▓▓▓▓▓▓░░░░░░░░░░░▒▒ ▒█ ░ ▀█▄██▀ ░ ▓█${E}[0m
+                  ${E}[37m▀▀▀█████▓▓▓▓▓▓▓▓▓▓▓▓▓▓█ ██ ░░  ▀▀  ░░ ██${E}[0m
+           ${E}[37m▄▄▄▄▄▄        ▀▀▀▀████████████ ██  ░░░░░░░░  ██${E}[0m
+          ${E}[37m█${E}[30;47mo${E}[37;40m████${E}[30;47mo${E}[37;40m█           ▄▄▄▄ ▀▀▀▀███▄▀██▄▄▄▄▄▄▄▄▄▄██▀${E}[0m
+          ${E}[37m███▀▀▀▀▀           ▒▓██${E}[0m
+          ${E}[37m██ ███▓▓▓▓▓▓▓▓▓▓▓▓▓▓██▀${E}[0m
+          ${E}[37m██▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     w a t c h i n g   t h e m${E}[0m
+          ${E}[37m█${E}[30;47mo${E}[37;40m████${E}[30;47mo${E}[37;40m█${E}[0m
+          ${E}[37m▀██████▀                    w a t c h i n g   u s${E}[0m`;
+
+/** BANNER on stderr ahead of a bake, gated like the spinner (off under CI or off a terminal); NO_COLOR strips its colors. */
+export const banner = (): void => {
+	if (animated()) writeSync(2, `${process.env.NO_COLOR ? BANNER.replace(/\x1b\[[\d;]*m/g, "") : BANNER}\n\n`);
+};
 
 // Worker side: this same file, booted by spin() above.
 if (!isMainThread && workerData?.spinner) {

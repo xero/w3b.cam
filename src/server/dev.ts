@@ -17,8 +17,8 @@
 import { parseArgs } from "node:util";
 import { isIP } from "node:net";
 import { createHash } from "node:crypto";
-import { OUT_DIR } from "../core/config.ts";
-import { spinning } from "../core/spinner.ts";
+import { banner, spinning } from "../core/spinner.ts";
+import { table, took } from "../core/table.ts";
 import { addFeatured, addTag, blacklist, blacklistImage, closeDb, deleteWebcamsByImageHash, deleteWebcamsByIp, distinctTags, entityTags, isFeatured, normalizeImageHash, openDb, removeEntity, removeFeatured, removeTag, setPreferred, setThumbnail } from "../db/db.ts";
 import { ingestMjpegOne, ingestShodanText, ingestYoutubeOne } from "../ingest/ingest.ts";
 import { build } from "../site/build.ts";
@@ -32,7 +32,8 @@ const DEV_CLIENT = `${import.meta.dir}/dev-client`;
 const port = Number(process.env.PORT ?? 1337);
 
 // 1. Bake the dev-flavored site into out/ (data-* hooks + /__dev/* asset refs).
-await spinning("baking dev site", () => build({ dev: true, indexOnly: values["index-only"] }), "baked dev site");
+banner();
+const t0 = Date.now(), rows = await spinning("baking dev site", () => build({ dev: true, indexOnly: values["index-only"] })), ms = Date.now() - t0;
 
 // 2. One long-lived handle for the server's lifetime. bun:sqlite calls are
 //    synchronous and Bun is single-threaded, so mutation endpoints can't race each
@@ -241,10 +242,7 @@ const server = Bun.serve({
 	},
 });
 
-console.log(
-	`Dev server on http://localhost:${server.port}, serving ${OUT_DIR}/. Mutations write to the local camhunting.sqlite.\n` +
-		`Right-click a card or screenshot to blacklist / reorder / tag / remove / change thumbnail. Run \`bun run bake\` to regenerate the static site.`,
-);
+console.log(table([took(ms), "dev server running at", `http://localhost:${server.port}`], rows));
 
 // 3. Open the browser (macOS). Fire-and-forget; ignore if `open` is unavailable.
 try {

@@ -17,13 +17,15 @@
 
 Every write to the database is a draft until you bake. The curation commands, imports, and scrapes all change rows; `bake` is what turns those rows into the pages the site serves.
 
-A full bake takes a minute or two, so in a terminal it draws a braille spinner and an elapsed clock on stderr while it works, then prints `✓ baked site` with the total time. Set `CI=true` (or `1`, `yes`, `on`) to turn it off. GitHub Actions sets `CI=true` on every runner, and the build workflow sets it again on its bake step. The spinner also stays off whenever stderr is not a terminal, so piping the output to a file never captures escape codes. Set `NO_COLOR` to keep the animation but drop its colors.
+A full bake takes a minute or two. In a terminal it first prints the w3b.cam ANSI banner, then draws a braille spinner and an elapsed clock on stderr while it works. Set `CI=true` (or `1`, `yes`, `on`) to turn both off. GitHub Actions sets `CI=true` on every runner, and the build workflow sets it again on its bake step. The banner and spinner also stay off whenever stderr is not a terminal, so piping the output to a file never captures escape codes. Set `NO_COLOR` to keep both but drop their colors.
+
+When the bake finishes it prints a table of what it wrote. Each section (gallery, hosts, feeds, streams, vendors, tags, and map) gets a row with its item and page counts, and a footer below gives the build time and the command to preview the site. The table is plain text, so it prints under CI and into pipes too.
 
 ---
 
 ## serve
 
-**`bun serve`.** Serves `out/` over HTTP at `http://localhost:1337`. The site needs a server because its htmx navigation fetches page fragments, and browsers block those requests over `file://`. Override the port with `PORT=3000 bun serve`.
+**`bun serve`.** Serves `out/` over HTTP at `http://localhost:1337`. The site needs a server because its htmx navigation fetches page fragments, and browsers block those requests over `file://`. Override the port with `PORT=3000 bun serve`. Once it's listening it prints the address in a small box.
 
 ```sh
 bun scrape --pages 5

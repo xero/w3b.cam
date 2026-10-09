@@ -37,7 +37,8 @@ import { computeAutoTags } from "./autotags.ts";
 import { allRows, allRowsMeta, allFeedRows, allFeedRowsMeta, allYtRows, allYtRowsMeta, closeDb, loadFeatured, loadSuperFeatures, loadTagCounts, loadTagIndex, loadTags, loadVendorRefs, loadYtGeo, openDb, type TagKind } from "../db/db.ts";
 import { productBreakdown } from "../fingerprint/fingerprint.ts";
 import { isBlockedProduct, pickRandom } from "../core/util.ts";
-import { spinning } from "../core/spinner.ts";
+import { banner, spinning } from "../core/spinner.ts";
+import { table, took, type Section } from "../core/table.ts";
 import {
 	groupByIp,
 	project,
@@ -111,7 +112,7 @@ import { HOME_PER_KIND, HOME_FEATURED_PER_KIND, HOME_TOP_N, byNewest, computeVen
  * into every page; off (the default) yields the byte-identical production site.
  * `bun bake` calls this with no options; `bun dev` (src/server/dev.ts) passes `{ dev: true }`.
  */
-export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): Promise<void> {
+export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): Promise<Section[]> {
 	const dev = opts.dev ?? false;
 
 	// --index-only regenerates just index.html against the last full bake's out/ (images
@@ -467,7 +468,7 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	// from the last full bake's out/.
 	if (indexOnly) {
 		console.log(`Wrote out/index.html (--index-only): homepage rebuilt, ${hosts.length} host(s) / ${streams.length} stream(s) / ${feedCams.length} feed(s) reused from the last full bake.`);
-		return;
+		return [];
 	}
 
 	// ── Hosts (cams) gallery: page 1 also mirrored to the bare /hosts landing ─────────
@@ -670,17 +671,20 @@ export async function build(opts: { dev?: boolean; indexOnly?: boolean } = {}): 
 	}
 	await writePage(MAP, renderMapMain(mapPoints, mapPoints.length), `map | ${TITLE}`, stats, { dev, thumb: randomFeatured() });
 
-	const images = written.size;
-	console.log(
-		`Wrote ${OUT_DIR}/: homepage + ${hosts.length} host(s) across ${totalPages} hosts page(s), ` +
-			`${streams.length} stream(s) across ${ytTotalPages} streams page(s), ` +
-			`${feedCams.length} feed(s) across ${feedTotalPages} feeds page(s), ` +
-			`gallery (${galleryItems.length} card(s) across ${galleryTotalPages} page(s)), ` +
-			`${vendorsWithGallery.size} vendor gallery/-ies across ${vendorPagesWritten} page(s), ` +
-			`map (${mapPoints.length.toLocaleString()} dot(s)), tags cloud + ${tagPagesWritten} browse page(s) across ${cloudTags.length} tag(s), ` +
-			`fingerprints, tips page, ${images} image(s).${dev ? " (dev build)" : " Run `bun run serve`."}`,
-	);
+	return [
+		["gallery", galleryItems.length, galleryTotalPages],
+		["hosts", hosts.length, totalPages],
+		["feeds", feedCams.length, feedTotalPages],
+		["streams", streams.length, ytTotalPages],
+		["vendors", vendorsWithGallery.size, vendorPagesWritten],
+		["tags", cloudTags.length, tagPagesWritten],
+		["map", mapPoints.length, 1],
+	];
 }
 
 // Direct run (`bun run bake` / `bun run src/site/build.ts`) bakes the production site.
-if (import.meta.main) await spinning("baking site", () => build(), "baked site");
+if (import.meta.main) {
+	banner();
+	const t0 = Date.now(), rows = await spinning("baking site", () => build());
+	console.log(table([took(Date.now() - t0), "to preview the site", "run: `bun serve`"], rows));
+}

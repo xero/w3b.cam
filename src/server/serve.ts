@@ -5,6 +5,7 @@
 // Usage:  bun run serve   (override the port with PORT=3000 bun run serve)
 
 import { OUT_DIR } from "../core/config.ts";
+import { table } from "../core/table.ts";
 
 /**
  * Serve one request out of out/: `..` traversal guard, `/` → index.html, then clean
@@ -39,5 +40,5 @@ export async function serveStatic(req: Request): Promise<Response> {
 if (import.meta.main) {
 	const port = Number(process.env.PORT ?? 1337);
 	const server = Bun.serve({ port, fetch: serveStatic });
-	console.log(`Serving ${OUT_DIR}/ at http://localhost:${server.port}`);
+	console.log(table(["preview server running at", `http://localhost:${server.port}`]));
 }

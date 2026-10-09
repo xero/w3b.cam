@@ -27,7 +27,7 @@ bun sync --push   # publish your edits and rebuild the live site
 
 ## bun dev
 
-**`bun dev`.** Bakes a dev build of the site, serves it at `http://localhost:1337`, and opens your browser. Override the port with `PORT=3000 bun dev`. The bake shows the same progress spinner as [`bun bake`](./building.md#bake), and `CI=true` turns it off here too.
+**`bun dev`.** Bakes a dev build of the site, serves it at `http://localhost:1337`, and opens your browser. Override the port with `PORT=3000 bun dev`. The bake shows the same banner and progress spinner as [`bun bake`](./building.md#bake), and `CI=true` turns them off here too. Once the server is up it prints the bake's section table, with the server's address in the footer.
 
 Right-click a cam card or screenshot to blacklist the host, pin that port as the card image, or attach a tag; right-click a stream or feed card, or its detail page, to tag it too. Any card or screenshot that shows a baked image also offers **Blacklist image** and **Remove image**. Those act on the screenshot's content, blocking or dropping it across every host that serves it, the same as `bun blacklist <image-hash>` and `bun remove --kind image`. The Tag menu lists the entity's current tags as chips, each with an × to remove it, so you add and remove in one place. These are the same operations the [curation](./curation.md) commands run from the CLI.
 
@@ -37,7 +37,7 @@ Each action writes straight to the local database. Changes apply in the page imm
 
 ## Fast restarts with --index-only
 
-**`bun dev --index-only`.** Rebuilds only `index.html` and reuses the rest of `out/` from your last full bake, so startup drops from tens of seconds to about one. Every full bake writes an image manifest (`out/.img-manifest.json`) that lets this path pull the homepage's images off disk instead of re-extracting all of them.
+**`bun dev --index-only`.** Rebuilds only `index.html` and reuses the rest of `out/` from your last full bake, so startup drops from tens of seconds to about one. Every full bake writes an image manifest (`out/.img-manifest.json`) that lets this path pull the homepage's images off disk instead of re-extracting all of them. With only the homepage rebuilt there are no sections to count, so the table shrinks to its footer.
 
 The tradeoff is freshness. The galleries, detail pages, and the homepage's own "newest" cards reflect the last full bake, not any database changes since, so run a plain `bun dev` when you need those current. If the manifest is missing, it falls back to a full build once. Use it for fast restarts while iterating on homepage layout or featured picks.
 
