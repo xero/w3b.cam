@@ -561,7 +561,6 @@ export const TIPS_HTML = `
 <h3 id="finding-fresh-proxies">Finding fresh proxies</h3>
 <p>I use the <a href="https://github.com/rofl0r/proxychains-ng/" target="_blank" rel="noopener noreferrer">proxychains-ng</a> terminal application. It's designed for using proxies, not sourcing them. You need to provide your own list via a config file.</p>
 <blockquote class="admonition tip">
-	<p class="admonition-label">Tip</p>
 	<p>Windows users should check out the <a href="https://github.com/scramblr/proxychains-win" target="_blank" rel="noopener noreferrer">proxychains-win</a> fork, a security-hardened, zero-driver, native implementation.</p>
 </blockquote>
 <p>The <em><a href="https://github.com/vakhov/fresh-proxy-list">Fresh Proxies</a></em> project publishes new hosts daily. The following bash script automates the process of downloading and formatting them into a valid configuration file.</p>
